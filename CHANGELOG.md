@@ -11,6 +11,35 @@ um novo `[Unreleased]` vazio no topo.
 
 ## [Unreleased]
 
+### Added
+
+- **Módulo de finanças pessoais** (fases 0 a 3 do plano em
+  `docs/plans/2026-09-21-financas-pessoais/`), com grupo próprio na navegação:
+  - **Painel** com saldo consolidado atual e previsto, resumo do mês contra o
+    anterior e as barras de alvo × realizado do casal, nos três modos de divisão
+    (sem divisão, proporcional à renda e bolo comum).
+  - **Transações, Gastos e Entradas** — a mesma tela com um filtro fixo de tipo:
+    livro com filtros combináveis, chips do filtro aplicado, foto do comprovante
+    com miniatura e ampliação, e exportação em CSV do que está na tela.
+  - **Contas** (corrente, poupança, dinheiro, vale-refeição e cartão) e
+    **Categorias** planas com cor, orçamento mensal e etiquetas livres.
+  - **Relatórios** com totais por categoria contra o orçamento, duas roscas
+    (mês e ano) nas cores das categorias, comparativo com o período anterior e
+    tendência de até duas categorias em 12 meses.
+  - **Fatura** de cartão com ciclo real de fechamento e vencimento, os dois
+    números separados (fatura atual e total devido), limite usado e disponível,
+    parcelamento com plano persistido, estorno e antecipação de parcelas.
+- Backup do banco pela API `backup()` do SQLite, com botão visível no livro.
+
+### Changed
+
+- Migrações agora são versionadas, com transação por versão e suporte a
+  reconstrução de tabela para ampliar `CHECK`.
+- `apps/web` consome os tipos de `@projeto41/contracts`; `src/lib/types.ts`
+  deixou de existir. O bundle continua sem `zod`.
+- As rotas da API saíram de `app.ts` para plugins por recurso, sem mudança de
+  comportamento.
+
 ## [0.5.0] - 2026-06-17
 
 ### Added
