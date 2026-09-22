@@ -1,4 +1,6 @@
 import Database from "better-sqlite3";
+import { migrations, runMigrations } from "./migrations/index.js";
+import { createLedgerRepositories } from "./repositories/index.js";
 import type { Contribution, ManualPosition, Operation } from "@projeto41/contracts";
 
 type SnapshotInput = {
@@ -35,12 +37,18 @@ export function createDatabase(path: string) {
   const raw = new Database(path);
   raw.pragma("journal_mode = WAL");
   raw.pragma("foreign_keys = ON");
+  // O `migrate()` legado cuida das tabelas de investimento e roda primeiro; o
+  // runner versionado (D26) cuida de tudo que veio depois da fase 0.
   migrate(raw);
+  runMigrations(raw, migrations);
 
   return {
     raw,
     close: () => raw.close(),
     transaction: <T>(callback: () => T) => raw.transaction(callback)(),
+    // Modulo de financas (centavos inteiros), separado das tabelas legadas de
+    // investimento que seguem em REAL logo abaixo (D19).
+    ledger: createLedgerRepositories(raw),
     operations: {
       list: (portfolio?: string) =>
         raw
@@ -379,3 +387,6 @@ function ensureColumn(db: Database.Database, table: string, column: string, type
     db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
   }
 }
+
+export * from "./repositories/index.js";
+export * from "./migrations/index.js";
