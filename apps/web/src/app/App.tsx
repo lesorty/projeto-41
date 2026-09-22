@@ -11,6 +11,8 @@ import {
   LayoutDashboard,
   Menu,
   Moon,
+  ChartPie,
+  Gauge,
   Landmark,
   ReceiptText,
   RefreshCw,
@@ -32,6 +34,8 @@ import { PortfolioPage } from "../pages/Portfolio.js";
 import { PositionsPage } from "../pages/Positions.js";
 import { AccountsPage } from "../pages/finance/Accounts.js";
 import { CategoriesPage } from "../pages/finance/Categories.js";
+import { FinanceDashboardPage } from "../pages/finance/FinanceDashboard.js";
+import { ReportsPage } from "../pages/finance/Reports.js";
 import {
   ExpensesPage,
   IncomePage,
@@ -57,6 +61,8 @@ type Page =
   | "planning"
   | "allocation"
   | "history"
+  | "finance"
+  | "reports"
   | "transactions"
   | "expenses"
   | "income"
@@ -81,11 +87,13 @@ const nav: { group: string; items: NavItem[] }[] = [
   {
     group: "Finanças",
     items: [
+      { id: "finance", label: "Painel", icon: Gauge },
       { id: "transactions", label: "Transações", icon: ReceiptText },
       { id: "expenses", label: "Gastos", icon: ArrowDownCircle },
       { id: "income", label: "Entradas", icon: ArrowUpCircle },
       { id: "accounts", label: "Contas", icon: Landmark },
-      { id: "categories", label: "Categorias", icon: Tags }
+      { id: "categories", label: "Categorias", icon: Tags },
+      { id: "reports", label: "Relatórios", icon: ChartPie }
     ]
   },
   {
@@ -351,6 +359,8 @@ export function App() {
             {page === "planning" && <PlanningPage />}
             {page === "allocation" && dashboard && <AllocationPage dashboard={dashboard} />}
             {page === "history" && <HistoryPage history={dashboard?.history ?? []} />}
+            {page === "finance" && <FinanceDashboardPage onOpenReports={() => setPage("reports")} />}
+            {page === "reports" && <ReportsPage />}
             {page === "transactions" && <TransactionsPage />}
             {page === "expenses" && <ExpensesPage />}
             {page === "income" && <IncomePage />}

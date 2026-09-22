@@ -3040,3 +3040,172 @@ main {
     overflow-x: auto;
   }
 }
+
+/* --- Fase 2: painel, alvos e relatórios ---------------------------------- */
+
+.fin-period-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.fin-account-group h4 {
+  margin: 14px 0 4px;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+}
+
+.fin-account-group:first-child h4 {
+  margin-top: 0;
+}
+
+/* Alvo x realizado */
+
+.fin-targets {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.fin-target-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.9rem;
+}
+
+.fin-target-head strong,
+.fin-target-head span {
+  font-variant-numeric: tabular-nums;
+}
+
+.fin-target-of {
+  font-style: normal;
+  color: var(--text-faint);
+}
+
+.fin-target-track {
+  position: relative;
+  height: 9px;
+  margin-top: 6px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+
+.fin-target-track.neutral {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--surface-3),
+    var(--surface-3) 6px,
+    var(--surface-2) 6px,
+    var(--surface-2) 12px
+  );
+}
+
+.fin-target-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width var(--transition);
+}
+
+.fin-target-fill.over {
+  background: var(--negative);
+}
+
+.fin-target-foot {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.78rem;
+}
+
+.fin-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0 0 10px;
+  padding: 8px 11px;
+  border: 1px solid var(--warning-soft);
+  border-radius: var(--radius-sm);
+  background: var(--warning-soft);
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+/* Overrides por pessoa no drawer de alvo */
+
+.fin-override-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.fin-override {
+  padding: 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.fin-override > .fin-inline {
+  margin-bottom: 8px;
+  font-size: 0.88rem;
+}
+
+/* Relatórios */
+
+.fin-donuts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+/* A rosca com linha-guia não sobrevive a duas colunas estreitas. */
+@media (max-width: 900px) {
+  .fin-donuts {
+    grid-template-columns: 1fr;
+  }
+}
+
+.fin-budget-over {
+  color: var(--negative);
+  font-weight: 600;
+}
+
+.fin-row-on {
+  background: var(--accent-soft);
+}
+
+.fin-comparison {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.fin-comparison li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 2px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.89rem;
+}
+
+.fin-comparison li:last-child {
+  border-bottom: 0;
+}
+
+.fin-comparison small {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}

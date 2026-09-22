@@ -101,12 +101,29 @@ export function AreaTrend({
   );
 }
 
+/**
+ * Duas series comparadas. Os defaults reproduzem exatamente o uso original do
+ * planejamento (ano x nominal/corrigido); as props existem para o comparativo
+ * de periodos do modulo de financas reaproveitar o mesmo grafico.
+ */
 export function DualAreaTrend({
   data,
-  height = 320
+  height = 320,
+  xKey = "year",
+  keys = ["nominal", "real"],
+  names = ["Saldo nominal", "Saldo corrigido"],
+  formatValue = money,
+  formatAxis = compactMoney,
+  formatX
 }: {
-  data: { year: number; nominal: number; real: number }[];
+  data: Record<string, string | number>[];
   height?: number;
+  xKey?: string;
+  keys?: [string, string];
+  names?: [string, string];
+  formatValue?: (value: number) => string;
+  formatAxis?: (value: number) => string;
+  formatX?: (value: string) => string;
 }) {
   const { colors } = useTheme();
   const gradientId = useId().replace(/:/g, "");
@@ -120,8 +137,8 @@ export function DualAreaTrend({
           </linearGradient>
         </defs>
         <CartesianGrid stroke={colors.grid} vertical={false} />
-        <XAxis dataKey="year" tick={{ fill: colors.axis, fontSize: 11 }} axisLine={false} tickLine={false} />
-        <YAxis tickFormatter={compactMoney} width={64} tick={{ fill: colors.axis, fontSize: 11 }} axisLine={false} tickLine={false} />
+        <XAxis dataKey={xKey} tickFormatter={formatX} tick={{ fill: colors.axis, fontSize: 11 }} axisLine={false} tickLine={false} />
+        <YAxis tickFormatter={formatAxis} width={64} tick={{ fill: colors.axis, fontSize: 11 }} axisLine={false} tickLine={false} />
         <Tooltip
           content={({ active, payload, label }: any) =>
             active && payload?.length ? (
@@ -129,21 +146,49 @@ export function DualAreaTrend({
                 <span>{label}</span>
                 {payload.map((item: any) => (
                   <strong key={item.dataKey} style={{ color: item.stroke }}>
-                    {item.name}: {money(item.value)}
+                    {item.name}: {formatValue(item.value)}
                   </strong>
                 ))}
               </div>
             ) : null
           }
         />
-        <Area name="Saldo nominal" type="monotone" dataKey="nominal" stroke={colors.accent} strokeWidth={2.2} fill={`url(#${gradientId})`} />
-        <Area name="Saldo corrigido" type="monotone" dataKey="real" stroke={colors.positive} strokeWidth={2.2} fill="transparent" />
+        <Area name={names[0]} type="monotone" dataKey={keys[0]} stroke={colors.accent} strokeWidth={2.2} fill={`url(#${gradientId})`} />
+        <Area name={names[1]} type="monotone" dataKey={keys[1]} stroke={colors.positive} strokeWidth={2.2} fill="transparent" />
       </AreaChart>
     </ResponsiveContainer>
   );
 }
 
-export function Donut({ data, height = 280 }: { data: { key: string; label: string; value: number }[]; height?: number }) {
+export type DonutDatum = {
+  key: string;
+  label: string;
+  value: number;
+  /**
+   * Cor escolhida pelo usuario para a categoria (D05). Quando ausente, cai na
+   * paleta do tema — que e so o fallback de quem nao tem cor propria.
+   */
+  color?: string;
+  /**
+   * Percentual ja arredondado pelo metodo do maior resto, que soma exatamente
+   * 100,0%. O `percent` do Recharts e o bruto, e a soma dos rotulos dele da
+   * 99,9% ou 100,1% — exatamente o detalhe que destroi a confianca no relatorio.
+   */
+  percentLabel?: string;
+};
+
+export function Donut({
+  data,
+  height = 280,
+  showValue = false,
+  formatValue = money
+}: {
+  data: DonutDatum[];
+  height?: number;
+  showValue?: boolean;
+  /** Obrigatorio quando os valores sao centavos: `money` os leria como reais. */
+  formatValue?: (value: number) => string;
+}) {
   const { colors } = useTheme();
   const layoutCache = useRef<{ key: string; map: Map<number, LabelSpot> }>({ key: "", map: new Map() });
 
@@ -210,8 +255,11 @@ export function Donut({ data, height = 280 }: { data: { key: string; label: stri
     const spot = buildLayout(cx, cy, outerRadius).get(index);
     if (!spot) return <g />;
     const textX = spot.endX + (spot.isRight ? 7 : -7);
-    const color = colors.series[index % colors.series.length];
-    const pct = `${(percent * 100).toFixed(1).replace(".", ",")}%`;
+    // A cor e resolvida UMA vez e usada na fatia, na linha-guia e no ponto.
+    // Recalcular aqui deixava linha e fatia de cores diferentes assim que a
+    // categoria passou a trazer a propria cor.
+    const color = sliceColor(data[index], index, colors.series);
+    const pct = payload.percentLabel ?? `${(percent * 100).toFixed(1).replace(".", ",")}%`;
     return (
       <g>
         <polyline
@@ -228,6 +276,11 @@ export function Donut({ data, height = 280 }: { data: { key: string; label: stri
           <tspan x={textX} dy="1.3em" fill="var(--text-muted)" fontSize={11} fontWeight={700}>
             {pct}
           </tspan>
+          {showValue && (
+            <tspan x={textX} dy="1.25em" fill="var(--text-muted)" fontSize={10.5}>
+              {formatValue(payload.value)}
+            </tspan>
+          )}
         </text>
       </g>
     );
@@ -250,7 +303,7 @@ export function Donut({ data, height = 280 }: { data: { key: string; label: stri
             isAnimationActive={false}
           >
             {data.map((item, index) => (
-              <Cell key={item.key} fill={colors.series[index % colors.series.length]} />
+              <Cell key={item.key} fill={sliceColor(item, index, colors.series)} />
             ))}
           </Pie>
           <Tooltip
@@ -258,7 +311,7 @@ export function Donut({ data, height = 280 }: { data: { key: string; label: stri
               active && payload?.length ? (
                 <div className="chart-tooltip">
                   <span>{payload[0].payload.label}</span>
-                  <strong>{money(payload[0].value)}</strong>
+                  <strong>{formatValue(payload[0].value)}</strong>
                 </div>
               ) : null
             }
@@ -278,6 +331,11 @@ type LabelSpot = {
   endX: number;
   y: number;
 };
+
+/** Cor da fatia: a do dado quando existir, senao a paleta do tema. */
+function sliceColor(item: DonutDatum | undefined, index: number, series: string[]) {
+  return item?.color ?? series[index % series.length];
+}
 
 export function seriesColor(index: number, series: string[]) {
   return series[index % series.length];
