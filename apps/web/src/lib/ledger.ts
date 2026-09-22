@@ -8,6 +8,7 @@ import type {
   EntryRecord,
   PersonRecord,
   PlaceRecord,
+  SeriesScope,
   TagRecord
 } from "@projeto41/contracts";
 import { api } from "./api.js";
@@ -85,11 +86,12 @@ export const ledgerApi = {
       body: JSON.stringify(body)
     }),
 
-  updateEntry: (id: number, body: unknown) =>
-    api<{ ok: true; entry: EntryRecord; balances: BalancesResult }>(`/ledger/entries/${id}`, {
-      method: "PUT",
-      body: JSON.stringify(body)
-    }),
+  /** `scope` so tem efeito quando o lancamento pertence a um plano de parcelas. */
+  updateEntry: (id: number, body: unknown, scope: SeriesScope = "one") =>
+    api<{ ok: true; entry: EntryRecord; balances: BalancesResult }>(
+      `/ledger/entries/${id}?scope=${scope}`,
+      { method: "PUT", body: JSON.stringify(body) }
+    ),
 
   removeEntry: (id: number) =>
     api<{ ok: true; balances: BalancesResult }>(`/ledger/entries/${id}`, { method: "DELETE" }),

@@ -24,12 +24,12 @@ import { useToast } from "../../lib/toast.js";
  * Contas agrupadas por pessoa, cada uma com saldo atual e previsto vindos do
  * servidor (D24 — a tela nunca soma lancamento).
  *
- * Cartao de credito nao e criavel aqui: a fase 3 e quem traz fechamento,
- * vencimento e limite. O `CHECK` do banco ja aceita o tipo, mas a interface so
- * oferece os quatro tipos da fase 1.
+ * Cartao de credito aparece com os campos de ciclo (fechamento, vencimento,
+ * limite e conta de pagamento) e, na lista, com os **dois numeros** — fatura
+ * atual e total devido — em vez do "saldo" de conta comum (6.1).
  */
 
-const KINDS: AccountKind[] = ["checking", "savings", "cash", "meal_voucher"];
+const KINDS: AccountKind[] = ["checking", "savings", "cash", "meal_voucher", "credit_card"];
 
 type Draft = Partial<AccountRecord> & { openingBalanceText?: string };
 
@@ -145,12 +145,35 @@ export function AccountsPage() {
                       {account.institution && <small className="fin-sub">{account.institution}</small>}
                     </td>
                     <td>{ACCOUNT_KIND_LABEL[account.kind] ?? account.kind}</td>
-                    <td className={`num ${account.currentBalanceCents < 0 ? "fin-negative" : ""}`}>
-                      {moneyFromCents(account.currentBalanceCents)}
-                    </td>
-                    <td className="num fin-muted">
-                      {moneyFromCents(account.projectedBalanceCents)}
-                    </td>
+                    {account.kind === "credit_card" ? (
+                      <>
+                        {/* Cartão nunca mostra "saldo": mostra os dois números
+                            da regra 6.1, que são coisas diferentes. */}
+                        <td className="num">
+                          {debtFromCents(account.currentStatementCents ?? 0)}
+                          <small className="fin-sub">fatura atual</small>
+                        </td>
+                        <td className="num fin-muted">
+                          {debtFromCents(account.totalDueCents ?? 0)}
+                          <small className="fin-sub">
+                            {account.availableLimitCents == null
+                              ? "total devido"
+                              : `${moneyFromCents(account.availableLimitCents)} livres`}
+                          </small>
+                        </td>
+                      </>
+                    ) : (
+                      <>
+                        <td
+                          className={`num ${account.currentBalanceCents < 0 ? "fin-negative" : ""}`}
+                        >
+                          {moneyFromCents(account.currentBalanceCents)}
+                        </td>
+                        <td className="num fin-muted">
+                          {moneyFromCents(account.projectedBalanceCents)}
+                        </td>
+                      </>
+                    )}
                     <td className="num">
                       <IconButton
                         icon={Archive}
@@ -170,6 +193,9 @@ export function AccountsPage() {
         <AccountDrawer
           initial={editing}
           people={people}
+          payableAccounts={(balances?.accounts ?? []).filter(
+            (account) => account.kind !== "credit_card"
+          )}
           onClose={() => setEditing(null)}
           onSaved={async () => {
             setEditing(null);
@@ -184,11 +210,14 @@ export function AccountsPage() {
 function AccountDrawer({
   initial,
   people,
+  payableAccounts,
   onClose,
   onSaved
 }: {
   initial: Draft;
   people: PersonRecord[];
+  /** Contas que podem pagar uma fatura: tudo menos outro cartão. */
+  payableAccounts: AccountRecord[];
   onClose: () => void;
   onSaved: () => Promise<void>;
 }) {
@@ -203,7 +232,14 @@ function AccountDrawer({
   );
   const [openingDate, setOpeningDate] = useState(initial.openingDate ?? "");
   const [includeInNetWorth, setIncludeInNetWorth] = useState(initial.includeInNetWorth ?? true);
+  const [closingDay, setClosingDay] = useState(String(initial.closingDay ?? ""));
+  const [dueDay, setDueDay] = useState(String(initial.dueDay ?? ""));
+  const [creditLimit, setCreditLimit] = useState(centsToInput(initial.creditLimitCents));
+  const [paymentAccountId, setPaymentAccountId] = useState<number | null>(
+    initial.paymentAccountId ?? null
+  );
   const [saving, setSaving] = useState(false);
+  const isCard = kind === "credit_card";
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -214,6 +250,11 @@ function AccountDrawer({
     }
     setSaving(true);
     try {
+      const limitCents = creditLimit.trim() === "" ? null : parseCurrencyInput(creditLimit);
+      if (isCard && creditLimit.trim() !== "" && limitCents == null) {
+        toast.notify("Limite inválido", "error");
+        return;
+      }
       const body = {
         name,
         kind,
@@ -222,7 +263,13 @@ function AccountDrawer({
         color,
         openingBalanceCents: cents,
         openingDate: openingDate || null,
-        includeInNetWorth
+        includeInNetWorth,
+        // Sem ciclo não existe fatura, então o contrato exige os dois dias em
+        // cartão; o resto das contas manda nulo.
+        closingDay: isCard ? Number(closingDay) || null : null,
+        dueDay: isCard ? Number(dueDay) || null : null,
+        creditLimitCents: isCard ? limitCents : null,
+        paymentAccountId: isCard ? paymentAccountId : null
       };
       if (initial.id) {
         await api(`/ledger/accounts/${initial.id}`, { method: "PUT", body: JSON.stringify(body) });
@@ -308,6 +355,58 @@ function AccountDrawer({
             <DateField value={openingDate} onChange={setOpeningDate} />
           </Field>
         </div>
+        {isCard && (
+          <>
+            <div className="field-row">
+              <Field label="Dia do fechamento" hint="1 a 31">
+                <input
+                  type="number"
+                  min={1}
+                  max={31}
+                  value={closingDay}
+                  onChange={(event) => setClosingDay(event.target.value)}
+                  required
+                />
+              </Field>
+              <Field label="Dia do vencimento" hint="1 a 31">
+                <input
+                  type="number"
+                  min={1}
+                  max={31}
+                  value={dueDay}
+                  onChange={(event) => setDueDay(event.target.value)}
+                  required
+                />
+              </Field>
+            </div>
+            <div className="field-row">
+              <Field label="Limite" hint="Opcional">
+                <input
+                  value={creditLimit}
+                  onChange={(event) => setCreditLimit(event.target.value)}
+                  inputMode="decimal"
+                  placeholder="Sem limite"
+                />
+              </Field>
+              <Field label="Conta de pagamento" hint="Pré-selecionada ao pagar a fatura">
+                <select
+                  value={paymentAccountId ?? ""}
+                  onChange={(event) =>
+                    setPaymentAccountId(event.target.value ? Number(event.target.value) : null)
+                  }
+                >
+                  <option value="">Escolher na hora</option>
+                  {payableAccounts.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+          </>
+        )}
+
         <ColorPicker value={color} onChange={setColor} />
         <label className="fin-check">
           <input

@@ -12,6 +12,7 @@ import {
   Menu,
   Moon,
   ChartPie,
+  CreditCard,
   Gauge,
   Landmark,
   ReceiptText,
@@ -35,6 +36,7 @@ import { PositionsPage } from "../pages/Positions.js";
 import { AccountsPage } from "../pages/finance/Accounts.js";
 import { CategoriesPage } from "../pages/finance/Categories.js";
 import { FinanceDashboardPage } from "../pages/finance/FinanceDashboard.js";
+import { InvoicePage } from "../pages/finance/Invoice.js";
 import { ReportsPage } from "../pages/finance/Reports.js";
 import {
   ExpensesPage,
@@ -63,6 +65,7 @@ type Page =
   | "history"
   | "finance"
   | "reports"
+  | "invoice"
   | "transactions"
   | "expenses"
   | "income"
@@ -92,6 +95,7 @@ const nav: { group: string; items: NavItem[] }[] = [
       { id: "expenses", label: "Gastos", icon: ArrowDownCircle },
       { id: "income", label: "Entradas", icon: ArrowUpCircle },
       { id: "accounts", label: "Contas", icon: Landmark },
+      { id: "invoice", label: "Fatura", icon: CreditCard },
       { id: "categories", label: "Categorias", icon: Tags },
       { id: "reports", label: "Relatórios", icon: ChartPie }
     ]
@@ -361,6 +365,7 @@ export function App() {
             {page === "history" && <HistoryPage history={dashboard?.history ?? []} />}
             {page === "finance" && <FinanceDashboardPage onOpenReports={() => setPage("reports")} />}
             {page === "reports" && <ReportsPage />}
+            {page === "invoice" && <InvoicePage />}
             {page === "transactions" && <TransactionsPage />}
             {page === "expenses" && <ExpensesPage />}
             {page === "income" && <IncomePage />}

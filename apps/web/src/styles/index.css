@@ -3209,3 +3209,151 @@ main {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+
+/* --- Fase 3: cartão, fatura e parcelamento -------------------------------- */
+
+.fin-statement-nav {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.fin-statement-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 190px;
+}
+
+.fin-statement-label small {
+  font-size: 0.78rem;
+}
+
+.fin-limit {
+  display: flex;
+  flex-direction: column;
+}
+
+.fin-limit-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.fin-limit-empty {
+  margin: 0;
+  font-size: 0.88rem;
+}
+
+.fin-payments {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.fin-payments h4 {
+  margin: 0 0 6px;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+}
+
+/* Prévia das parcelas e plano somente-leitura */
+
+.fin-installment-preview ul {
+  list-style: none;
+  margin: 6px 0;
+  padding: 0;
+  max-height: 210px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.fin-installment-preview li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.84rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.fin-installment-preview li:last-child {
+  border-bottom: 0;
+}
+
+.fin-readonly-plan p {
+  margin: 4px 0 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.fin-refund-tag {
+  font-style: normal;
+  font-size: 0.72rem;
+  color: var(--warning);
+  border: 1px solid var(--warning-soft);
+  background: var(--warning-soft);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+/* Diálogo de escopo de série */
+
+.fin-scope {
+  padding: 0 18px 18px;
+}
+
+.fin-scope-counts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.fin-scope-counts li {
+  padding: 8px 11px;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+}
+
+.fin-scope-counts li:last-child {
+  border-bottom: 0;
+}
+
+.fin-scope-counts li[data-active="true"] {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.fin-scope-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.fin-effect {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  font-size: 0.86rem;
+}
+
+.fin-effect p {
+  margin: 0;
+}
+
+.fin-effect p + p {
+  margin-top: 3px;
+}

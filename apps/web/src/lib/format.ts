@@ -154,6 +154,12 @@ export function ledgerDate(value: string) {
   });
 }
 
+/** Rótulo de um mês `YYYY-MM`, como "Maio de 2026". */
+export function monthLabel(month: string) {
+  const [year, index] = month.split("-");
+  return `${monthNames[Number(index) - 1] ?? month} de ${year}`;
+}
+
 export function moneyFromCents(cents: number) {
   return money((cents || 0) / 100);
 }

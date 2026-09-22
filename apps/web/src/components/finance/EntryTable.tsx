@@ -4,6 +4,7 @@ import type { EntryRecord } from "@projeto41/contracts";
 import { Modal } from "../dialog.js";
 import { Empty, StatusDot } from "../ui.js";
 import { ColorDot } from "../ColorPicker.js";
+import { InstallmentBadge } from "./InstallmentBadge.js";
 import { ledgerDate, signedMoneyFromCents } from "../../lib/format.js";
 import { STATUS_LABEL, attachmentThumbUrl, attachmentUrl } from "../../lib/ledger.js";
 
@@ -70,15 +71,7 @@ export function EntryTable({
                         <span className="fin-desc-main">
                           {isTransfer && <ArrowLeftRight size={13} aria-hidden />}
                           {entry.description ?? entry.placeName ?? "Sem descrição"}
-                          {entry.installmentNumber != null && entry.installmentCount != null && (
-                            <em
-                              className={`fin-installment ${
-                                entry.installmentNumber === entry.installmentCount ? "last" : ""
-                              }`}
-                            >
-                              {entry.installmentNumber}/{entry.installmentCount}
-                            </em>
-                          )}
+                          <InstallmentBadge entry={entry} />
                         </span>
                         {entry.placeName && entry.description && (
                           <small className="fin-sub">{entry.placeName}</small>
@@ -90,6 +83,11 @@ export function EntryTable({
                           </small>
                         )}
                       </button>
+                      {entry.refundOfEntryId != null && (
+                        <em className="fin-refund-tag" title="Este lançamento é um estorno">
+                          estorno
+                        </em>
+                      )}
                       {entry.tags.length > 0 && (
                         <span className="fin-tags">
                           {entry.tags.map((tag) => (

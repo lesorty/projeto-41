@@ -1,7 +1,8 @@
-import { Save, Trash2 } from "lucide-react";
+import { Save, Trash2, Undo2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   AttachmentRecord,
+  SeriesScope,
   EntryRecord,
   EntryStatus,
   PaymentMethod,
@@ -12,10 +13,14 @@ import { DateField } from "../datepicker.js";
 import { Drawer, useConfirm } from "../dialog.js";
 import { Button, Field, Segmented } from "../ui.js";
 import { ColorDot } from "../ColorPicker.js";
+import { InstallmentFields } from "./InstallmentFields.js";
 import { PhotoField } from "./PhotoField.js";
+import { RefundDrawer } from "./RefundDrawer.js";
+import { SeriesScopeDialog } from "./SeriesScopeDialog.js";
 import { centsToInput } from "../../lib/format.js";
 import { PAYMENT_METHOD_LABEL, STATUS_LABEL, ledgerApi } from "../../lib/ledger.js";
 import type { LedgerReference } from "../../lib/ledger.js";
+import { api } from "../../lib/api.js";
 import { useToast } from "../../lib/toast.js";
 
 /** Tipos oferecidos no formulário. `adjustment` é interno, não se cria à mão. */
@@ -69,6 +74,10 @@ export function EntryDrawer({
   const [pendingPhoto, setPendingPhoto] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [installmentMode, setInstallmentMode] = useState<"single" | "installments">("single");
+  const [installmentCount, setInstallmentCount] = useState(2);
+  const [refunding, setRefunding] = useState(false);
+  const [scopeAsk, setScopeAsk] = useState(false);
 
   const categories = useMemo(
     () => reference.categories.filter((category) => category.kind === kind),
@@ -85,6 +94,13 @@ export function EntryDrawer({
   // A pessoa é herdada da conta (D01), mas continua sobrescrevível.
   const account = reference.accounts.find((item) => item.id === accountId);
   const effectivePersonId = personId ?? account?.personId ?? null;
+  const isCard = account?.kind === "credit_card";
+  const inSeries = entry?.installmentPlanId != null;
+  const seriesCount = entry?.installmentCount ?? 0;
+  const seriesNumber = entry?.installmentNumber ?? 0;
+  // O valor muda só nesta parcela, então nem vale perguntar o escopo.
+  const amountChanged =
+    entry != null && Math.abs(parseCurrencyInput(amount) ?? 0) !== Math.abs(entry.amountCents);
 
   async function persistPhoto(entryId: number) {
     if (!pendingPhoto) return;
@@ -99,6 +115,17 @@ export function EntryDrawer({
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
+    // Editar uma parcela pede o escopo antes de gravar — menos quando o que
+    // mudou foi o valor, que é sempre só desta parcela.
+    if (inSeries && editing && !amountChanged && !scopeAsk) {
+      setScopeAsk(true);
+      return;
+    }
+    await persist("one");
+  }
+
+  async function persist(scope: SeriesScope) {
+    setScopeAsk(false);
     const cents = parseCurrencyInput(amount);
     if (cents == null || cents === 0) {
       toast.notify("Informe um valor válido", "error");
@@ -143,6 +170,22 @@ export function EntryDrawer({
           });
           await persistPhoto(created.fromEntryId);
         }
+      } else if (!editing && isCard && installmentMode === "installments") {
+        // Compra parcelada nasce como plano: N lançamentos reais, nunca uma
+        // linha só com "12x" escrito na descrição (D23).
+        await api("/ledger/installment-plans", {
+          method: "POST",
+          body: JSON.stringify({
+            accountId,
+            purchaseDate: date,
+            totalCents: Math.abs(cents),
+            installmentCount,
+            categoryId,
+            placeId: await resolvePlace(),
+            personId: effectivePersonId,
+            description: description || null
+          })
+        });
       } else {
         const resolvedPlaceId = await resolvePlace();
         const signed = kind === "expense" ? -Math.abs(cents) : Math.abs(cents);
@@ -161,7 +204,7 @@ export function EntryDrawer({
           tagIds
         };
         if (editing && entry) {
-          await ledgerApi.updateEntry(entry.id, body);
+          await ledgerApi.updateEntry(entry.id, body, scope);
           await persistPhoto(entry.id);
         } else {
           const created = await ledgerApi.createEntry(body);
@@ -210,6 +253,11 @@ export function EntryDrawer({
       onClose={onClose}
       footer={
         <>
+          {editing && entry && entry.kind !== "transfer" && entry.refundOfEntryId == null && (
+            <Button variant="ghost" icon={Undo2} onClick={() => setRefunding(true)}>
+              Estornar
+            </Button>
+          )}
           {editing && (
             <Button variant="danger" icon={Trash2} onClick={() => void remove()}>
               Excluir
@@ -298,6 +346,24 @@ export function EntryDrawer({
             </Field>
           )}
         </div>
+
+        {isCard && kind === "expense" && (
+          <InstallmentFields
+            mode={inSeries ? "installments" : installmentMode}
+            onModeChange={setInstallmentMode}
+            installmentCount={inSeries ? seriesCount : installmentCount}
+            onCountChange={setInstallmentCount}
+            totalCents={
+              inSeries
+                ? (entry?.amountCents ?? 0) * -seriesCount
+                : Math.abs(parseCurrencyInput(amount) ?? 0)
+            }
+            purchaseDate={date}
+            closingDay={account?.closingDay ?? 1}
+            dueDay={account?.dueDay ?? 10}
+            readOnly={inSeries}
+          />
+        )}
 
         <Field label="Descrição" hint="Opcional">
           <input
@@ -391,6 +457,30 @@ export function EntryDrawer({
           }}
         />
       </form>
+
+      <SeriesScopeDialog
+        open={scopeAsk}
+        title="Alterar parcelas"
+        description={`Esta é a parcela ${seriesNumber} de ${seriesCount}.`}
+        counts={{
+          one: 1,
+          forward: Math.max(seriesCount - seriesNumber + 1, 1),
+          all: seriesCount
+        }}
+        onPick={(scope) => void persist(scope)}
+        onCancel={() => setScopeAsk(false)}
+      />
+
+      {refunding && entry && (
+        <RefundDrawer
+          entry={entry}
+          onClose={() => setRefunding(false)}
+          onDone={async () => {
+            setRefunding(false);
+            await onSaved();
+          }}
+        />
+      )}
     </Drawer>
   );
 }
