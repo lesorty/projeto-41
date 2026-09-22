@@ -7,6 +7,8 @@
 - **Última atualização:** 2026-09-22
 - **Fases concluídas:** 0, 1, 2, 3, 4 e 5
 - **Fases pendentes:** 6 (importação OFX/CSV), 7 (recorrentes), 8 (PDF)
+- **Commits:** 12, todos em `feat(...)` / `refactor(...)` / `docs(...)`, com o
+  raciocínio das decisões não óbvias na mensagem
 
 ## Como verificar o que existe
 
@@ -18,7 +20,7 @@ npm test
 npm run typecheck && npm run lint && npm run build
 ```
 
-461 testes passam. A **única** falha conhecida de `npm test` é
+466 dos 467 testes passam. A **única** falha conhecida de `npm test` é
 `scripts/launch-project.test.mjs`, que **já falhava antes** deste trabalho: ele
 compara o separador de `PATH` com `:` fixo e quebra no Windows, que usa `;`.
 Não tem relação com o módulo de finanças.
@@ -134,19 +136,50 @@ importação: as classes novas têm todas o prefixo `fin-` e vivem no fim de
 
 ### 2. Fases 6, 7 e 8
 
-Não iniciadas. Os documentos de fase estão completos e as fundações que elas
-pedem já existem:
+**Não iniciadas** — nenhum arquivo dessas fases existe no repositório. Os
+documentos de fase estão completos e as fundações que elas pedem já existem.
 
-- **Fase 6 (OFX/CSV):** `entries.external_id` e o índice único parcial
-  `UNIQUE(account_id, external_id)` já existem desde a fase 1;
-  `entries.import_row_id` está declarado como INTEGER solto, à espera do
-  `rebuildTable` que lhe dará a FK quando `import_rows` existir. `raw_description`
-  também já existe.
-- **Fase 7 (recorrentes):** o `SeriesScopeDialog` já é genérico e testado, e o
-  contrato `seriesScopeSchema` já mora em `packages/contracts/src/cards.ts`
-  justamente para ser reaproveitado.
-- **Fase 8 (PDF):** depende da 6. O valor `'needs_review'` já está previsto no
-  `CHECK` que a fase 6 vai criar.
+#### Fase 6 (importação OFX/CSV) — por onde começar
+
+A próxima versão livre de migração é a **007**. Fundações já prontas:
+`entries.external_id` com o índice único parcial
+`UNIQUE(account_id, external_id) WHERE external_id IS NOT NULL` (fase 1),
+`entries.raw_description`, e `entries.import_row_id` declarado como INTEGER
+solto à espera do `rebuildTable` que lhe dará a FK quando `import_rows`
+existir.
+
+Três armadilhas que o documento da fase detalha e que vale ter em mente antes
+de escrever a primeira linha:
+
+1. **OFX 1.x brasileiro é SGML, não XML.** As tags de folha vêm sem fechamento
+   (`<TRNAMT>-123.45` e nada de `</TRNAMT>`). O `fast-xml-parser` já está nas
+   dependências de `apps/api` (usado pelo leitor de xlsx) e é justamente o que
+   **não** pode ser usado no caminho do OFX.
+2. **Ao reconstruir `entries`, ler os índices de `sqlite_master`** em vez de
+   escrever a lista à mão: as fases 3 e 5 acrescentaram índices que o documento
+   da fase 6 não conhece, e o parcial de `external_id` é o que dá a
+   reimportação idempotente de graça. O padrão está em
+   `packages/db/src/migrations/004-credit-card.ts`, que faz o mesmo rebuild com
+   a lista explícita — na 007 ela precisa ser lida dinamicamente.
+3. **O hash de dedupe não pode conter id resolvido** de local, categoria ou
+   pessoa (bug Firefly III #4124). Só conta, data, valor em centavos e
+   descrição normalizada.
+
+A normalização de descritor pode reaproveitar `normalizeName` de
+`packages/finance/src/text.ts`, que já é a mesma usada por
+`places.normalized_name`.
+
+#### Fase 7 (recorrentes)
+
+O `SeriesScopeDialog` já é genérico e tem teste próprio
+(`apps/web/src/components/finance/SeriesScopeDialog.test.tsx`): ele não menciona
+parcela em lugar nenhum, exatamente para esta fase herdá-lo. O contrato
+`seriesScopeSchema` mora em `packages/contracts/src/cards.ts` pelo mesmo motivo.
+
+#### Fase 8 (PDF)
+
+Depende da 6. O valor `'needs_review'` já está previsto no `CHECK` de
+`import_rows.status` que a fase 6 vai criar, então ela não exigirá rebuild.
 
 ### 3. Dados de demonstração no banco local
 
