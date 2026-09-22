@@ -10,6 +10,7 @@ import {
   registerAttachmentsRoutes,
   registerIconsRoutes,
   registerImportExportRoutes,
+  registerLedgerReportsRoutes,
   registerLedgerRoutes,
   registerOperationsRoutes,
   registerPortfolioRoutes,
@@ -82,6 +83,7 @@ export function buildApp({
   registerPositionsRoutes(app, deps);
   registerPricesRoutes(app, deps);
   registerLedgerRoutes(app, deps);
+  registerLedgerReportsRoutes(app, deps);
   registerAttachmentsRoutes(app, deps);
   registerImportExportRoutes(app, deps);
 

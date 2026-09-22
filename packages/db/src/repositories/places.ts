@@ -1,4 +1,4 @@
-import type { Place, PlaceRecord } from "@projeto41/contracts";
+import type { PlaceDraft, PlaceRecord } from "@projeto41/contracts";
 import { normalizeName } from "@projeto41/finance";
 import { countReferencing, notFound, nowIso, type Db } from "./shared.js";
 
@@ -28,7 +28,7 @@ export function createPlacesRepository(db: Db) {
         | PlaceRecord
         | undefined,
 
-    create: (place: Place): number => {
+    create: (place: PlaceDraft): number => {
       const normalized = normalizeName(place.name);
       if (!normalized) throw notFound("Local");
       return Number(
@@ -58,7 +58,7 @@ export function createPlacesRepository(db: Db) {
       return repository.create({ name: name.trim(), defaultCategoryId: defaultCategoryId ?? null });
     },
 
-    update: (id: number, place: Place): number => {
+    update: (id: number, place: PlaceDraft): number => {
       const changes = db
         .prepare(
           `UPDATE places SET name=@name, normalized_name=@normalizedName,

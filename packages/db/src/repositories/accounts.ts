@@ -1,11 +1,11 @@
-import type { Account, AccountRecord } from "@projeto41/contracts";
+import type { AccountDraft, AccountRecord } from "@projeto41/contracts";
 import { createBalancesRepository, type BalanceOptions } from "./balances.js";
 import { countReferencing, notFound, nowIso, toBit, LedgerError, type Db } from "./shared.js";
 
 export function createAccountsRepository(db: Db) {
   const balances = createBalancesRepository(db);
 
-  function assertCardFields(account: Account) {
+  function assertCardFields(account: AccountDraft) {
     if (account.kind !== "credit_card") return;
     if (account.closingDay == null || account.dueDay == null) {
       throw new LedgerError("Cartao precisa de dia de fechamento e de vencimento");
@@ -22,7 +22,7 @@ export function createAccountsRepository(db: Db) {
     get: (id: number, options: BalanceOptions = {}): AccountRecord | undefined =>
       balances.forAccount(id, options),
 
-    create: (account: Account): number => {
+    create: (account: AccountDraft): number => {
       assertCardFields(account);
       return Number(
         db
@@ -56,7 +56,7 @@ export function createAccountsRepository(db: Db) {
       );
     },
 
-    update: (id: number, account: Account): number => {
+    update: (id: number, account: AccountDraft): number => {
       assertCardFields(account);
       if (account.paymentAccountId === id) {
         throw new LedgerError("Conta de pagamento nao pode ser o proprio cartao");

@@ -1,11 +1,13 @@
 import type {
   AttachmentRecord,
+  EntryKind,
+  TransferPurpose,
   EntryFilter,
-  EntryInput,
+  EntryDraft,
   EntryListResult,
   EntryRecord,
   TagRecord,
-  TransferInput
+  TransferDraft
 } from "@projeto41/contracts";
 import { statementMonthFor } from "@projeto41/finance";
 import { createAccountsRepository } from "./accounts.js";
@@ -136,6 +138,34 @@ function buildWhere(filter: Partial<EntryFilter>) {
   return { where: clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "", params };
 }
 
+/**
+ * Materializa a regra de "o que conta como realizado" do plano mestre 6.4 —
+ * e nada alem dela.
+ *
+ * O caso sutil e o deposito em caixinha: ele conta **so na ponta de saida**.
+ * Marcar as duas pontas faria o deposito somar e subtrair, anulando-se.
+ * Saque de caixinha nao devolve folga ao alvo do mes, e transferencia para
+ * investimento nunca conta — e justamente para sobrar dinheiro para investir
+ * que o alvo existe.
+ */
+export function deriveCountsTowardTarget(input: {
+  kind: EntryKind;
+  amountCents: number;
+  transferPurpose?: TransferPurpose | null;
+  refundOfEntryId?: number | null;
+}): boolean {
+  // Estorno entra positivo e abate a despesa original no somatorio (6.6).
+  if (input.refundOfEntryId != null) return true;
+  if (input.kind === "expense") return true;
+  if (input.kind === "transfer") {
+    return input.transferPurpose === "goal_deposit" && input.amountCents < 0;
+  }
+  return false;
+}
+
+/** `targetFlagReset` avisa a UI que a excecao manual foi refeita (6.4). */
+export type UpdateResult = { changes: number; targetFlagReset: boolean };
+
 export function createEntriesRepository(db: Db) {
   const accounts = createAccountsRepository(db);
 
@@ -172,7 +202,7 @@ export function createEntriesRepository(db: Db) {
   }
 
   /** Despesa e negativa, receita e positiva — menos em estorno (6.6). */
-  function normalizeAmount(input: Pick<EntryInput, "kind" | "amountCents" | "refundOfEntryId">) {
+  function normalizeAmount(input: Pick<EntryDraft, "kind" | "amountCents" | "refundOfEntryId">) {
     if (input.refundOfEntryId != null) return input.amountCents;
     const magnitude = Math.abs(input.amountCents);
     if (input.kind === "expense") return -magnitude;
@@ -203,10 +233,12 @@ export function createEntriesRepository(db: Db) {
 
   /** Os campos extras so sao preenchidos pelas fases 3 (parcelas) e 6 (importacao). */
   function insertRow(
-    input: EntryInput & {
+    input: EntryDraft & {
       installmentPlanId?: number | null;
       installmentNumber?: number | null;
       parentEntryId?: number | null;
+      /** So a criacao de transferencia informa; define o flag de alvo (6.4). */
+      transferPurpose?: TransferPurpose | null;
       rawDescription?: string | null;
       externalId?: string | null;
       importRowId?: number | null;
@@ -234,7 +266,17 @@ export function createEntriesRepository(db: Db) {
         installmentNumber: input.installmentNumber ?? null,
         parentEntryId: input.parentEntryId ?? null,
         refundOfEntryId: input.refundOfEntryId ?? null,
-        countsTowardTarget: toBit(input.countsTowardTarget, input.kind === "expense"),
+        // O valor derivado e o padrao; um `countsTowardTarget` explicito no
+        // input e a excecao manual caso a caso prevista em 6.4.
+        countsTowardTarget: toBit(
+          input.countsTowardTarget,
+          deriveCountsTowardTarget({
+            kind: input.kind,
+            amountCents: normalizeAmount(input),
+            transferPurpose: input.transferPurpose,
+            refundOfEntryId: input.refundOfEntryId
+          })
+        ),
         externalId: input.externalId ?? null,
         importRowId: input.importRowId ?? null,
         contentHash: input.contentHash ?? null,
@@ -247,7 +289,7 @@ export function createEntriesRepository(db: Db) {
   }
 
   const repository = {
-    create: (input: EntryInput): number => db.transaction(() => insertRow(input))(),
+    create: (input: EntryDraft): number => db.transaction(() => insertRow(input))(),
 
     /** Usado pelas fases 3 e 6, que precisam gravar campos internos. */
     createInternal: (
@@ -385,7 +427,7 @@ export function createEntriesRepository(db: Db) {
      * Cria as duas pontas de uma transferencia numa transacao so (D20). E a
      * unica maneira de criar transferencia: pontas soltas nao existem.
      */
-    createTransfer: (input: TransferInput): { fromEntryId: number; toEntryId: number } => {
+    createTransfer: (input: TransferDraft): { fromEntryId: number; toEntryId: number } => {
       if (input.fromAccountId === input.toAccountId) {
         throw new LedgerError("Conta de origem e destino precisam ser diferentes");
       }
@@ -401,9 +443,9 @@ export function createEntriesRepository(db: Db) {
           status: input.status ?? "cleared",
           description: input.description ?? null,
           notes: input.notes ?? null,
-          // Deposito em caixinha e consumo adiado e conta no alvo; investimento
-          // e o oposto, e justamente o que se quer que sobre (plano mestre 6.4).
-          countsTowardTarget: input.purpose === "goal_deposit",
+          // A regra de 6.4 fica em `deriveCountsTowardTarget`, alimentada pelo
+          // purpose: aqui nao se decide nada.
+          transferPurpose: input.purpose ?? "generic",
           tagIds: []
         });
         const toEntryId = insertRow({
@@ -416,7 +458,7 @@ export function createEntriesRepository(db: Db) {
           statementMonth: input.statementMonth ?? null,
           description: input.description ?? null,
           notes: input.notes ?? null,
-          countsTowardTarget: false,
+          transferPurpose: input.purpose ?? "generic",
           tagIds: []
         });
         db.prepare(
@@ -431,23 +473,50 @@ export function createEntriesRepository(db: Db) {
      * Atualiza um lancamento. Mexer numa ponta de transferencia arrasta a outra
      * na mesma transacao: data, valor e status precisam continuar espelhados.
      */
-    update: (id: number, input: EntryInput): number =>
-      db.transaction(() => {
+    update: (id: number, input: EntryDraft): UpdateResult =>
+      db.transaction((): UpdateResult => {
         const existing = db
           .prepare(
-            `SELECT e.id, e.kind, t.id AS transferId, t.from_entry_id AS fromEntryId,
-                    t.to_entry_id AS toEntryId
+            `SELECT e.id, e.kind, e.counts_toward_target AS countsTowardTarget,
+                    e.refund_of_entry_id AS refundOfEntryId,
+                    t.id AS transferId, t.purpose AS transferPurpose,
+                    t.from_entry_id AS fromEntryId, t.to_entry_id AS toEntryId
              FROM entries e
              LEFT JOIN transfers t ON t.from_entry_id = e.id OR t.to_entry_id = e.id
              WHERE e.id = ?`
           )
           .get(id) as
-          | { id: number; kind: string; transferId: number | null; fromEntryId: number | null; toEntryId: number | null }
+          | {
+              id: number;
+              kind: EntryKind;
+              countsTowardTarget: number;
+              refundOfEntryId: number | null;
+              transferId: number | null;
+              transferPurpose: TransferPurpose | null;
+              fromEntryId: number | null;
+              toEntryId: number | null;
+            }
           | undefined;
         if (!existing) throw notFound("Lancamento");
 
         const defaults = resolveAccountDefaults({ ...input, statementMonth: input.statementMonth });
         const amount = normalizeAmount(input);
+
+        // Re-derivar em toda edicao apagaria a excecao manual do usuario numa
+        // simples troca de descricao. So o que muda o resultado de 6.4 —
+        // `kind` e `refund_of_entry_id` — dispara a re-derivacao.
+        const flagInputsChanged =
+          input.kind !== existing.kind ||
+          (input.refundOfEntryId ?? null) !== existing.refundOfEntryId;
+        const previousFlag = fromBit(existing.countsTowardTarget);
+        const derivedFlag = deriveCountsTowardTarget({
+          kind: input.kind,
+          amountCents: amount,
+          transferPurpose: existing.transferPurpose,
+          refundOfEntryId: input.refundOfEntryId
+        });
+        const nextFlag = input.countsTowardTarget ?? (flagInputsChanged ? derivedFlag : previousFlag);
+        const targetFlagReset = flagInputsChanged && nextFlag !== previousFlag;
 
         db.prepare(
           `UPDATE entries SET account_id=@accountId, person_id=@personId, date=@date,
@@ -472,7 +541,7 @@ export function createEntriesRepository(db: Db) {
           paymentMethod: input.paymentMethod ?? null,
           statementMonth: defaults.statementMonth,
           refundOfEntryId: input.refundOfEntryId ?? null,
-          countsTowardTarget: toBit(input.countsTowardTarget, input.kind === "expense"),
+          countsTowardTarget: nextFlag ? 1 : 0,
           updatedAt: nowIso()
         });
         replaceTags(id, input.tagIds);
@@ -493,8 +562,17 @@ export function createEntriesRepository(db: Db) {
             );
           }
         }
-        return 1;
+        return { changes: 1, targetFlagReset };
       })(),
+
+    /** Unica porta da excecao manual de 6.4: nao toca em mais nada. */
+    setCountsTowardTarget: (id: number, value: boolean): number => {
+      const changes = db
+        .prepare("UPDATE entries SET counts_toward_target = ?, updated_at = ? WHERE id = ?")
+        .run(value ? 1 : 0, nowIso(), id).changes;
+      if (changes === 0) throw notFound("Lancamento");
+      return changes;
+    },
 
     /** Remover uma ponta remove a outra e a linha de `transfers`, em cascata. */
     remove: (id: number): number =>

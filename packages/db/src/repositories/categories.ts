@@ -1,4 +1,4 @@
-import type { Category, CategoryKind, CategoryRecord } from "@projeto41/contracts";
+import type { CategoryDraft, CategoryKind, CategoryRecord } from "@projeto41/contracts";
 import { countReferencing, fromBit, notFound, nowIso, toBit, type Db } from "./shared.js";
 
 type CategoryRow = {
@@ -46,7 +46,7 @@ export function createCategoriesRepository(db: Db) {
       return row ? map(row) : undefined;
     },
 
-    create: (category: Category): number =>
+    create: (category: CategoryDraft): number =>
       Number(
         db
           .prepare(
@@ -67,7 +67,7 @@ export function createCategoriesRepository(db: Db) {
           }).lastInsertRowid
       ),
 
-    update: (id: number, category: Category): number => {
+    update: (id: number, category: CategoryDraft): number => {
       const changes = db
         .prepare(
           `UPDATE categories SET name=@name, kind=@kind, color=@color, icon=@icon,

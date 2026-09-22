@@ -34,4 +34,5 @@ export { registerPricesRoutes } from "./prices.routes.js";
 export { registerIconsRoutes } from "./icons.routes.js";
 export { registerImportExportRoutes } from "./import-export.routes.js";
 export { registerLedgerRoutes } from "./ledger.routes.js";
+export { registerLedgerReportsRoutes } from "./ledger-reports.routes.js";
 export { registerAttachmentsRoutes } from "./attachments.routes.js";

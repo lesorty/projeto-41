@@ -57,10 +57,9 @@ function expense(overrides: Record<string, unknown> = {}) {
     kind: "expense",
     status: "cleared",
     categoryId: mercado,
-    countsTowardTarget: true,
     tagIds: [],
     ...overrides
-  } as Parameters<typeof ledger.entries.create>[0]);
+  });
 }
 
 describe("entries.create", () => {
@@ -85,7 +84,6 @@ describe("entries.create", () => {
       kind: "income",
       status: "cleared",
       categoryId: salario,
-      countsTowardTarget: false,
       tagIds: []
     });
     expect(ledger.entries.get(inbound)?.amountCents).toBe(3000);
@@ -101,7 +99,6 @@ describe("entries.create", () => {
       status: "cleared",
       categoryId: mercado,
       refundOfEntryId: original,
-      countsTowardTarget: true,
       tagIds: []
     });
     expect(ledger.entries.get(refund)?.amountCents).toBe(2000);
@@ -243,7 +240,6 @@ describe("entries.list", () => {
       kind: "income",
       status: "cleared",
       categoryId: salario,
-      countsTowardTarget: false,
       tagIds: []
     });
   });

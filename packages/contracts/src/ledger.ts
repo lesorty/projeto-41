@@ -143,7 +143,12 @@ const entryBase = z.object({
   paymentMethod: paymentMethodSchema.nullable().optional(),
   statementMonth: monthSchema.nullable().optional(),
   refundOfEntryId: idSchema.nullable().optional(),
-  countsTowardTarget: z.boolean().default(true),
+  /**
+   * Ausente significa "derive pela regra 6.4"; presente e a excecao manual
+   * caso a caso. Por isso nao tem `.default()`: um padrao apagaria a diferenca
+   * entre "o usuario nao disse" e "o usuario marcou".
+   */
+  countsTowardTarget: z.boolean().optional(),
   tagIds: z.array(idSchema).default([])
 });
 
@@ -253,6 +258,20 @@ export const entryFilterSchema = z.object({
 });
 
 // Tipos de leitura ----------------------------------------------------------
+
+/**
+ * Os tipos `*Draft` sao o **input** dos schemas: os campos com `.default()`
+ * ainda sao opcionais neles. Sao eles que os repositorios recebem, porque cada
+ * repositorio ja aplica seu proprio padrao ao gravar — exigir o tipo de saida
+ * obrigaria todo chamador a repetir defaults que o banco ja tem.
+ */
+export type PersonDraft = z.input<typeof personSchema>;
+export type AccountDraft = z.input<typeof accountSchema>;
+export type CategoryDraft = z.input<typeof categorySchema>;
+export type TagDraft = z.input<typeof tagSchema>;
+export type PlaceDraft = z.input<typeof placeSchema>;
+export type EntryDraft = z.input<typeof entrySchema>;
+export type TransferDraft = z.input<typeof transferSchema>;
 
 export type Person = z.infer<typeof personSchema>;
 export type Account = z.infer<typeof accountSchema>;

@@ -3,6 +3,7 @@ import {
   categorySchema,
   entryFilterSchema,
   entrySchema,
+  entryTargetFlagSchema,
   personSchema,
   placeSchema,
   tagSchema,
@@ -165,6 +166,17 @@ export const registerLedgerRoutes: RoutePlugin = (app, { db }) => {
     }
     ledger.entries.remove(id);
     return { ok: true, balances: balances() };
+  });
+
+  /** Excecao manual de 6.4: a unica porta para sobrescrever o flag derivado. */
+  app.patch("/api/ledger/entries/:id/target", async (request, reply) => {
+    const { id } = idParam.parse(request.params);
+    if (!ledger.entries.get(id)) {
+      return reply.status(404).send({ error: "Lancamento nao encontrado" });
+    }
+    const { countsTowardTarget } = entryTargetFlagSchema.parse(request.body);
+    ledger.entries.setCountsTowardTarget(id, countsTowardTarget);
+    return { ok: true, entry: ledger.entries.get(id) };
   });
 
   app.post("/api/ledger/entries/status", async (request) => {

@@ -13,8 +13,8 @@ let checking: number;
 let savings: number;
 let mercado: number;
 
-async function post(url: string, payload: unknown) {
-  return app.inject({ method: "POST", url, payload });
+async function post(url: string, payload: Record<string, unknown>) {
+  return await app.inject({ method: "POST", url, payload });
 }
 
 beforeEach(async () => {

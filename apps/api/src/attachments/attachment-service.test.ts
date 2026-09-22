@@ -65,7 +65,6 @@ beforeEach(() => {
     amountCents: -1000,
     kind: "expense",
     status: "cleared",
-    countsTowardTarget: true,
     tagIds: []
   });
 });

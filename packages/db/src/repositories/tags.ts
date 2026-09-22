@@ -1,4 +1,4 @@
-import type { Tag, TagRecord } from "@projeto41/contracts";
+import type { TagDraft, TagRecord } from "@projeto41/contracts";
 import { countReferencing, notFound, type Db } from "./shared.js";
 
 const SELECT = "SELECT id, name, color FROM tags";
@@ -10,7 +10,7 @@ export function createTagsRepository(db: Db) {
     get: (id: number): TagRecord | undefined =>
       db.prepare(`${SELECT} WHERE id = ?`).get(id) as TagRecord | undefined,
 
-    create: (tag: Tag): number =>
+    create: (tag: TagDraft): number =>
       Number(
         db.prepare("INSERT INTO tags(name, color) VALUES (@name, @color)").run({
           name: tag.name,
@@ -30,7 +30,7 @@ export function createTagsRepository(db: Db) {
       );
     },
 
-    update: (id: number, tag: Tag): number => {
+    update: (id: number, tag: TagDraft): number => {
       const changes = db
         .prepare("UPDATE tags SET name=@name, color=@color WHERE id=@id")
         .run({ id, name: tag.name, color: tag.color }).changes;

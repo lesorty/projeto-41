@@ -1,4 +1,4 @@
-import type { Person, PersonRecord } from "@projeto41/contracts";
+import type { PersonDraft, PersonRecord } from "@projeto41/contracts";
 import { countReferencing, fromBit, notFound, nowIso, toBit, type Db } from "./shared.js";
 
 type PersonRow = {
@@ -27,7 +27,7 @@ export function createPeopleRepository(db: Db) {
       return row ? map(row) : undefined;
     },
 
-    create: (person: Person): number =>
+    create: (person: PersonDraft): number =>
       Number(
         db
           .prepare(
@@ -43,7 +43,7 @@ export function createPeopleRepository(db: Db) {
           }).lastInsertRowid
       ),
 
-    update: (id: number, person: Person): number => {
+    update: (id: number, person: PersonDraft): number => {
       const changes = db
         .prepare(
           `UPDATE people SET name=@name, kind=@kind, color=@color, active=@active WHERE id=@id`
