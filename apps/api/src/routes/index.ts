@@ -2,6 +2,7 @@ import type { AppDatabase } from "@projeto41/db";
 import type { FastifyInstance } from "fastify";
 import type { IconService } from "../icons/icon-service.js";
 import type { AttachmentService } from "../attachments/attachment-service.js";
+import type { CdiService } from "../cdi/cdi-service.js";
 
 export type CryptoSearchHit = { id: string; symbol: string; name: string; rank: number | null };
 export type B3SearchHit = { symbol: string; name: string; price: number; currency: string };
@@ -22,6 +23,7 @@ export type RouteDeps = {
   priceService: PriceService;
   iconService?: IconService;
   attachmentService?: AttachmentService;
+  cdiService?: CdiService;
   databaseFile?: string;
 };
 
@@ -37,4 +39,6 @@ export { registerLedgerRoutes } from "./ledger.routes.js";
 export { registerLedgerReportsRoutes } from "./ledger-reports.routes.js";
 export { registerCardsRoutes } from "./cards.routes.js";
 export { registerInvestmentCashRoutes } from "./investment-cash.routes.js";
+export { registerCdiRoutes } from "./cdi.routes.js";
+export { registerGoalsRoutes } from "./goals.routes.js";
 export { registerAttachmentsRoutes } from "./attachments.routes.js";

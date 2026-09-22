@@ -46,3 +46,4 @@ export * from "./ledger.js";
 export * from "./views.js";
 export * from "./reports.js";
 export * from "./cards.js";
+export * from "./goals.js";

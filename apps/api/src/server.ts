@@ -4,6 +4,7 @@ import { createDatabase } from "@projeto41/db";
 import { buildApp } from "./app.js";
 import { loadServerConfig } from "./config.js";
 import { createAttachmentService } from "./attachments/attachment-service.js";
+import { createCdiService } from "./cdi/cdi-service.js";
 import { createIconService, type IconKind } from "./icons/icon-service.js";
 import { startScheduler } from "./jobs/scheduler.js";
 import { createPriceService } from "./prices/price-service.js";
@@ -20,6 +21,8 @@ const attachmentService = createAttachmentService({
   db,
   attachmentDir: resolve(dirname(databasePath), "attachments")
 });
+// A serie do CDI mora ao lado do banco, em `data/cdi/`.
+const cdiService = createCdiService(db, dirname(databasePath));
 const livePriceService = createPriceService(db, {
   coingeckoApiKey: config.coingeckoApiKey,
   brapiToken: config.brapiToken
@@ -37,12 +40,13 @@ const app = buildApp({
   priceService,
   iconService,
   attachmentService,
+  cdiService,
   databaseFile: databasePath,
   webRoot: existsSync(resolve(webRoot, "index.html")) ? webRoot : undefined
 });
 const stopScheduler = config.demoMode
   ? () => undefined
-  : startScheduler(db, livePriceService, config.timezone);
+  : startScheduler(db, livePriceService, config.timezone, cdiService);
 
 function iconTargets() {
   const crypto = [...new Set(db.operations.list("crypto").map((operation) => operation.asset))];

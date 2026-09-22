@@ -6,9 +6,12 @@ import type { AppDatabase } from "@projeto41/db";
 import { z } from "zod";
 import type { IconService } from "./icons/icon-service.js";
 import type { AttachmentService } from "./attachments/attachment-service.js";
+import type { CdiService } from "./cdi/cdi-service.js";
 import {
   registerAttachmentsRoutes,
   registerCardsRoutes,
+  registerCdiRoutes,
+  registerGoalsRoutes,
   registerInvestmentCashRoutes,
   registerIconsRoutes,
   registerImportExportRoutes,
@@ -35,6 +38,7 @@ export function buildApp({
   priceService,
   iconService,
   attachmentService,
+  cdiService,
   webRoot,
   databaseFile
 }: {
@@ -42,6 +46,7 @@ export function buildApp({
   priceService: PriceService;
   iconService?: IconService;
   attachmentService?: AttachmentService;
+  cdiService?: CdiService;
   webRoot?: string;
   databaseFile?: string;
 }) {
@@ -78,7 +83,14 @@ export function buildApp({
 
   app.get("/api/health", async () => ({ ok: true }));
 
-  const deps: RouteDeps = { db, priceService, iconService, attachmentService, databaseFile };
+  const deps: RouteDeps = {
+    db,
+    priceService,
+    iconService,
+    attachmentService,
+    cdiService,
+    databaseFile
+  };
   registerIconsRoutes(app, deps);
   registerPortfolioRoutes(app, deps);
   registerOperationsRoutes(app, deps);
@@ -88,6 +100,8 @@ export function buildApp({
   registerLedgerReportsRoutes(app, deps);
   registerCardsRoutes(app, deps);
   registerInvestmentCashRoutes(app, deps);
+  registerCdiRoutes(app, deps);
+  registerGoalsRoutes(app, deps);
   registerAttachmentsRoutes(app, deps);
   registerImportExportRoutes(app, deps);
 

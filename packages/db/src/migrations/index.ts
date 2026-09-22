@@ -3,6 +3,7 @@ import { migration002LedgerCore } from "./002-ledger-core.js";
 import { migration003BudgetTargets } from "./003-budget-targets.js";
 import { migration004CreditCard } from "./004-credit-card.js";
 import { migration005InvestmentLink } from "./005-investment-link.js";
+import { migration006GoalsCdi } from "./006-goals-cdi.js";
 import type { Migration } from "./runner.js";
 
 /**
@@ -14,7 +15,8 @@ export const migrations: Migration[] = [
   migration002LedgerCore,
   migration003BudgetTargets,
   migration004CreditCard,
-  migration005InvestmentLink
+  migration005InvestmentLink,
+  migration006GoalsCdi
 ];
 
 export * from "./runner.js";

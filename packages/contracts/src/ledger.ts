@@ -251,6 +251,8 @@ export const entryFilterSchema = z.object({
   maxCents: z.coerce.number().int().optional(),
   statementMonth: monthSchema.optional(),
   installmentPlanId: z.coerce.number().int().positive().optional(),
+  /** Movimentos de uma caixinha, nos dois modos (fase 5). */
+  goalId: z.coerce.number().int().positive().optional(),
   /** Transferencias poluem o extrato de gastos; a UI liga e desliga. */
   includeTransfers: boolishSchema,
   page: z.coerce.number().int().min(1).default(1),
@@ -340,6 +342,10 @@ export type EntryRecord = {
   countsTowardTarget: boolean;
   transferId: number | null;
   transferPurpose: TransferPurpose | null;
+  /** Caixinha do movimento, resolvida pelo servidor (fase 5). */
+  goalId: number | null;
+  goalName: string | null;
+  goalColor: string | null;
   counterpartAccountId: number | null;
   counterpartAccountName: string | null;
   tags: TagRecord[];

@@ -2,6 +2,7 @@ import { createAccountsRepository } from "./accounts.js";
 import { createBalancesRepository } from "./balances.js";
 import { createBudgetPeriodsRepository } from "./budget-periods.js";
 import { createCardsRepository } from "./cards.js";
+import { createGoalsRepository } from "./goals.js";
 import { createInstallmentPlansRepository } from "./installment-plans.js";
 import { createRefundsRepository } from "./refunds.js";
 import { createStatementsRepository } from "./statements.js";
@@ -31,7 +32,8 @@ export function createLedgerRepositories(db: Db) {
     cards: createCardsRepository(db),
     statements: createStatementsRepository(db),
     installmentPlans: createInstallmentPlansRepository(db),
-    refunds: createRefundsRepository(db)
+    refunds: createRefundsRepository(db),
+    goals: createGoalsRepository(db)
   };
 }
 

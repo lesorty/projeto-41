@@ -43,7 +43,12 @@ const SELECT_COLUMNS = `
   e.updated_at AS updatedAt,
   t.id AS transferId,
   t.purpose AS transferPurpose,
-  CASE WHEN t.from_entry_id = e.id THEN t.to_entry_id ELSE t.from_entry_id END AS counterpartEntryId
+  CASE WHEN t.from_entry_id = e.id THEN t.to_entry_id ELSE t.from_entry_id END AS counterpartEntryId,
+  -- A caixinha do movimento sai de dois caminhos: a conta da contraparte numa
+  -- transferencia de caixinha (modo conta) ou a alocacao (modo marcacao).
+  COALESCE(gt.id, ga_goal.id) AS goalId,
+  COALESCE(gt.name, ga_goal.name) AS goalName,
+  COALESCE(gt.color, ga_goal.color) AS goalColor
 `;
 
 const FROM_JOINS = `
@@ -53,6 +58,12 @@ const FROM_JOINS = `
   LEFT JOIN categories c ON c.id = e.category_id
   LEFT JOIN places pl ON pl.id = e.place_id
   LEFT JOIN transfers t ON t.from_entry_id = e.id OR t.to_entry_id = e.id
+  LEFT JOIN entries ce
+    ON t.purpose IN ('goal_deposit','goal_withdrawal')
+   AND ce.id = CASE WHEN t.from_entry_id = e.id THEN t.to_entry_id ELSE t.from_entry_id END
+  LEFT JOIN goals gt ON gt.mode = 'account' AND gt.account_id IN (e.account_id, ce.account_id)
+  LEFT JOIN goal_allocations ga ON ga.entry_id = e.id
+  LEFT JOIN goals ga_goal ON ga_goal.id = ga.goal_id
 `;
 
 type EntryRow = Omit<
@@ -105,6 +116,15 @@ function buildWhere(filter: Partial<EntryFilter>) {
   if (filter.installmentPlanId) {
     clauses.push("e.installment_plan_id = @installmentPlanId");
     params.installmentPlanId = filter.installmentPlanId;
+  }
+  if (filter.goalId) {
+    // Os dois modos: conta da caixinha, ou alocacao apontando para ela.
+    clauses.push(
+      `(e.account_id IN (SELECT account_id FROM goals WHERE id = @goalId AND account_id IS NOT NULL)
+        OR EXISTS (SELECT 1 FROM goal_allocations ga2
+                   WHERE ga2.entry_id = e.id AND ga2.goal_id = @goalId))`
+    );
+    params.goalId = filter.goalId;
   }
   if (filter.categoryId && filter.categoryId.length > 0) {
     // Lista de ids vem validada como inteiros pelo contrato, entao interpolar

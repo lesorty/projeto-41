@@ -1,14 +1,25 @@
 import cron from "node-cron";
 import type { AppDatabase } from "@projeto41/db";
+import type { CdiService } from "../cdi/cdi-service.js";
 import type { createPriceService } from "../prices/price-service.js";
 import { createDailySnapshot } from "../services/portfolio-service.js";
 
 export function startScheduler(
   db: AppDatabase,
   priceService: ReturnType<typeof createPriceService>,
-  timezone = "America/Fortaleza"
+  timezone = "America/Fortaleza",
+  cdiService?: CdiService
 ) {
   const tasks = [
+    // Tres vezes por dia util cobre a publicacao D+1 do BCB e fica muito abaixo
+    // do teto de 4 requisicoes por hora. Fim de semana nao tem o que publicar.
+    ...(cdiService
+      ? [
+          cron.schedule("20 9,13,19 * * 1-5", () => void cdiService.refresh(), {
+            timezone
+          })
+        ]
+      : []),
     cron.schedule("*/15 * * * *", () => void priceService.runCrypto(), {
       timezone
     }),
