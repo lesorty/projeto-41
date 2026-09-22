@@ -3357,3 +3357,17 @@ main {
 .fin-effect p + p {
   margin-top: 3px;
 }
+
+/* --- Fase 4: patrimônio unificado ---------------------------------------- */
+
+/* Aviso de contagem dupla: alerta, não erro fatal, e some sozinho quando a
+   condição deixa de valer. */
+.fin-alert {
+  border-color: var(--warning-soft);
+  background: var(--warning-soft);
+}
+
+.fin-limit-empty,
+.fin-alert .fin-list li {
+  border-color: var(--border);
+}

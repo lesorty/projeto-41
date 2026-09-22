@@ -20,10 +20,18 @@ import {
   Tag
 } from "../components/ui.js";
 import { api } from "../lib/api.js";
-import { currency as fmtCurrency, currencyRaw, decimal, longDate, money, percent } from "../lib/format.js";
+import { currency as fmtCurrency, currencyRaw, decimal, fx, longDate, money, percent } from "../lib/format.js";
 import { portfolioIconUrl } from "../lib/icons.js";
 import { useToast } from "../lib/toast.js";
 import type { Asset, CryptoSearchResult, OperationRecord } from "@projeto41/contracts";
+import { AccountSelect } from "../components/finance/AccountSelect.js";
+
+/** A rota devolve o estado do vínculo junto da operação (fase 4). */
+type OperationRow = OperationRecord & {
+  accountName?: string | null;
+  transferId?: number | null;
+  transferStatus?: string | null;
+};
 
 type SortKey = "asset" | "quantity" | "averagePrice" | "price" | "marketValueBrl" | "totalReturn";
 
@@ -49,15 +57,15 @@ export function PortfolioPage({
   const isCrypto = portfolio === "crypto";
   const code = isCrypto ? "USD" : "BRL";
 
-  const [operations, setOperations] = useState<OperationRecord[]>([]);
+  const [operations, setOperations] = useState<OperationRow[]>([]);
   const [drawer, setDrawer] = useState(false);
-  const [editing, setEditing] = useState<OperationRecord | null>(null);
+  const [editing, setEditing] = useState<OperationRow | null>(null);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "marketValueBrl", dir: -1 });
   const importInput = useRef<HTMLInputElement>(null);
 
   const load = useCallback(
-    () => api<OperationRecord[]>(`/operations?portfolio=${portfolio}`).then(setOperations),
+    () => api<OperationRow[]>(`/operations?portfolio=${portfolio}`).then(setOperations),
     [portfolio]
   );
   useEffect(() => void load(), [load]);
@@ -85,7 +93,7 @@ export function PortfolioPage({
     );
   }
 
-  async function removeOperation(operation: OperationRecord) {
+  async function removeOperation(operation: OperationRow) {
     const ok = await confirm({
       title: "Excluir operação",
       message: `Remover ${operation.type === "buy" ? "compra" : "venda"} de ${operation.asset}? As posições serão recalculadas.`,
@@ -93,7 +101,23 @@ export function PortfolioPage({
       confirmLabel: "Excluir"
     });
     if (!ok) return;
-    await api(`/operations/${operation.id}`, { method: "DELETE" });
+    try {
+      await api(`/operations/${operation.id}`, { method: "DELETE" });
+    } catch (error) {
+      // 409: existe lançamento conciliado no caminho. Em vez de um beco sem
+      // saída, oferecemos o desvínculo, que é a operação que destrava.
+      const message = error instanceof Error ? error.message : "Falha ao excluir";
+      toast.notify(message, "error");
+      const unlink = await confirm({
+        title: "Desvincular e excluir",
+        message: `${message} Remover o movimento de caixa e excluir a operação?`,
+        confirmLabel: "Desvincular e excluir",
+        tone: "danger"
+      });
+      if (!unlink) return;
+      await api(`/operations/${operation.id}/link`, { method: "DELETE" });
+      await api(`/operations/${operation.id}`, { method: "DELETE" });
+    }
     await Promise.all([load(), onChanged()]);
     toast.notify("Operação excluída");
   }
@@ -265,6 +289,7 @@ export function PortfolioPage({
                 <th>Ativo</th>
                 <th className="right">Quantidade</th>
                 <th className="right">Valor</th>
+                <th>Caixa</th>
                 <th className="right">Ações</th>
               </tr>
             </thead>
@@ -283,6 +308,15 @@ export function PortfolioPage({
                   </td>
                   <td className="right num">{decimal(operation.quantity, 8)}</td>
                   <td className="right num">{fmtCurrency(operation.total, operation.currency)}</td>
+                  <td>
+                    {/* A diferença entre operação antiga e nova fica na cara:
+                        nada foi vinculado automaticamente. */}
+                    {operation.transferId ? (
+                      <Tag tone="positive">{operation.accountName ?? "Vinculada"}</Tag>
+                    ) : (
+                      <Tag tone="muted">Sem caixa</Tag>
+                    )}
+                  </td>
                   <td className="right">
                     <div className="row-actions">
                       <IconButton
@@ -327,7 +361,7 @@ function OperationDrawer({
   onSaved
 }: {
   portfolio: "crypto" | "b3";
-  initial: OperationRecord | null;
+  initial: OperationRow | null;
   usdBrl: number;
   onClose: () => void;
   onSaved: () => void;
@@ -362,6 +396,8 @@ function OperationDrawer({
   );
   const solved = recent[2] as TradeField;
   const [saving, setSaving] = useState(false);
+  const [accountId, setAccountId] = useState<number | null>(initial?.accountId ?? null);
+  const [defaultLoaded, setDefaultLoaded] = useState(false);
 
   function editField(field: TradeField, raw: string) {
     const next = { ...fields, [field]: raw };
@@ -384,6 +420,16 @@ function OperationDrawer({
     }));
     setEntryCurrency(next);
   }
+
+  useEffect(() => {
+    if (initial || defaultLoaded) return;
+    void api<{ defaultAccountId: number | null }>("/investments/cash-settings")
+      .then((settings) => {
+        setAccountId((current) => current ?? settings.defaultAccountId);
+        setDefaultLoaded(true);
+      })
+      .catch(() => setDefaultLoaded(true));
+  }, [initial, defaultLoaded]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -421,6 +467,7 @@ function OperationDrawer({
         quantity,
         total,
         currency: storedCode,
+        accountId,
         notes: initial?.notes ?? "",
         ...(isCrypto && slug ? { slug, name: assetName } : {})
       };
@@ -443,6 +490,22 @@ function OperationDrawer({
   const netTotal = feeOn && type === "sell" ? round(grossTotal * (1 - BINANCE_FEE)) : grossTotal;
   const feeQty = grossQty - netQty;
   const feeTotal = grossTotal - netTotal;
+
+  /**
+   * O que vai efetivamente sair (ou entrar) na conta, em BRL. Mostrar isso
+   * antes de salvar evita o usuário descobrir a conversão depois, no extrato.
+   */
+  const movementLabel = (() => {
+    const totalInStored =
+      isCrypto && entryCurrency === "BRL" && usdBrl > 0 ? netTotal / usdBrl : netTotal;
+    if (storedCode === "USD") {
+      if (!(usdBrl > 0)) return "Sem cotação do dólar: a operação será recusada.";
+      return `US$ ${decimal(totalInStored, 2)} · USDBRL ${fx(usdBrl)} · ${money(
+        totalInStored * usdBrl
+      )}`;
+    }
+    return money(totalInStored);
+  })();
 
   return (
     <Drawer
@@ -506,6 +569,24 @@ function OperationDrawer({
             />
           )}
         </Field>
+        {/* O campo fica junto do valor, não escondido num avançado (D03): a
+            conta é uma escolha do momento da operação. */}
+        <Field
+          label={type === "buy" ? "Debitar de" : "Creditar em"}
+          hint={
+            accountId == null
+              ? "A operação será registrada sem movimentar o caixa."
+              : movementLabel
+          }
+        >
+          <AccountSelect
+            value={accountId}
+            onChange={setAccountId}
+            allowNone
+            exclude={["credit_card", "investment"]}
+          />
+        </Field>
+
         <Field label="Data">
           <DateField value={date} onChange={setDate} />
         </Field>

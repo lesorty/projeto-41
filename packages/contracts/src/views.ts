@@ -66,7 +66,10 @@ export type Dashboard = {
   /** So as classes do livro, ja liquidas da divida de cartao. */
   bankOnlyBrl: number;
   investmentsBrl: number;
+  /** Total devido do cartao; e ele que entra no patrimonio (6.1). */
   liabilitiesBrl: number;
+  /** So a fatura corrente do cartao: o outro numero de 6.1. */
+  creditCardCurrentBrl: number;
   /** So o modulo de investimentos, sem a reserva: base dos pesos da carteira. */
   investableBrl: number;
   cashControlStartedOn: string | null;

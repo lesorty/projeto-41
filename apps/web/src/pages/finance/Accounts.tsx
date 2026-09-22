@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AccountKind, AccountRecord, BalancesResult, PersonRecord } from "@projeto41/contracts";
 import { ColorDot, ColorPicker } from "../../components/ColorPicker.js";
 import { DateField } from "../../components/datepicker.js";
+import { InvestmentCashPanel } from "../../components/finance/InvestmentCashPanel.js";
 import { Drawer, useConfirm } from "../../components/dialog.js";
 import {
   AnimatedNumber,
@@ -188,6 +189,8 @@ export function AccountsPage() {
           </div>
         </Panel>
       ))}
+
+      <InvestmentCashPanel accounts={balances?.accounts ?? []} />
 
       {editing && (
         <AccountDrawer

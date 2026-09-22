@@ -34,7 +34,10 @@ export type NetWorth = {
   classes: Record<string, number>;
   investmentsBrl: number;
   bankBrl: number;
+  /** Total devido do cartao, positivo. E ele que entra no patrimonio. */
   liabilitiesBrl: number;
+  /** So a fatura corrente, positivo: o outro numero de 6.1. */
+  creditCardCurrentBrl: number;
   totalBrl: number;
   bankOnlyBrl: number;
   /** Só o módulo de investimentos, líquido da reserva: base dos pesos da carteira. */
@@ -93,6 +96,7 @@ export function buildNetWorth(db: AppDatabase, now = new Date()): NetWorth {
     0
   );
   const liabilitiesBrl = Math.abs(classes["ledger:credit_card"] ?? 0);
+  const creditCardCurrentBrl = fromCents(debt.currentStatementCents);
   const totalBrl = Object.values(classes).reduce((sum, value) => sum + value, 0);
 
   // R-07: posições manuais de caixa/reserva convivendo com contas do livro
@@ -112,6 +116,7 @@ export function buildNetWorth(db: AppDatabase, now = new Date()): NetWorth {
     investmentsBrl,
     bankBrl,
     liabilitiesBrl,
+    creditCardCurrentBrl,
     totalBrl,
     bankOnlyBrl,
     investableBrl: investmentsBrl - (classes.reserve ?? 0),

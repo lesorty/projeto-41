@@ -6,6 +6,7 @@ import {
   Cell,
   Pie,
   PieChart,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -33,12 +34,15 @@ export function AreaTrend({
   data,
   dataKey = "totalBrl",
   height = 300,
-  tone = "accent"
+  tone = "accent",
+  marker
 }: {
   data: { date?: string; year?: number; [key: string]: unknown }[];
   dataKey?: string;
   height?: number | string;
   tone?: "accent" | "positive";
+  /** Degrau no eixo X, como o dia em que o controle de caixa começou (D14). */
+  marker?: { date: string; label: string };
 }) {
   const { colors } = useTheme();
   const gradientId = useId().replace(/:/g, "");
@@ -89,6 +93,16 @@ export function AreaTrend({
           tickLine={false}
         />
         <Tooltip content={<TrendTooltip />} />
+        {marker && (
+          // Marca uma mudança de significado da série, não um valor: por isso
+          // linha tracejada e nos tokens do tema, sem cor literal.
+          <ReferenceLine
+            x={marker.date}
+            stroke={colors.axis}
+            strokeDasharray="4 4"
+            label={{ value: marker.label, position: "insideTopLeft", fill: colors.axis, fontSize: 11 }}
+          />
+        )}
         <Area
           type="monotone"
           dataKey={dataKey}

@@ -16,6 +16,7 @@ import {
   Gauge,
   Landmark,
   ReceiptText,
+  Scale,
   RefreshCw,
   ShieldCheck,
   Tags,
@@ -37,6 +38,7 @@ import { AccountsPage } from "../pages/finance/Accounts.js";
 import { CategoriesPage } from "../pages/finance/Categories.js";
 import { FinanceDashboardPage } from "../pages/finance/FinanceDashboard.js";
 import { InvoicePage } from "../pages/finance/Invoice.js";
+import { NetWorthPage } from "../pages/finance/NetWorth.js";
 import { ReportsPage } from "../pages/finance/Reports.js";
 import {
   ExpensesPage,
@@ -66,6 +68,7 @@ type Page =
   | "finance"
   | "reports"
   | "invoice"
+  | "networth"
   | "transactions"
   | "expenses"
   | "income"
@@ -97,7 +100,8 @@ const nav: { group: string; items: NavItem[] }[] = [
       { id: "accounts", label: "Contas", icon: Landmark },
       { id: "invoice", label: "Fatura", icon: CreditCard },
       { id: "categories", label: "Categorias", icon: Tags },
-      { id: "reports", label: "Relatórios", icon: ChartPie }
+      { id: "reports", label: "Relatórios", icon: ChartPie },
+      { id: "networth", label: "Patrimônio", icon: Scale }
     ]
   },
   {
@@ -362,10 +366,18 @@ export function App() {
             {page === "contributions" && <ContributionsPage />}
             {page === "planning" && <PlanningPage />}
             {page === "allocation" && dashboard && <AllocationPage dashboard={dashboard} />}
-            {page === "history" && <HistoryPage history={dashboard?.history ?? []} />}
+            {page === "history" && (
+              <HistoryPage
+                history={dashboard?.history ?? []}
+                cashControlStartedOn={dashboard?.cashControlStartedOn ?? null}
+              />
+            )}
             {page === "finance" && <FinanceDashboardPage onOpenReports={() => setPage("reports")} />}
             {page === "reports" && <ReportsPage />}
             {page === "invoice" && <InvoicePage />}
+            {page === "networth" && (
+              <NetWorthPage dashboard={dashboard} onChanged={loadDashboard} />
+            )}
             {page === "transactions" && <TransactionsPage />}
             {page === "expenses" && <ExpensesPage />}
             {page === "income" && <IncomePage />}

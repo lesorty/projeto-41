@@ -92,6 +92,7 @@ export function buildDashboard(db: AppDatabase, now = new Date()) {
     bankOnlyBrl: netWorth.bankOnlyBrl,
     investmentsBrl: netWorth.investmentsBrl,
     liabilitiesBrl: netWorth.liabilitiesBrl,
+    creditCardCurrentBrl: netWorth.creditCardCurrentBrl,
     investableBrl: netWorth.investableBrl,
     cashControlStartedOn: netWorth.cashControlStartedOn,
     doubleCounting: netWorth.doubleCounting,

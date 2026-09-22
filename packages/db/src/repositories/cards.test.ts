@@ -356,3 +356,21 @@ describe("antecipacao de parcelas", () => {
     expect(ledger.entries.get(last.id)?.statementMonth).toBe("2026-08");
   });
 });
+
+describe("uma unica definicao de fatura atual", () => {
+  it("balances e cards concordam, usando o ciclo do cartao e nao o mes-calendario", () => {
+    // Compra em 05/09 cai na fatura de setembro (fecha 20/09); em 25/09 cai na
+    // de outubro. Em 22/09, a fatura ABERTA é a de outubro.
+    cardExpense("2026-09-05", 10000);
+    cardExpense("2026-09-25", 30000);
+    const asOf = "2026-09-22";
+
+    const fromCards = ledger.cards.summary(card, asOf);
+    const fromBalances = ledger.balances.forAccount(card, { asOf });
+
+    expect(fromCards.currentStatementMonth).toBe("2026-10");
+    expect(fromCards.currentStatementCents).toBe(30000);
+    expect(fromBalances?.currentStatementCents).toBe(fromCards.currentStatementCents);
+    expect(fromBalances?.totalDueCents).toBe(fromCards.totalOwedCents);
+  });
+});

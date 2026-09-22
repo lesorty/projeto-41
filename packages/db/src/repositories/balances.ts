@@ -1,5 +1,5 @@
 import type { AccountKind, AccountRecord, BalancesResult } from "@projeto41/contracts";
-import { endOfMonth, monthOf } from "@projeto41/finance";
+import { endOfMonth, monthOf, statementMonthFor } from "@projeto41/finance";
 import { fromBit, today, type Db } from "./shared.js";
 
 /**
@@ -65,7 +65,8 @@ const BALANCE_SQL = `
                       THEN e.amount_cents END), 0) AS pendingCents,
     COALESCE(SUM(e.amount_cents), 0) AS allCents,
     COALESCE(SUM(CASE WHEN e.statement_month = @statementMonth
-                      THEN e.amount_cents END), 0) AS statementCents
+                      THEN e.amount_cents END), 0) AS statementCents,
+    a.id AS accountId
   FROM accounts a
   LEFT JOIN people p ON p.id = a.person_id
   LEFT JOIN entries e ON e.account_id = a.id
@@ -83,7 +84,7 @@ export type BalanceOptions = {
   includeArchived?: boolean;
 };
 
-function mapAccount(row: AccountBalanceRow): AccountRecord {
+function mapAccount(row: AccountBalanceRow, currentStatementCents?: number): AccountRecord {
   const isCard = row.kind === "credit_card";
   const currentBalanceCents = row.openingBalanceCents + row.clearedCents;
   const projectedBalanceCents = currentBalanceCents + row.pendingCents;
@@ -114,7 +115,7 @@ function mapAccount(row: AccountBalanceRow): AccountRecord {
     // Saldo devedor e positivo para leitura humana: os lancamentos do cartao
     // sao negativos, entao invertemos o sinal ao reportar.
     account.totalDueCents = -(row.openingBalanceCents + row.allCents);
-    account.currentStatementCents = -row.statementCents;
+    account.currentStatementCents = -(currentStatementCents ?? row.statementCents);
     account.availableLimitCents =
       row.creditLimitCents == null ? null : row.creditLimitCents - account.totalDueCents;
   }
@@ -131,7 +132,22 @@ export function createBalancesRepository(db: Db) {
       const rows = db
         .prepare(BALANCE_SQL)
         .all({ asOf, until, statementMonth }) as AccountBalanceRow[];
-      const mapped = rows.map(mapAccount);
+
+      // A fatura "atual" de um cartao e a do ciclo DELE, nunca o mes-calendario:
+      // e a mesma definicao de `cards.summary`, e existir duas seria o comeco de
+      // dois numeros diferentes na tela para a mesma coisa.
+      const cardStatement = db.prepare(
+        `SELECT COALESCE(SUM(amount_cents), 0) AS total FROM entries
+         WHERE account_id = ? AND statement_month = ?`
+      );
+      const mapped = rows.map((row) => {
+        if (row.kind !== "credit_card" || row.closingDay == null || row.dueDay == null) {
+          return mapAccount(row);
+        }
+        const month = statementMonthFor(asOf, row.closingDay, row.dueDay);
+        const total = (cardStatement.get(row.id, month) as { total: number }).total;
+        return mapAccount(row, total);
+      });
       return options.includeArchived ? mapped : mapped.filter((account) => !account.archived);
     },
 
