@@ -237,6 +237,8 @@ describe("exportacao", () => {
     await post("/api/ledger/entries", baseExpense());
     const payload = await app.inject("/api/export").then((r) => r.json());
     expect(payload.ledger.entries).toHaveLength(1);
-    expect(payload.ledger.accounts).toHaveLength(2);
+    expect(
+      payload.ledger.accounts.filter((a: { kind: string }) => a.kind !== "investment")
+    ).toHaveLength(2);
   });
 });

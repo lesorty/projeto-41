@@ -39,6 +39,16 @@ export type Snapshot = {
   date: string;
   totalBrl: number;
   payload: Record<string, number>;
+  classes: Record<string, number>;
+  /** 1 = antes do controle de caixa; 2 = com caixa somado (fase 4). */
+  payloadVersion: 1 | 2;
+  totals: { investments: number; bank: number; liabilities: number } | null;
+};
+
+export type DoubleCounting = {
+  active: boolean;
+  manualPositions: { id: number; name: string; category: string; currentValue: number }[];
+  ledgerBalanceBrl: number;
 };
 
 export type Dashboard = {
@@ -47,11 +57,21 @@ export type Dashboard = {
   usdBrl: number;
   categories: Record<string, number>;
   annualContributions: number;
-  annualReturn: number;
+  /** `null` quando a base do ano e anterior ao controle de caixa (fase 4). */
+  annualReturn: number | null;
   history: Snapshot[];
   prices: Price[];
   portfolios: { crypto: Asset[]; b3: Asset[] };
   reserveBrl: number;
+  /** So as classes do livro, ja liquidas da divida de cartao. */
+  bankOnlyBrl: number;
+  investmentsBrl: number;
+  liabilitiesBrl: number;
+  /** So o modulo de investimentos, sem a reserva: base dos pesos da carteira. */
+  investableBrl: number;
+  cashControlStartedOn: string | null;
+  doubleCounting: DoubleCounting;
+  payloadVersion: number;
   updatedAt: string;
 };
 

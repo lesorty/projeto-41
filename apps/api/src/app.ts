@@ -9,6 +9,7 @@ import type { AttachmentService } from "./attachments/attachment-service.js";
 import {
   registerAttachmentsRoutes,
   registerCardsRoutes,
+  registerInvestmentCashRoutes,
   registerIconsRoutes,
   registerImportExportRoutes,
   registerLedgerReportsRoutes,
@@ -86,6 +87,7 @@ export function buildApp({
   registerLedgerRoutes(app, deps);
   registerLedgerReportsRoutes(app, deps);
   registerCardsRoutes(app, deps);
+  registerInvestmentCashRoutes(app, deps);
   registerAttachmentsRoutes(app, deps);
   registerImportExportRoutes(app, deps);
 

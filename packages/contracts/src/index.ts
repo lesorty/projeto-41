@@ -13,7 +13,9 @@ export const operationSchema = z.object({
   quantity: z.number().positive(),
   total: z.number().nonnegative(),
   currency: currencySchema,
-  notes: z.string().trim().optional()
+  notes: z.string().trim().optional(),
+  /** Conta do livro que paga a compra ou recebe a venda (fase 4). */
+  accountId: z.number().int().positive().nullable().optional()
 });
 
 export const manualPositionSchema = z.object({

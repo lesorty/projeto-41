@@ -1,15 +1,10 @@
-import Database from "better-sqlite3";
 import { beforeEach, describe, expect, it } from "vitest";
-import { migrations } from "../migrations/index.js";
-import { runMigrations } from "../migrations/runner.js";
-import { createLedgerRepositories, type LedgerRepositories } from "./index.js";
+import { createDatabase } from "../index.js";
+import type { LedgerRepositories } from "./index.js";
 import { today } from "./shared.js";
 
 function setup() {
-  const db = new Database(":memory:");
-  db.pragma("foreign_keys = ON");
-  runMigrations(db, migrations);
-  return createLedgerRepositories(db);
+  return createDatabase(":memory:").ledger;
 }
 
 const YESTERDAY = "2020-01-01";

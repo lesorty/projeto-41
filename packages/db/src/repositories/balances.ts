@@ -141,6 +141,39 @@ export function createBalancesRepository(db: Db) {
         .find((account) => account.id === accountId),
 
     /**
+     * Saldo consolidado agrupado por `accounts.kind`, em centavos.
+     *
+     * Respeita 6.1 ao pe da letra: so `cleared`/`reconciled`, so `date <= hoje`,
+     * so contas com `include_in_net_worth = 1`, e tudo derivado por SUM. E a
+     * entrada do servico de patrimonio da fase 4.
+     */
+    byKind: (options: BalanceOptions = {}): Record<string, number> => {
+      const accounts = repository
+        .all({ ...options, includeArchived: false })
+        .filter((account) => account.includeInNetWorth);
+      const totals: Record<string, number> = {};
+      for (const account of accounts) {
+        totals[account.kind] = (totals[account.kind] ?? 0) + account.currentBalanceCents;
+      }
+      return totals;
+    },
+
+    /** Os dois numeros de 6.1, em centavos e **positivos**. Quem inverte o sinal
+     * e o servico de patrimonio. */
+    creditCardDebt: (options: BalanceOptions = {}) => {
+      const cards = repository
+        .all({ ...options, includeArchived: false })
+        .filter((account) => account.kind === "credit_card");
+      return {
+        currentStatementCents: cards.reduce(
+          (total, card) => total + (card.currentStatementCents ?? 0),
+          0
+        ),
+        totalOwedCents: cards.reduce((total, card) => total + (card.totalDueCents ?? 0), 0)
+      };
+    },
+
+    /**
      * Consolidado: soma das contas marcadas para patrimonio, **excluindo**
      * cartao. Cartao nao e saldo, e divida, e entra no relatorio proprio.
      */

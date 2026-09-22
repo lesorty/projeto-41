@@ -16,6 +16,9 @@ const aliasToCategory: Record<string, string> = {
 };
 
 function actualValue(category: string, dashboard: Dashboard) {
+  // As classes do livro (prefixo `ledger:`) medem caixa, não carteira: elas
+  // nunca entram nos pesos da alocação.
+  if (category.startsWith("ledger:")) return 0;
   if (category === "bitcoin") {
     return dashboard.portfolios.crypto.find((asset) => asset.asset === "BTC")?.marketValueBrl ?? 0;
   }
@@ -35,7 +38,10 @@ export function AllocationPage({ dashboard }: { dashboard: Dashboard }) {
   const load = useCallback(() => api<AllocationTarget[]>("/allocation").then(setTargets), []);
   useEffect(() => void load(), [load]);
 
-  const investable = dashboard.totalBrl - dashboard.reserveBrl;
+  // `investableBrl` mede só o módulo de investimentos, líquido da reserva. Usar
+  // `totalBrl` aqui passaria a incluir conta corrente nos pesos da carteira e
+  // distorceria todas as metas.
+  const investable = dashboard.investableBrl;
 
   // Ordenado pelo valor atual (estável durante o arraste do slider).
   const rows = useMemo(

@@ -107,12 +107,30 @@ export function DashboardPage({ data }: { data: Dashboard }) {
           </div>
         </Card>
         <div className="kpi-stack stagger">
+          {/* Sem base comparável, mostrar "—" é mais honesto do que um
+              percentual que mistura patrimônio com e sem caixa. */}
           <Kpi
-            icon={data.annualReturn >= 0 ? ArrowUpRight : ArrowDownRight}
+            icon={(data.annualReturn ?? 0) >= 0 ? ArrowUpRight : ArrowDownRight}
             label="Rentabilidade no ano"
-            value={<AnimatedNumber value={data.annualReturn} format={percent} />}
-            tone={data.annualReturn >= 0 ? "positive" : "negative"}
-            detail="descontando aportes"
+            value={
+              data.annualReturn == null ? (
+                "—"
+              ) : (
+                <AnimatedNumber value={data.annualReturn} format={percent} />
+              )
+            }
+            tone={
+              data.annualReturn == null
+                ? ""
+                : data.annualReturn >= 0
+                  ? "positive"
+                  : "negative"
+            }
+            detail={
+              data.annualReturn == null
+                ? "sem base comparável antes do controle de caixa"
+                : "descontando aportes"
+            }
           />
           <Kpi
             icon={CircleDollarSign}

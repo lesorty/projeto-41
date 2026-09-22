@@ -1,6 +1,14 @@
 import { contributionSchema, operationSchema } from "@projeto41/contracts";
 import { z } from "zod";
 import { buildPortfolios } from "../services/portfolio-service.js";
+import {
+  clearOperations,
+  listOperationsWithLinks,
+  registerOperation,
+  removeOperation,
+  unlinkOperation,
+  updateOperation
+} from "../services/investment-cash-service.js";
 import type { RoutePlugin } from "./index.js";
 
 const cryptoAssetSchema = z.object({
@@ -19,9 +27,10 @@ export const registerOperationsRoutes: RoutePlugin = (app, { db, priceService })
     db.cryptoAssets.upsert({ symbol: operation.asset, slug, name: name || operation.asset });
   }
 
+  /** Devolve o estado do vinculo junto: a interface nao precisa adivinhar. */
   app.get("/api/operations", async (request) => {
     const query = z.object({ portfolio: z.enum(["crypto", "b3"]).optional() }).parse(request.query);
-    return db.operations.list(query.portfolio);
+    return listOperationsWithLinks(db, query.portfolio);
   });
 
   app.get("/api/crypto/search", async (request) => {
@@ -39,33 +48,73 @@ export const registerOperationsRoutes: RoutePlugin = (app, { db, priceService })
   app.post("/api/operations", async (request, reply) => {
     const operation = operationSchema.parse(request.body);
     rememberCryptoAsset(operation, request.body);
-    const id = db.operations.create(operation);
+    const { id } = registerOperation(db, operation);
     if (operation.portfolio === "crypto" && priceService.ensureCryptoPrice) {
       await priceService.ensureCryptoPrice(operation.asset);
     }
-    return reply.status(201).send({ id, portfolios: buildPortfolios(db) });
+    // Mutacao devolve o agregado recalculado; com o debito automatico, o saldo
+    // da conta muda junto, entao `balances` vai junto de `portfolios`.
+    return reply
+      .status(201)
+      .send({ id, portfolios: buildPortfolios(db), balances: db.ledger.balances.consolidated() });
   });
 
   app.put("/api/operations/:id", async (request) => {
     const { id } = z.object({ id: z.coerce.number().int().positive() }).parse(request.params);
     const operation = operationSchema.parse(request.body);
     rememberCryptoAsset(operation, request.body);
-    db.operations.update(id, operation);
-    return { ok: true, portfolios: buildPortfolios(db) };
+    updateOperation(db, id, operation);
+    return {
+      ok: true,
+      portfolios: buildPortfolios(db),
+      balances: db.ledger.balances.consolidated()
+    };
+  });
+
+  app.post("/api/operations/:id/link", async (request) => {
+    const { id } = z.object({ id: z.coerce.number().int().positive() }).parse(request.params);
+    const { accountId } = z.object({ accountId: z.number().int().positive() }).parse(request.body);
+    const operation = db.operations.list().find((item) => item.id === id);
+    if (!operation) throw Object.assign(new Error("Operacao nao encontrada"), { statusCode: 404 });
+    updateOperation(db, id, { ...operation, accountId });
+    return {
+      ok: true,
+      portfolios: buildPortfolios(db),
+      balances: db.ledger.balances.consolidated()
+    };
+  });
+
+  app.delete("/api/operations/:id/link", async (request) => {
+    const { id } = z.object({ id: z.coerce.number().int().positive() }).parse(request.params);
+    unlinkOperation(db, id);
+    return {
+      ok: true,
+      portfolios: buildPortfolios(db),
+      balances: db.ledger.balances.consolidated()
+    };
   });
 
   app.delete("/api/operations/:id", async (request) => {
     const { id } = z.object({ id: z.coerce.number().int().positive() }).parse(request.params);
-    db.operations.remove(id);
-    return { ok: true, portfolios: buildPortfolios(db) };
+    removeOperation(db, id);
+    return {
+      ok: true,
+      portfolios: buildPortfolios(db),
+      balances: db.ledger.balances.consolidated()
+    };
   });
 
   app.delete("/api/operations", async (request) => {
     const { portfolio } = z
       .object({ portfolio: z.enum(["crypto", "b3"]).optional() })
       .parse(request.query);
-    const removed = db.operations.clear(portfolio);
-    return { ok: true, removed, portfolios: buildPortfolios(db) };
+    const removed = clearOperations(db, portfolio);
+    return {
+      ok: true,
+      removed,
+      portfolios: buildPortfolios(db),
+      balances: db.ledger.balances.consolidated()
+    };
   });
 
   app.get("/api/dividends", async () => db.dividends.list());

@@ -114,6 +114,13 @@ export const monthShort = [
 ];
 
 export const categoryLabels: Record<string, string> = {
+  // Classes do livro-caixa (fase 4). O prefixo `ledger:` evita colisão com as
+  // chaves do dashboard e com os apelidos das metas de alocação.
+  "ledger:bank": "Contas bancárias",
+  "ledger:cash": "Dinheiro vivo",
+  "ledger:voucher": "Vale-refeição",
+  "ledger:goals": "Caixinhas",
+  "ledger:credit_card": "Cartão (dívida)",
   crypto: "Cripto",
   b3: "Bolsa B3",
   dollar: "Dólar",

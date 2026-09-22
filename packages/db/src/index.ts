@@ -3,10 +3,42 @@ import { migrations, runMigrations } from "./migrations/index.js";
 import { createLedgerRepositories } from "./repositories/index.js";
 import type { Contribution, ManualPosition, Operation } from "@projeto41/contracts";
 
+/**
+ * Payload do snapshot, versionado (R-03).
+ *
+ * - **v1 (legado):** objeto plano de numeros, sem nenhuma chave de metadado.
+ * - **v2 (fase 4):** `{ version, classes, totals }`.
+ *
+ * A deteccao e pela **presenca da chave `version`**, nunca por heuristica sobre
+ * os nomes das outras chaves. Nenhuma linha v1 e reescrita: o passado nao tinha
+ * caixa e continuara nao tendo.
+ */
+export type SnapshotPayloadV2 = {
+  version: 2;
+  classes: Record<string, number>;
+  totals: { investments: number; bank: number; liabilities: number };
+};
+
+export type SnapshotRecord = {
+  date: string;
+  totalBrl: number;
+  payloadVersion: 1 | 2;
+  classes: Record<string, number>;
+  totals: SnapshotPayloadV2["totals"] | null;
+  priceTimes: Record<string, string>;
+  /** Mantido para os consumidores antigos, que leem `payload` como as classes. */
+  payload: Record<string, number>;
+};
+
 type SnapshotInput = {
   date: string;
   totalBrl: number;
-  payload: Record<string, number>;
+  /**
+   * v2 para o que o app grava hoje; o objeto plano continua aceito porque o
+   * importador da planilha e os dados de demonstracao gravam patrimonio de
+   * antes do controle de caixa, que e v1 por natureza.
+   */
+  payload: SnapshotPayloadV2 | Record<string, number>;
   priceTimes?: Record<string, string>;
 };
 
@@ -53,7 +85,8 @@ export function createDatabase(path: string) {
       list: (portfolio?: string) =>
         raw
           .prepare(
-            `SELECT id, portfolio, type, asset, date, quantity, total, currency, notes
+            `SELECT id, portfolio, type, asset, date, quantity, total, currency, notes,
+                    account_id AS accountId
              FROM operations
              ${portfolio ? "WHERE portfolio = ?" : ""}
              ORDER BY date DESC, id DESC`
@@ -63,20 +96,22 @@ export function createDatabase(path: string) {
         const result = raw
           .prepare(
             `INSERT INTO operations
-             (portfolio, type, asset, date, quantity, total, currency, notes)
-             VALUES (@portfolio, @type, @asset, @date, @quantity, @total, @currency, @notes)`
+             (portfolio, type, asset, date, quantity, total, currency, notes, account_id)
+             VALUES (@portfolio, @type, @asset, @date, @quantity, @total, @currency, @notes,
+                     @accountId)`
           )
-          .run({ notes: null, ...operation });
+          .run({ notes: null, accountId: null, ...operation });
         return Number(result.lastInsertRowid);
       },
       update: (id: number, operation: Operation) =>
         raw
           .prepare(
             `UPDATE operations SET portfolio=@portfolio, type=@type, asset=@asset,
-             date=@date, quantity=@quantity, total=@total, currency=@currency, notes=@notes
+             date=@date, quantity=@quantity, total=@total, currency=@currency, notes=@notes,
+             account_id=@accountId
              WHERE id=@id`
           )
-          .run({ notes: null, ...operation, id }).changes,
+          .run({ notes: null, accountId: null, ...operation, id }).changes,
       remove: (id: number) => raw.prepare("DELETE FROM operations WHERE id = ?").run(id).changes,
       clear: (portfolio?: string) =>
         raw
@@ -261,11 +296,22 @@ export function createDatabase(path: string) {
             payload: string;
             priceTimes: string;
           }[]
-        ).map((row) => ({
-          ...row,
-          payload: JSON.parse(row.payload),
-          priceTimes: JSON.parse(row.priceTimes)
-        })),
+        ).map((row): SnapshotRecord => {
+          const parsed = JSON.parse(row.payload) as Record<string, unknown>;
+          const isV2 = parsed.version === 2;
+          const classes = (
+            isV2 ? (parsed.classes ?? {}) : parsed
+          ) as Record<string, number>;
+          return {
+            date: row.date,
+            totalBrl: row.totalBrl,
+            payloadVersion: isV2 ? 2 : 1,
+            classes,
+            totals: isV2 ? (parsed.totals as SnapshotPayloadV2["totals"]) : null,
+            priceTimes: JSON.parse(row.priceTimes) as Record<string, string>,
+            payload: classes
+          };
+        }),
       upsert: (snapshot: SnapshotInput) =>
         raw
           .prepare(
@@ -279,6 +325,52 @@ export function createDatabase(path: string) {
             payload: JSON.stringify(snapshot.payload),
             priceTimes: JSON.stringify(snapshot.priceTimes ?? {})
           })
+    },
+    // Vinculo 1-1 entre operacao de investimento e a transferencia que ela
+    // gerou no livro. Saber isso numa consulta e o que permite a interface
+    // distinguir operacao com e sem movimento de caixa.
+    operationLinks: {
+      get: (operationId: number) =>
+        raw
+          .prepare(
+            `SELECT operation_id AS operationId, transfer_id AS transferId,
+                    created_at AS createdAt
+             FROM operation_transfers WHERE operation_id = ?`
+          )
+          .get(operationId) as
+          | { operationId: number; transferId: number; createdAt: string }
+          | undefined,
+      set: (operationId: number, transferId: number) =>
+        raw
+          .prepare(
+            `INSERT INTO operation_transfers(operation_id, transfer_id, created_at)
+             VALUES (?, ?, ?)
+             ON CONFLICT(operation_id) DO UPDATE SET transfer_id = excluded.transfer_id`
+          )
+          .run(operationId, transferId, new Date().toISOString()),
+      remove: (operationId: number) =>
+        raw.prepare("DELETE FROM operation_transfers WHERE operation_id = ?").run(operationId)
+          .changes,
+      /** Estado do vinculo de cada operacao, para a listagem. */
+      listByOperations: (ids: number[]) => {
+        if (ids.length === 0) return [];
+        return raw
+          .prepare(
+            `SELECT ot.operation_id AS operationId, ot.transfer_id AS transferId,
+                    e.status AS transferStatus, a.name AS accountName
+             FROM operation_transfers ot
+             JOIN transfers t ON t.id = ot.transfer_id
+             JOIN entries e ON e.id = t.from_entry_id
+             JOIN accounts a ON a.id = e.account_id
+             WHERE ot.operation_id IN (${ids.map(() => "?").join(",")})`
+          )
+          .all(...ids) as {
+          operationId: number;
+          transferId: number;
+          transferStatus: string;
+          accountName: string;
+        }[];
+      }
     },
     imports: {
       has: (fingerprint: string) =>

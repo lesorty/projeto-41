@@ -343,7 +343,7 @@ export function App() {
                 subtitle="Posições consolidadas em USD e convertidas para BRL"
                 portfolio="crypto"
                 assets={dashboard?.portfolios.crypto ?? []}
-                investableTotal={dashboard ? dashboard.totalBrl - dashboard.reserveBrl : 0}
+                investableTotal={dashboard?.investableBrl ?? 0}
                 usdBrl={dashboard?.usdBrl ?? 0}
                 onChanged={loadDashboard}
               />
@@ -354,7 +354,7 @@ export function App() {
                 subtitle="Ativos, preço médio e dividendos acumulados"
                 portfolio="b3"
                 assets={dashboard?.portfolios.b3 ?? []}
-                investableTotal={dashboard ? dashboard.totalBrl - dashboard.reserveBrl : 0}
+                investableTotal={dashboard?.investableBrl ?? 0}
                 onChanged={loadDashboard}
               />
             )}

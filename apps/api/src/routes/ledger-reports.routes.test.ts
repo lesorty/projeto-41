@@ -69,7 +69,11 @@ describe("GET /api/ledger/summary", () => {
       .then((r) => r.json());
 
     expect(summary.month.expenseCents).toBe(-80000);
-    expect(summary.accounts).toHaveLength(2);
+    // A migração 005 semeia as duas contas de corretora, então contamos só as
+    // que este teste criou.
+    expect(
+      summary.accounts.filter((a: { kind: string }) => a.kind !== "investment")
+    ).toHaveLength(2);
     // Os dois numeros sao distintos por construcao (6.1).
     expect(summary.consolidated).toHaveProperty("currentCents");
     expect(summary.consolidated).toHaveProperty("projectedCents");

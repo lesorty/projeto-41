@@ -1,12 +1,17 @@
 import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
-import { migrations } from "./index.js";
 import { migration001Baseline } from "./001-baseline.js";
 import { migration002LedgerCore } from "./002-ledger-core.js";
 import { migration003BudgetTargets } from "./003-budget-targets.js";
+import { migration004CreditCard } from "./004-credit-card.js";
 import { runMigrations, type MigrationDatabase } from "./runner.js";
 
 const BEFORE = [migration001Baseline, migration002LedgerCore, migration003BudgetTargets];
+/**
+ * Só até a 004: a 005 mexe em `operations`, que pertence ao `migrate()` legado
+ * e não existe num banco montado apenas pelo runner.
+ */
+const THROUGH_004 = [...BEFORE, migration004CreditCard];
 
 function dbAtPhase2() {
   const db = new Database(":memory:");
@@ -41,7 +46,7 @@ function seedLedger(db: MigrationDatabase) {
 describe("migration 004 — credit card", () => {
   it("cria installment_plans e nao cria tabela de fatura (D22)", () => {
     const db = dbAtPhase2();
-    runMigrations(db, migrations);
+    runMigrations(db, THROUGH_004);
     const tables = (
       db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]
     ).map((row) => row.name);
@@ -54,7 +59,7 @@ describe("migration 004 — credit card", () => {
     const db = dbAtPhase2();
     seedLedger(db);
     const before = tableSql(db, "accounts");
-    runMigrations(db, migrations);
+    runMigrations(db, THROUGH_004);
     expect(tableSql(db, "accounts")).toBe(before);
   });
 
@@ -62,13 +67,13 @@ describe("migration 004 — credit card", () => {
     const db = dbAtPhase2();
     seedLedger(db);
     const before = db.prepare("SELECT * FROM entries ORDER BY id").all();
-    runMigrations(db, migrations);
+    runMigrations(db, THROUGH_004);
     expect(db.prepare("SELECT * FROM entries ORDER BY id").all()).toEqual(before);
   });
 
   it("mantem todos os indices da migracao 002 e acrescenta os da fatura", () => {
     const db = dbAtPhase2();
-    runMigrations(db, migrations);
+    runMigrations(db, THROUGH_004);
     const indexes = indexNames(db, "entries");
     for (const name of [
       "entries_account_date",
@@ -91,7 +96,7 @@ describe("migration 004 — credit card", () => {
 
   it("preserva os CHECK da 002 depois do rebuild", () => {
     const db = dbAtPhase2();
-    runMigrations(db, migrations);
+    runMigrations(db, THROUGH_004);
     db.exec(
       `INSERT INTO accounts(id, name, kind, color, created_at)
        VALUES (9, 'X', 'checking', '#fff', 'x')`
@@ -107,7 +112,7 @@ describe("migration 004 — credit card", () => {
   it("da integridade a installment_plan_id", () => {
     const db = dbAtPhase2();
     seedLedger(db);
-    runMigrations(db, migrations);
+    runMigrations(db, THROUGH_004);
     expect(() =>
       db
         .prepare(
@@ -122,7 +127,7 @@ describe("migration 004 — credit card", () => {
   it("rejeita plano com zero parcelas e parcela duplicada na serie", () => {
     const db = dbAtPhase2();
     seedLedger(db);
-    runMigrations(db, migrations);
+    runMigrations(db, THROUGH_004);
 
     const plan = db.prepare(
       `INSERT INTO installment_plans(account_id, purchase_date, total_cents,
@@ -144,7 +149,7 @@ describe("migration 004 — credit card", () => {
 
   it("nao reaplica quando ja rodou", () => {
     const db = dbAtPhase2();
-    runMigrations(db, migrations);
-    expect(runMigrations(db, migrations)).toHaveLength(0);
+    runMigrations(db, THROUGH_004);
+    expect(runMigrations(db, THROUGH_004)).toHaveLength(0);
   });
 });

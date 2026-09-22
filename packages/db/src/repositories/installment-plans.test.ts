@@ -1,8 +1,6 @@
-import Database from "better-sqlite3";
 import { beforeEach, describe, expect, it } from "vitest";
-import { migrations } from "../migrations/index.js";
-import { runMigrations } from "../migrations/runner.js";
-import { createLedgerRepositories, type LedgerRepositories } from "./index.js";
+import { createDatabase } from "../index.js";
+import type { LedgerRepositories } from "./index.js";
 
 let ledger: LedgerRepositories;
 let steylor: number;
@@ -12,10 +10,10 @@ let otherCard: number;
 let mercado: number;
 
 beforeEach(() => {
-  const db = new Database(":memory:");
-  db.pragma("foreign_keys = ON");
-  runMigrations(db, migrations);
-  ledger = createLedgerRepositories(db);
+  // `createDatabase` é o caminho real: roda o `migrate()` legado e, em seguida,
+  // o runner versionado. Montar só o runner produz um banco que não existe em
+  // produção — sem `operations`, por exemplo.
+  ledger = createDatabase(":memory:").ledger;
 
   steylor = ledger.people.list()[0]!.id;
   checking = ledger.accounts.create({

@@ -58,15 +58,16 @@ describe("buildDashboard", () => {
       currentValue: 110,
       currency: "BRL"
     });
+    // Base do ano gravada em v2: a comparação é entre grandezas iguais.
     db.snapshots.upsert({
       date: "2026-01-01",
       totalBrl: 100,
-      payload: { cash: 100 }
+      payload: { version: 2, classes: { cash: 100 }, totals: { investments: 100, bank: 0, liabilities: 0 } }
     });
     db.snapshots.upsert({
       date: "2026-03-01",
       totalBrl: 108,
-      payload: { cash: 108 }
+      payload: { version: 2, classes: { cash: 108 }, totals: { investments: 108, bank: 0, liabilities: 0 } }
     });
     db.contributions.create({
       date: "2026-02-01",
@@ -76,5 +77,22 @@ describe("buildDashboard", () => {
     const dashboard = buildDashboard(db, new Date("2026-06-14T12:00:00-03:00"));
 
     expect(dashboard.annualReturn).toBeCloseTo(-0.1);
+  });
+
+  it("returns null when the year's base snapshot predates cash control", () => {
+    const db = createDatabase(":memory:");
+    db.positions.upsert({
+      category: "cash",
+      name: "Conta",
+      invested: 110,
+      currentValue: 110,
+      currency: "BRL"
+    });
+    // Payload plano = v1: só investimentos, sem caixa. Comparar o total de hoje
+    // (v2) contra ele seria comparar grandezas diferentes.
+    db.snapshots.upsert({ date: "2026-01-01", totalBrl: 100, payload: { cash: 100 } });
+
+    const dashboard = buildDashboard(db, new Date("2026-06-14T12:00:00-03:00"));
+    expect(dashboard.annualReturn).toBeNull();
   });
 });
