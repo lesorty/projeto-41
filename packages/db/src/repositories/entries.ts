@@ -260,7 +260,9 @@ export function createEntriesRepository(db: Db) {
         description: input.description ?? null,
         notes: input.notes ?? null,
         rawDescription: input.rawDescription ?? null,
-        paymentMethod: input.paymentMethod ?? null,
+        // Lancamento em cartao nasce como 'credit' quando o metodo nao vem.
+        paymentMethod:
+          input.paymentMethod ?? (defaults.accountKind === "credit_card" ? "credit" : null),
         statementMonth: defaults.statementMonth,
         installmentPlanId: input.installmentPlanId ?? null,
         installmentNumber: input.installmentNumber ?? null,
@@ -538,7 +540,8 @@ export function createEntriesRepository(db: Db) {
           placeId: input.placeId ?? null,
           description: input.description ?? null,
           notes: input.notes ?? null,
-          paymentMethod: input.paymentMethod ?? null,
+          paymentMethod:
+            input.paymentMethod ?? (defaults.accountKind === "credit_card" ? "credit" : null),
           statementMonth: defaults.statementMonth,
           refundOfEntryId: input.refundOfEntryId ?? null,
           countsTowardTarget: nextFlag ? 1 : 0,
@@ -594,6 +597,17 @@ export function createEntriesRepository(db: Db) {
           );
           return 2;
         }
+        // Excluir o original deixando o estorno orfao apagaria o vinculo que
+        // explica por que a categoria ficou negativa (6.6).
+        const refunds = (
+          db
+            .prepare("SELECT COUNT(*) AS n FROM entries WHERE refund_of_entry_id = ?")
+            .get(id) as { n: number }
+        ).n;
+        if (refunds > 0) {
+          throw new LedgerError("Remova antes o estorno deste lancamento");
+        }
+
         const changes = db.prepare("DELETE FROM entries WHERE id = ?").run(id).changes;
         if (changes === 0) throw notFound("Lancamento");
         return changes;

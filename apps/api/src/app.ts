@@ -8,6 +8,7 @@ import type { IconService } from "./icons/icon-service.js";
 import type { AttachmentService } from "./attachments/attachment-service.js";
 import {
   registerAttachmentsRoutes,
+  registerCardsRoutes,
   registerIconsRoutes,
   registerImportExportRoutes,
   registerLedgerReportsRoutes,
@@ -84,6 +85,7 @@ export function buildApp({
   registerPricesRoutes(app, deps);
   registerLedgerRoutes(app, deps);
   registerLedgerReportsRoutes(app, deps);
+  registerCardsRoutes(app, deps);
   registerAttachmentsRoutes(app, deps);
   registerImportExportRoutes(app, deps);
 

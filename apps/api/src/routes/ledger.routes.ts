@@ -4,6 +4,7 @@ import {
   entryFilterSchema,
   entrySchema,
   entryTargetFlagSchema,
+  seriesScopeSchema,
   personSchema,
   placeSchema,
   tagSchema,
@@ -150,12 +151,51 @@ export const registerLedgerRoutes: RoutePlugin = (app, { db }) => {
     return reply.status(201).send({ id, entry: ledger.entries.get(id), balances: balances() });
   });
 
+  /**
+   * `scope` so tem efeito quando o lancamento pertence a um plano de parcelas.
+   *
+   * Ele vale para campos **nao monetarios** (descricao, categoria, local,
+   * pessoa, etiquetas). **Valor e sempre `one`**: alterar o valor da serie
+   * inteira quebraria a invariante de soma da secao 4.2, entao a combinacao e
+   * recusada em vez de aceita pela metade.
+   */
   app.put("/api/ledger/entries/:id", async (request, reply) => {
     const { id } = idParam.parse(request.params);
-    if (!ledger.entries.get(id)) {
-      return reply.status(404).send({ error: "Lancamento nao encontrado" });
+    const { scope } = z
+      .object({ scope: seriesScopeSchema.default("one") })
+      .parse(request.query);
+    const existing = ledger.entries.get(id);
+    if (!existing) return reply.status(404).send({ error: "Lancamento nao encontrado" });
+
+    const input = entrySchema.parse(request.body);
+    if (scope !== "one" && input.amountCents !== existing.amountCents) {
+      return reply.status(400).send({
+        error: "Alterar valor so vale para esta parcela: use scope=one"
+      });
     }
-    ledger.entries.update(id, entrySchema.parse(request.body));
+
+    ledger.entries.update(id, input);
+
+    if (scope !== "one" && existing.installmentPlanId != null) {
+      const siblings = ledger.entries
+        .listAll({ installmentPlanId: existing.installmentPlanId, pageSize: 500 })
+        .filter((row) => row.id !== id)
+        .filter((row) =>
+          scope === "all" ? true : (row.installmentNumber ?? 0) > (existing.installmentNumber ?? 0)
+        );
+      for (const sibling of siblings) {
+        ledger.entries.update(sibling.id, {
+          ...input,
+          // Cada irmao mantem o proprio valor, data e numero: so os campos
+          // descritivos viajam pela serie.
+          amountCents: sibling.amountCents,
+          date: sibling.date,
+          accountId: sibling.accountId,
+          statementMonth: sibling.statementMonth
+        });
+      }
+    }
+
     return { ok: true, entry: ledger.entries.get(id), balances: balances() };
   });
 
