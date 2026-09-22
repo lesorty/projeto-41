@@ -15,6 +15,7 @@ import {
   CreditCard,
   Gauge,
   Landmark,
+  PiggyBank,
   ReceiptText,
   Scale,
   RefreshCw,
@@ -38,6 +39,7 @@ import { AccountsPage } from "../pages/finance/Accounts.js";
 import { CategoriesPage } from "../pages/finance/Categories.js";
 import { FinanceDashboardPage } from "../pages/finance/FinanceDashboard.js";
 import { InvoicePage } from "../pages/finance/Invoice.js";
+import { GoalsPage } from "../pages/finance/Goals.js";
 import { NetWorthPage } from "../pages/finance/NetWorth.js";
 import { ReportsPage } from "../pages/finance/Reports.js";
 import {
@@ -69,6 +71,7 @@ type Page =
   | "reports"
   | "invoice"
   | "networth"
+  | "goals"
   | "transactions"
   | "expenses"
   | "income"
@@ -101,6 +104,7 @@ const nav: { group: string; items: NavItem[] }[] = [
       { id: "invoice", label: "Fatura", icon: CreditCard },
       { id: "categories", label: "Categorias", icon: Tags },
       { id: "reports", label: "Relatórios", icon: ChartPie },
+      { id: "goals", label: "Caixinhas", icon: PiggyBank },
       { id: "networth", label: "Patrimônio", icon: Scale }
     ]
   },
@@ -375,6 +379,7 @@ export function App() {
             {page === "finance" && <FinanceDashboardPage onOpenReports={() => setPage("reports")} />}
             {page === "reports" && <ReportsPage />}
             {page === "invoice" && <InvoicePage />}
+            {page === "goals" && <GoalsPage />}
             {page === "networth" && (
               <NetWorthPage dashboard={dashboard} onChanged={loadDashboard} />
             )}

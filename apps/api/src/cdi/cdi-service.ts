@@ -13,12 +13,32 @@ import { DEFAULT_RETRY_DELAYS_MS, createSgsClient, type Fetcher } from "./sgs-cl
  * instalação que nunca viu a internet calcula a partir da semente commitada.
  */
 
-/** Nunca mais que ~4 requisições por hora. */
+/** Nunca mais que ~4 requisições por hora **quando dá certo**. */
 const MIN_INTERVAL_MS = 15 * 60 * 1000;
+/**
+ * Depois de uma falha, o piso é bem menor.
+ *
+ * Aplicar os 15 minutos a uma tentativa que falhou puniria o usuário por um
+ * blip de rede: a série ficaria parada e o aviso de "sem conexão" na tela por
+ * um quarto de hora, sem nenhuma chance de recuperação.
+ */
+const RETRY_AFTER_FAILURE_MS = 60 * 1000;
 
-type State = { etag: string | null; lastFetchAt: string | null; lastDate: string | null };
+type State = {
+  etag: string | null;
+  /** Último contato, com ou sem sucesso. */
+  lastFetchAt: string | null;
+  /** Último contato **bem-sucedido**: é ele que governa o limite de 15 min. */
+  lastSuccessAt: string | null;
+  lastDate: string | null;
+};
 
-const EMPTY_STATE: State = { etag: null, lastFetchAt: null, lastDate: null };
+const EMPTY_STATE: State = {
+  etag: null,
+  lastFetchAt: null,
+  lastSuccessAt: null,
+  lastDate: null
+};
 
 export type CdiService = ReturnType<typeof createCdiService>;
 
@@ -84,12 +104,16 @@ export function createCdiService(
     const state = await readState();
     const now = Date.now();
 
-    if (
-      !options.force &&
-      state.lastFetchAt &&
-      now - new Date(state.lastFetchAt).getTime() < MIN_INTERVAL_MS
-    ) {
+    const sinceSuccess = state.lastSuccessAt
+      ? now - new Date(state.lastSuccessAt).getTime()
+      : Infinity;
+    const sinceAttempt = state.lastFetchAt ? now - new Date(state.lastFetchAt).getTime() : Infinity;
+
+    if (!options.force && sinceSuccess < MIN_INTERVAL_MS) {
       return { ok: true as const, inserted: 0, skipped: 0, reason: "cache recente" };
+    }
+    if (!options.force && sinceAttempt < RETRY_AFTER_FAILURE_MS) {
+      return { ok: true as const, inserted: 0, skipped: 0, reason: "tentativa recente falhou" };
     }
 
     const last = lastRateDate();
@@ -105,7 +129,8 @@ export function createCdiService(
       online = true;
 
       if (result.notModified) {
-        await writeState({ ...state, lastFetchAt: new Date().toISOString() });
+        const stamp = new Date().toISOString();
+        await writeState({ ...state, lastFetchAt: stamp, lastSuccessAt: stamp });
         return { ok: true as const, inserted: 0, skipped: 0, reason: "sem novidade (304)" };
       }
 
@@ -118,9 +143,11 @@ export function createCdiService(
         }
       });
 
+      const stamp = new Date().toISOString();
       await writeState({
         etag: result.etag,
-        lastFetchAt: new Date().toISOString(),
+        lastFetchAt: stamp,
+        lastSuccessAt: stamp,
         lastDate: lastRateDate()
       });
       return { ok: true as const, inserted, skipped: 0, reason: null };

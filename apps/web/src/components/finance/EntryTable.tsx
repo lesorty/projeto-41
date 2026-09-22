@@ -1,4 +1,4 @@
-import { ArrowLeftRight, Paperclip, Receipt } from "lucide-react";
+import { ArrowLeftRight, Paperclip, PiggyBank, Receipt } from "lucide-react";
 import { useState } from "react";
 import type { EntryRecord } from "@projeto41/contracts";
 import { Modal } from "../dialog.js";
@@ -83,6 +83,18 @@ export function EntryTable({
                           </small>
                         )}
                       </button>
+                      {entry.goalId != null && (
+                        // Movimento de caixinha continua sendo transferência:
+                        // não vira receita nem despesa em relatório nenhum (D21).
+                        <em
+                          className="fin-goal-chip"
+                          style={{ borderColor: entry.goalColor ?? undefined }}
+                          title={`Caixinha ${entry.goalName ?? ""}`}
+                        >
+                          <PiggyBank size={11} aria-hidden />
+                          {entry.goalName}
+                        </em>
+                      )}
                       {entry.refundOfEntryId != null && (
                         <em className="fin-refund-tag" title="Este lançamento é um estorno">
                           estorno

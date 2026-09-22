@@ -138,3 +138,28 @@ describe("cdi-service", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 });
+
+describe("recuperacao depois de falha", () => {
+  it("uma falha nao bloqueia a proxima tentativa por 15 minutos", async () => {
+    let shouldFail = true;
+    const fetcher = vi.fn(async () => {
+      if (shouldFail) throw new Error("blip");
+      return jsonResponse([{ data: "19/09/2026", valor: "0.049999" }]);
+    });
+    const service = createCdiService(db, dir, fetcher as unknown as typeof fetch, [0, 0, 0]);
+
+    const failed = await service.refresh();
+    expect(failed.reason).toMatch(/sem rede/i);
+    expect((await service.status()).online).toBe(false);
+
+    // A tentativa seguinte é barrada só pelo piso curto, não pelos 15 minutos.
+    const throttled = await service.refresh();
+    expect(throttled.reason).toMatch(/tentativa recente/i);
+
+    // `force` passa por cima e recupera assim que a rede volta.
+    shouldFail = false;
+    const recovered = await service.refresh({ force: true });
+    expect(recovered.inserted).toBeGreaterThan(0);
+    expect((await service.status()).online).toBe(true);
+  });
+});

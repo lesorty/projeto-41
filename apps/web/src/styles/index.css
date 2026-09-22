@@ -3371,3 +3371,107 @@ main {
 .fin-alert .fin-list li {
   border-color: var(--border);
 }
+
+/* --- Fase 5: caixinhas ---------------------------------------------------- */
+
+.fin-goal-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.fin-goal-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  /* A cor vem do banco e entra por `style` inline: é dado, não token. */
+  border-top: 3px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-grad);
+  box-shadow: var(--shadow-card);
+}
+
+.fin-goal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.fin-goal-tags {
+  display: inline-flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.fin-goal-value {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 1.4rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.fin-goal-value small {
+  font-size: 0.78rem;
+  font-weight: 400;
+}
+
+.fin-goal-yield {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 0;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.fin-goal-yield dt {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+}
+
+.fin-goal-yield dd {
+  margin: 2px 0 0;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.fin-goal-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.fin-goal-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.fin-goal-statement {
+  padding: 0 18px 18px;
+}
+
+/* Chip da caixinha na linha do livro principal. */
+.fin-goal-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-style: normal;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  padding: 1px 7px;
+}

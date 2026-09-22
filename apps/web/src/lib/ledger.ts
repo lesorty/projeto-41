@@ -7,6 +7,7 @@ import type {
   EntryListResult,
   EntryRecord,
   PersonRecord,
+  GoalRecord,
   PlaceRecord,
   SeriesScope,
   TagRecord
@@ -25,9 +26,16 @@ export type LedgerReference = {
   accounts: AccountRecord[];
   categories: CategoryRecord[];
   tags: TagRecord[];
+  goals: GoalRecord[];
 };
 
-const EMPTY_REFERENCE: LedgerReference = { people: [], accounts: [], categories: [], tags: [] };
+const EMPTY_REFERENCE: LedgerReference = {
+  people: [],
+  accounts: [],
+  categories: [],
+  tags: [],
+  goals: []
+};
 
 export function useLedgerReference() {
   const [data, setData] = useState<LedgerReference>(EMPTY_REFERENCE);
@@ -37,13 +45,14 @@ export function useLedgerReference() {
   const reload = useCallback(async () => {
     try {
       setError("");
-      const [people, accounts, categories, tags] = await Promise.all([
+      const [people, accounts, categories, tags, goals] = await Promise.all([
         api<PersonRecord[]>("/ledger/people"),
         api<AccountRecord[]>("/ledger/accounts"),
         api<CategoryRecord[]>("/ledger/categories"),
-        api<TagRecord[]>("/ledger/tags")
+        api<TagRecord[]>("/ledger/tags"),
+        api<GoalRecord[]>("/ledger/goals")
       ]);
-      setData({ people, accounts, categories, tags });
+      setData({ people, accounts, categories, tags, goals });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Falha ao carregar cadastros");
     } finally {

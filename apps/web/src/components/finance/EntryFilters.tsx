@@ -145,6 +145,21 @@ export function EntryFilters({
             ))}
           </select>
         </Field>
+        <Field label="Caixinha">
+          <select
+            value={filter.goalId ?? ""}
+            onChange={(event) =>
+              patch({ goalId: event.target.value ? Number(event.target.value) : undefined })
+            }
+          >
+            <option value="">Todas</option>
+            {reference.goals.map((goal) => (
+              <option key={goal.id} value={goal.id}>
+                {goal.name}
+              </option>
+            ))}
+          </select>
+        </Field>
         <Field label="Status">
           <select
             value={filter.status ?? ""}
@@ -238,6 +253,13 @@ function buildChips(filter: LedgerFilter, reference: LedgerReference) {
       key: "status",
       label: `Status: ${STATUS_LABEL[filter.status]}`,
       clear: { status: undefined }
+    });
+  }
+  if (filter.goalId) {
+    chips.push({
+      key: "goal",
+      label: `Caixinha: ${name(reference.goals, filter.goalId) ?? ""}`,
+      clear: { goalId: undefined }
     });
   }
   if (filter.search) {
