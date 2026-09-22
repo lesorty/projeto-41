@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path";
 import { createDatabase } from "@projeto41/db";
 import { buildApp } from "./app.js";
 import { loadServerConfig } from "./config.js";
+import { createAttachmentService } from "./attachments/attachment-service.js";
 import { createIconService, type IconKind } from "./icons/icon-service.js";
 import { startScheduler } from "./jobs/scheduler.js";
 import { createPriceService } from "./prices/price-service.js";
@@ -14,6 +15,11 @@ const webRoot = resolve(root, "apps/web/dist");
 mkdirSync(dirname(databasePath), { recursive: true });
 const db = createDatabase(databasePath);
 const iconService = createIconService(resolve(dirname(databasePath), "icons"));
+// Fotos de recibo ficam ao lado do banco, em `data/attachments/` (D29).
+const attachmentService = createAttachmentService({
+  db,
+  attachmentDir: resolve(dirname(databasePath), "attachments")
+});
 const livePriceService = createPriceService(db, {
   coingeckoApiKey: config.coingeckoApiKey,
   brapiToken: config.brapiToken
@@ -30,6 +36,8 @@ const app = buildApp({
   db,
   priceService,
   iconService,
+  attachmentService,
+  databaseFile: databasePath,
   webRoot: existsSync(resolve(webRoot, "index.html")) ? webRoot : undefined
 });
 const stopScheduler = config.demoMode

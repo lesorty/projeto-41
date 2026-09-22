@@ -86,7 +86,8 @@ export function allocateByRatio(total: number, ratios: number[]): number[] {
   return result;
 }
 
-const CURRENCY_NOISE = /[R$\s ]/gi;
+// Inclui o NBSP, que vem colado junto ao copiar valor do internet banking.
+const CURRENCY_NOISE = /[R$\s\u00a0]/gi;
 
 /**
  * Lê o que o usuário digita em pt-BR e devolve centavos.
