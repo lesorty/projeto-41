@@ -1,4 +1,6 @@
 import {
+  ArrowDownCircle,
+  ArrowUpCircle,
   BriefcaseBusiness,
   CalendarDays,
   ChartNoAxesCombined,
@@ -9,8 +11,11 @@ import {
   LayoutDashboard,
   Menu,
   Moon,
+  Landmark,
+  ReceiptText,
   RefreshCw,
   ShieldCheck,
+  Tags,
   Sun,
   Target,
   Wallet,
@@ -25,6 +30,13 @@ import { HistoryPage } from "../pages/History.js";
 import { PlanningPage } from "../pages/Planning.js";
 import { PortfolioPage } from "../pages/Portfolio.js";
 import { PositionsPage } from "../pages/Positions.js";
+import { AccountsPage } from "../pages/finance/Accounts.js";
+import { CategoriesPage } from "../pages/finance/Categories.js";
+import {
+  ExpensesPage,
+  IncomePage,
+  TransactionsPage
+} from "../pages/finance/Ledger.js";
 import { Loading } from "../components/ui.js";
 import { Ticker, TickerSettings } from "../components/ticker.js";
 import type { TickerCandidate } from "../components/ticker.js";
@@ -44,7 +56,12 @@ type Page =
   | "contributions"
   | "planning"
   | "allocation"
-  | "history";
+  | "history"
+  | "transactions"
+  | "expenses"
+  | "income"
+  | "accounts"
+  | "categories";
 
 type NavItem = { id: Page; label: string; icon: ComponentType<{ size?: number | string }> };
 
@@ -59,6 +76,16 @@ const nav: { group: string; items: NavItem[] }[] = [
       { id: "crypto", label: "Cripto", icon: Coins },
       { id: "b3", label: "Bolsa B3", icon: BriefcaseBusiness },
       { id: "positions", label: "Caixa e renda fixa", icon: Wallet }
+    ]
+  },
+  {
+    group: "Finanças",
+    items: [
+      { id: "transactions", label: "Transações", icon: ReceiptText },
+      { id: "expenses", label: "Gastos", icon: ArrowDownCircle },
+      { id: "income", label: "Entradas", icon: ArrowUpCircle },
+      { id: "accounts", label: "Contas", icon: Landmark },
+      { id: "categories", label: "Categorias", icon: Tags }
     ]
   },
   {
@@ -324,6 +351,11 @@ export function App() {
             {page === "planning" && <PlanningPage />}
             {page === "allocation" && dashboard && <AllocationPage dashboard={dashboard} />}
             {page === "history" && <HistoryPage history={dashboard?.history ?? []} />}
+            {page === "transactions" && <TransactionsPage />}
+            {page === "expenses" && <ExpensesPage />}
+            {page === "income" && <IncomePage />}
+            {page === "accounts" && <AccountsPage />}
+            {page === "categories" && <CategoriesPage />}
           </div>
         )}
       </main>

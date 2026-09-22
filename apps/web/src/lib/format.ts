@@ -133,3 +133,59 @@ export const categoryLabels: Record<string, string> = {
 export function categoryLabel(key: string) {
   return categoryLabels[key] ?? key;
 }
+
+// --- Módulo de finanças: tudo entra em centavos inteiros (D19) --------------
+// Cada formatador novo precisa honrar a máscara do modo privacidade — um que
+// ignore a flag vaza valores na gravação de tela (R-04).
+
+/**
+ * Data de uma linha do livro: dia e mes, com o ano so quando nao e o corrente.
+ * `shortDate` nao serve aqui porque ela agrega por mes, que e o que os graficos
+ * de investimento precisam e o extrato nao.
+ */
+export function ledgerDate(value: string) {
+  if (!value) return "—";
+  const date = new Date(`${value}T12:00:00`);
+  const sameYear = date.getFullYear() === new Date().getFullYear();
+  return date.toLocaleDateString("pt-BR", {
+    day: "2-digit",
+    month: "short",
+    ...(sameYear ? {} : { year: "2-digit" })
+  });
+}
+
+export function moneyFromCents(cents: number) {
+  return money((cents || 0) / 100);
+}
+
+/** Mostra o sinal explícito: usado na coluna de valor do livro. */
+export function signedMoneyFromCents(cents: number) {
+  if (masked) return `R$ ${MASK}`;
+  const value = (cents || 0) / 100;
+  return value > 0 ? `+${brl.format(value)}` : brl.format(value);
+}
+
+export function compactMoneyFromCents(cents: number) {
+  return compactMoney((cents || 0) / 100);
+}
+
+/** Saldo devedor de cartão: sempre positivo, já é "quanto eu devo". */
+export function debtFromCents(cents: number) {
+  return moneyFromCents(Math.abs(cents || 0));
+}
+
+/**
+ * Par `gasto/orçamento` da tabela de totais (6.5). Sem orçamento mostra só o
+ * gasto — nada de placeholder.
+ */
+export function budgetPair(spentCents: number, budgetCents: number | null | undefined) {
+  const spent = moneyFromCents(Math.abs(spentCents));
+  if (budgetCents == null) return spent;
+  return `${spent} / ${moneyFromCents(budgetCents)}`;
+}
+
+/** Campo de entrada: converte centavos no texto editável em pt-BR. */
+export function centsToInput(cents: number | null | undefined) {
+  if (cents == null) return "";
+  return (Math.abs(cents) / 100).toFixed(2).replace(".", ",");
+}

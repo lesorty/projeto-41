@@ -2572,3 +2572,471 @@ main {
     transition: none !important;
   }
 }
+
+/* ===========================================================================
+   Módulo de finanças (prefixo fin-)
+   Só tokens existentes, nenhuma cor literal, para o tema claro continuar
+   funcionando sem uma segunda folha de estilo.
+   =========================================================================== */
+
+.fin-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.fin-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.fin-muted {
+  color: var(--text-faint);
+}
+
+.fin-sub {
+  display: block;
+  color: var(--text-faint);
+  font-size: 0.78rem;
+  margin-top: 2px;
+}
+
+.fin-positive {
+  color: var(--positive);
+}
+
+.fin-negative {
+  color: var(--negative);
+}
+
+.fin-link {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fin-link:hover {
+  color: var(--accent-text);
+}
+
+.fin-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.fin-summary strong {
+  font-size: 1.35rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Cadastros ----------------------------------------------------------- */
+
+.fin-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.fin-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.fin-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 2px;
+  border-bottom: 1px solid var(--border);
+}
+
+.fin-list li:last-child {
+  border-bottom: 0;
+}
+
+.fin-list-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fin-budget {
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.fin-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+/* --- Seletor de cor ------------------------------------------------------ */
+
+.fin-color-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fin-color-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.fin-color-wheel {
+  width: 46px;
+  height: 38px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--input-bg);
+  cursor: pointer;
+}
+
+.fin-color-hex {
+  flex: 1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-transform: lowercase;
+}
+
+.fin-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.fin-swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: transform var(--transition);
+}
+
+.fin-swatch:hover {
+  transform: scale(1.12);
+}
+
+.fin-swatch.active {
+  border-color: var(--text);
+}
+
+/* --- Filtros ------------------------------------------------------------- */
+
+.fin-filter-body {
+  padding-top: 14px;
+}
+
+.fin-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.fin-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.fin-shortcuts {
+  display: inline-flex;
+  gap: 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 3px;
+}
+
+.fin-shortcuts button {
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 5px 11px;
+  border-radius: 7px;
+  cursor: pointer;
+  text-transform: capitalize;
+}
+
+.fin-shortcuts button.active {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+
+.fin-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.fin-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-faint);
+}
+
+.fin-chips button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 3px 9px;
+  cursor: pointer;
+}
+
+.fin-chips button:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.fin-chip-clear {
+  background: none;
+  border-style: dashed;
+}
+
+/* --- Tabela do livro ----------------------------------------------------- */
+
+.fin-entries td {
+  vertical-align: top;
+}
+
+.fin-date {
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.fin-desc {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.fin-desc-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fin-amount {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.fin-row-pending td {
+  opacity: 0.72;
+}
+
+.fin-installment {
+  font-style: normal;
+  font-size: 0.72rem;
+  color: var(--text-faint);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 0 4px;
+}
+
+/* A última parcela ganha destaque discreto: é a informação que decide se vale
+   antecipar o resto. */
+.fin-installment.last {
+  color: var(--accent-text);
+  border-color: var(--accent-soft);
+}
+
+.fin-tags {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.fin-tags em {
+  font-style: normal;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+.fin-clip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--text-faint);
+  font-size: 0.75rem;
+}
+
+.fin-thumb {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  overflow: hidden;
+  background: var(--surface-3);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.fin-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.fin-photo-full {
+  display: block;
+  width: 100%;
+  border-radius: var(--radius-sm);
+}
+
+.fin-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding-top: 12px;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+/* --- Campo de foto ------------------------------------------------------- */
+
+.fin-photo-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fin-photo-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.fin-photo-item {
+  position: relative;
+  margin: 0;
+  width: 76px;
+  height: 76px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.fin-photo-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.fin-photo-item .icon-btn {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  background: var(--scrim);
+}
+
+.fin-photo-add {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 76px;
+  height: 76px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.fin-photo-add:hover:not(:disabled) {
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+
+.fin-photo-add:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+/* --- Seletor de etiquetas ------------------------------------------------ */
+
+.fin-tag-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.fin-tag-picker button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.82rem;
+  padding: 4px 11px;
+  cursor: pointer;
+}
+
+.fin-tag-picker button.active {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+@media (max-width: 720px) {
+  .fin-filter-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .fin-shortcuts {
+    overflow-x: auto;
+  }
+}

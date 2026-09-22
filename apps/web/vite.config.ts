@@ -10,6 +10,9 @@ export default defineConfig({
       // o alias do tsconfig resolve os tipos, mas o Vite precisa do seu proprio.
       "@projeto41/contracts": fileURLToPath(
         new URL("../../packages/contracts/src/index.ts", import.meta.url)
+      ),
+      "@projeto41/finance": fileURLToPath(
+        new URL("../../packages/finance/src/index.ts", import.meta.url)
       )
     }
   },
