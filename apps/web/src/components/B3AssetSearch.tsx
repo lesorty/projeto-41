@@ -4,7 +4,7 @@ import type { KeyboardEvent } from "react";
 import { api } from "../lib/api.js";
 import { money } from "../lib/format.js";
 import { b3IconUrl } from "../lib/icons.js";
-import type { B3SearchResult } from "../lib/types.js";
+import type { B3SearchResult } from "@projeto41/contracts";
 import { AssetIcon, IconButton } from "./ui.js";
 
 export function B3AssetSearch({

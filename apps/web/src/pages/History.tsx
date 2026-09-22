@@ -4,7 +4,7 @@ import { AreaTrend } from "../components/charts.js";
 import { Empty, MiniStat, Panel, SectionHeading } from "../components/ui.js";
 import { longDate, money, percent } from "../lib/format.js";
 import { filterHistory } from "./Dashboard.js";
-import type { Snapshot } from "../lib/types.js";
+import type { Snapshot } from "@projeto41/contracts";
 
 const ranges = [
   { id: "ytd", label: "YTD" },

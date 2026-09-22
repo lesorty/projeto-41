@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { AreaTrend, Donut } from "../components/charts.js";
 import { AnimatedNumber, Card, Delta, Kpi, Panel } from "../components/ui.js";
 import { fx, money, percent, signedPercent, usd } from "../lib/format.js";
-import type { Dashboard, Snapshot } from "../lib/types.js";
+import type { Dashboard, Snapshot } from "@projeto41/contracts";
 
 // Variação do saldo atual (ao vivo) em relação ao snapshot mais próximo de `days` atrás.
 function changeSince(history: Snapshot[], current: number, days: number) {

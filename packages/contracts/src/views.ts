@@ -1,3 +1,13 @@
+import type { Contribution, ManualPosition, Operation } from "./index.js";
+
+/**
+ * Formatos de resposta que o servidor monta e o frontend so le.
+ *
+ * Nao sao schemas Zod porque nada os valida na entrada: eles existem para que
+ * `apps/web` pare de manter uma copia manual dos tipos (D28). O frontend importa
+ * daqui apenas com `import type`, para o Zod continuar fora do bundle.
+ */
+
 export type Price = {
   symbol: string;
   price: number;
@@ -45,34 +55,14 @@ export type Dashboard = {
   updatedAt: string;
 };
 
-export type Operation = {
-  id: number;
-  portfolio: "crypto" | "b3";
-  type: "buy" | "sell";
-  asset: string;
-  date: string;
-  quantity: number;
-  total: number;
-  currency: "BRL" | "USD";
-  notes?: string;
-};
-
-export type ManualPosition = {
-  id: number;
-  category: string;
-  name: string;
-  invested: number;
-  currentValue: number;
-  currency: "BRL" | "USD";
-  notes?: string;
-};
-
-export type Contribution = {
-  id: number;
-  date: string;
-  amount: number;
-  notes?: string;
-};
+/**
+ * Linhas ja gravadas trazem `id`. Os schemas de entrada deixam `id` opcional
+ * porque na criacao ele ainda nao existe; estes apelidos evitam espalhar
+ * `id!` pelo frontend.
+ */
+export type OperationRecord = Operation & { id: number };
+export type ManualPositionRecord = ManualPosition & { id: number };
+export type ContributionRecord = Contribution & { id: number };
 
 export type CryptoSearchResult = {
   id: string;

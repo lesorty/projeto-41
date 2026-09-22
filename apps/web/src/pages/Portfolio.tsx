@@ -23,7 +23,7 @@ import { api } from "../lib/api.js";
 import { currency as fmtCurrency, currencyRaw, decimal, longDate, money, percent } from "../lib/format.js";
 import { portfolioIconUrl } from "../lib/icons.js";
 import { useToast } from "../lib/toast.js";
-import type { Asset, CryptoSearchResult, Operation } from "../lib/types.js";
+import type { Asset, CryptoSearchResult, OperationRecord } from "@projeto41/contracts";
 
 type SortKey = "asset" | "quantity" | "averagePrice" | "price" | "marketValueBrl" | "totalReturn";
 
@@ -49,15 +49,15 @@ export function PortfolioPage({
   const isCrypto = portfolio === "crypto";
   const code = isCrypto ? "USD" : "BRL";
 
-  const [operations, setOperations] = useState<Operation[]>([]);
+  const [operations, setOperations] = useState<OperationRecord[]>([]);
   const [drawer, setDrawer] = useState(false);
-  const [editing, setEditing] = useState<Operation | null>(null);
+  const [editing, setEditing] = useState<OperationRecord | null>(null);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "marketValueBrl", dir: -1 });
   const importInput = useRef<HTMLInputElement>(null);
 
   const load = useCallback(
-    () => api<Operation[]>(`/operations?portfolio=${portfolio}`).then(setOperations),
+    () => api<OperationRecord[]>(`/operations?portfolio=${portfolio}`).then(setOperations),
     [portfolio]
   );
   useEffect(() => void load(), [load]);
@@ -85,7 +85,7 @@ export function PortfolioPage({
     );
   }
 
-  async function removeOperation(operation: Operation) {
+  async function removeOperation(operation: OperationRecord) {
     const ok = await confirm({
       title: "Excluir operação",
       message: `Remover ${operation.type === "buy" ? "compra" : "venda"} de ${operation.asset}? As posições serão recalculadas.`,
@@ -327,7 +327,7 @@ function OperationDrawer({
   onSaved
 }: {
   portfolio: "crypto" | "b3";
-  initial: Operation | null;
+  initial: OperationRecord | null;
   usdBrl: number;
   onClose: () => void;
   onSaved: () => void;

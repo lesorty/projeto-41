@@ -15,15 +15,15 @@ import {
 import { api } from "../lib/api.js";
 import { longDate, money, monthShort } from "../lib/format.js";
 import { useToast } from "../lib/toast.js";
-import type { Contribution } from "../lib/types.js";
+import type { ContributionRecord } from "@projeto41/contracts";
 
 export function ContributionsPage() {
   const toast = useToast();
   const confirm = useConfirm();
-  const [items, setItems] = useState<Contribution[]>([]);
+  const [items, setItems] = useState<ContributionRecord[]>([]);
   const [open, setOpen] = useState(false);
 
-  const load = useCallback(() => api<Contribution[]>("/contributions").then(setItems), []);
+  const load = useCallback(() => api<ContributionRecord[]>("/contributions").then(setItems), []);
   useEffect(() => void load(), [load]);
 
   const year = new Date().getFullYear();
@@ -47,7 +47,7 @@ export function ContributionsPage() {
     value: 0
   });
 
-  async function remove(item: Contribution) {
+  async function remove(item: ContributionRecord) {
     const ok = await confirm({
       title: "Excluir aporte",
       message: `Remover aporte de ${money(item.amount)} em ${longDate(item.date)}?`,

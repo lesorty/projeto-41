@@ -34,7 +34,7 @@ import { portfolioIconUrl } from "../lib/icons.js";
 import { usePrivacy } from "../lib/privacy.js";
 import { useTheme } from "../lib/theme.js";
 import { useToast } from "../lib/toast.js";
-import type { Dashboard } from "../lib/types.js";
+import type { Dashboard } from "@projeto41/contracts";
 
 type Page =
   | "dashboard"

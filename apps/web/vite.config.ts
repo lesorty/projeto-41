@@ -1,8 +1,18 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { fileURLToPath } from "node:url";
 
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    alias: {
+      // Os pacotes do monorepo sao consumidos como `./src/index.ts`, sem build:
+      // o alias do tsconfig resolve os tipos, mas o Vite precisa do seu proprio.
+      "@projeto41/contracts": fileURLToPath(
+        new URL("../../packages/contracts/src/index.ts", import.meta.url)
+      )
+    }
+  },
   build: {
     rollupOptions: {
       output: {

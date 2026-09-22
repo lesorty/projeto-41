@@ -5,7 +5,7 @@ import { Empty, MiniStat, Panel, SectionHeading } from "../components/ui.js";
 import { api } from "../lib/api.js";
 import { categoryLabel, money, percent } from "../lib/format.js";
 import { useToast } from "../lib/toast.js";
-import type { AllocationTarget, Dashboard } from "../lib/types.js";
+import type { AllocationTarget, Dashboard } from "@projeto41/contracts";
 
 const aliasToCategory: Record<string, string> = {
   dolar: "dollar",

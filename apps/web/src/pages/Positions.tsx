@@ -7,7 +7,7 @@ import { api } from "../lib/api.js";
 import { currency as fmtCurrency, money, percent } from "../lib/format.js";
 import { institutionIconUrl } from "../lib/icons.js";
 import { useToast } from "../lib/toast.js";
-import type { ManualPosition } from "../lib/types.js";
+import type { ManualPositionRecord } from "@projeto41/contracts";
 
 const groups = [
   { id: "dollar", label: "Dólar", icon: DollarSign, hint: "Contas e carteiras em dólar", tracksInvested: false },
@@ -23,13 +23,13 @@ const tracksInvested = (category: string) =>
 export function PositionsPage({ onChanged }: { onChanged: () => Promise<void> }) {
   const toast = useToast();
   const confirm = useConfirm();
-  const [positions, setPositions] = useState<ManualPosition[]>([]);
-  const [editing, setEditing] = useState<Partial<ManualPosition> | null>(null);
+  const [positions, setPositions] = useState<ManualPositionRecord[]>([]);
+  const [editing, setEditing] = useState<Partial<ManualPositionRecord> | null>(null);
 
-  const load = useCallback(() => api<ManualPosition[]>("/positions").then(setPositions), []);
+  const load = useCallback(() => api<ManualPositionRecord[]>("/positions").then(setPositions), []);
   useEffect(() => void load(), [load]);
 
-  async function remove(position: ManualPosition) {
+  async function remove(position: ManualPositionRecord) {
     const ok = await confirm({
       title: "Excluir posição",
       message: `Remover "${position.name}"?`,
@@ -114,7 +114,7 @@ export function PositionsPage({ onChanged }: { onChanged: () => Promise<void> })
         <PositionDrawer
           initial={editing}
           onClose={() => setEditing(null)}
-          onDelete={editing.id ? () => remove(editing as ManualPosition) : undefined}
+          onDelete={editing.id ? () => remove(editing as ManualPositionRecord) : undefined}
           onSaved={async () => {
             setEditing(null);
             await Promise.all([load(), onChanged()]);
@@ -132,7 +132,7 @@ function PositionDrawer({
   onSaved,
   onDelete
 }: {
-  initial: Partial<ManualPosition>;
+  initial: Partial<ManualPositionRecord>;
   onClose: () => void;
   onSaved: () => void;
   onDelete?: () => void;
@@ -200,7 +200,12 @@ function PositionDrawer({
         </Field>
         <div className="field-row">
           <Field label="Categoria">
-            <select value={category} onChange={(event) => setCategory(event.target.value)}>
+            <select
+              value={category}
+              onChange={(event) =>
+                setCategory(event.target.value as ManualPositionRecord["category"])
+              }
+            >
               {groups.map((group) => (
                 <option key={group.id} value={group.id}>
                   {group.label}
