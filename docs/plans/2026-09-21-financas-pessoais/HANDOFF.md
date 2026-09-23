@@ -4,10 +4,10 @@
 > arquivo ao concluir cada fase.
 
 - **Branch:** `feat/financas-pessoais`
-- **Última atualização:** 2026-09-22
+- **Última atualização:** 2026-09-23
 - **Fases concluídas:** 0, 1, 2, 3, 4 e 5
 - **Fases pendentes:** 6 (importação OFX/CSV), 7 (recorrentes), 8 (PDF)
-- **Commits:** 12, todos em `feat(...)` / `refactor(...)` / `docs(...)`, com o
+- **Commits:** 15, todos em `feat(...)` / `refactor(...)` / `docs(...)`, com o
   raciocínio das decisões não óbvias na mensagem
 
 ## Como verificar o que existe
@@ -20,10 +20,7 @@ npm test
 npm run typecheck && npm run lint && npm run build
 ```
 
-466 dos 467 testes passam. A **única** falha conhecida de `npm test` é
-`scripts/launch-project.test.mjs`, que **já falhava antes** deste trabalho: ele
-compara o separador de `PATH` com `:` fixo e quebra no Windows, que usa `;`.
-Não tem relação com o módulo de finanças.
+Os 467 testes passam, nas duas plataformas.
 
 Para rodar o app: `npm run dev`, e abra o grupo **Finanças** na navegação.
 
@@ -187,9 +184,3 @@ A verificação no app rodando criou dados reais em `data/projeto41.sqlite`:
 contas, categorias com lançamentos, um cartão com parcelamento e uma caixinha
 rendendo CDI. Se quiser começar limpo, apague `data/projeto41.sqlite` — ele é
 recriado vazio na próxima execução (a pasta `data/` não é versionada).
-
-### 4. Teste do launcher quebrado no Windows
-
-`scripts/launch-project.test.mjs` compara o separador de `PATH` com `:` fixo.
-Pré-existente, sem relação com este trabalho, e já sugerido como tarefa
-separada.
