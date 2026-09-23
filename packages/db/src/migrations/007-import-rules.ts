@@ -68,7 +68,7 @@ const SCHEMA = `
     date_format TEXT NOT NULL DEFAULT 'dd/MM/yyyy',
     decimal_separator TEXT NOT NULL DEFAULT ',',
     sign_convention TEXT NOT NULL DEFAULT 'signed'
-      CHECK(sign_convention IN ('signed','separate_columns','absolute_with_type')),
+      CHECK(sign_convention IN ('signed','split_columns','debit_positive')),
     mapping_json TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
