@@ -39,15 +39,21 @@ describe("classes do livro", () => {
     expect(classes["ledger:goals"]).toBe(300);
   });
 
-  it("conta de investimento NAO altera o total, nem com include_in_net_worth ligado", () => {
-    // O mesmo dinheiro já aparece como valor de mercado das carteiras.
+  it("caixa da corretora conta uma vez, como Caixa BR dos investimentos", () => {
+    // Desde a migração 009 a compra desconta do caixa, então o saldo da
+    // corretora é só o que ainda não virou ativo — não repete o valor de
+    // mercado. `include_in_net_worth` não muda nada: ele é regra do livro.
     account({
       name: "Corretora",
       kind: "investment",
       openingBalanceCents: 900_000,
       includeInNetWorth: true
     });
-    expect(buildNetWorth(db).totalBrl).toBe(0);
+    const netWorth = buildNetWorth(db);
+    expect(netWorth.brokerCashBrl).toBe(9000);
+    expect(netWorth.classes.cash).toBe(9000);
+    expect(netWorth.bankOnlyBrl).toBe(0);
+    expect(netWorth.totalBrl).toBe(9000);
   });
 
   it("cartao entra negativo e reduz o total, pelo total devido", () => {

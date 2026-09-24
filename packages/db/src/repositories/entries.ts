@@ -270,7 +270,26 @@ export function createEntriesRepository(db: Db) {
     }
     if (to.kind === "goal") return "goal_deposit";
     if (from.kind === "goal") return "goal_withdrawal";
+    // Aporte no caixa da corretora e resgate dele: dinheiro que vai investir
+    // nao e gasto e nao conta no alvo (6.4).
+    if (to.kind === "investment" || from.kind === "investment") return "investment";
     return "generic";
+  }
+
+  /**
+   * Compra e venda movem o caixa da corretora por um lancamento da operacao.
+   * Mexer nele pelo livro desencontraria caixa e carteira: quem manda e a
+   * operacao.
+   */
+  function assertNotOperationCash(entryId: number) {
+    const linked = db
+      .prepare("SELECT 1 FROM operation_cash_entries WHERE entry_id = ?")
+      .get(entryId);
+    if (linked) {
+      throw new LedgerError(
+        "Movimento de caixa de uma operacao de investimento: edite ou exclua a operacao"
+      );
+    }
   }
 
   /** Os estornos somados nunca passam do lancamento que estornam (6.6). */
@@ -594,6 +613,7 @@ export function createEntriesRepository(db: Db) {
             }
           | undefined;
         if (!existing) throw notFound("Lancamento");
+        assertNotOperationCash(id);
         // O desconto de antecipacao e da antecipacao: nasce e morre com ela.
         if (existing.isDiscount) {
           throw new LedgerError(
@@ -690,6 +710,7 @@ export function createEntriesRepository(db: Db) {
     /** Remover uma ponta remove a outra e a linha de `transfers`, em cascata. */
     remove: (id: number): number =>
       db.transaction(() => {
+        assertNotOperationCash(id);
         const transfer = db
           .prepare(
             `SELECT id, from_entry_id AS fromEntryId, to_entry_id AS toEntryId

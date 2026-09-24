@@ -10,6 +10,8 @@ export type LedgerPreset = {
   from?: string;
   to?: string;
   personId?: number;
+  /** Na carteira: chegar com a compra aberta (o "Alocar" do caixa). */
+  openTrade?: boolean;
 };
 
 export type FinanceDestination = "expenses" | "income" | "transactions" | "reports";

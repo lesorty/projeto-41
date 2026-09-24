@@ -351,6 +351,25 @@ export function createDatabase(path: string) {
       remove: (operationId: number) =>
         raw.prepare("DELETE FROM operation_transfers WHERE operation_id = ?").run(operationId)
           .changes,
+      /** O lancamento que converte caixa da corretora em ativo (ou de volta). */
+      getCash: (operationId: number) =>
+        raw
+          .prepare(
+            `SELECT operation_id AS operationId, entry_id AS entryId
+             FROM operation_cash_entries WHERE operation_id = ?`
+          )
+          .get(operationId) as { operationId: number; entryId: number } | undefined,
+      setCash: (operationId: number, entryId: number) =>
+        raw
+          .prepare(
+            `INSERT INTO operation_cash_entries(operation_id, entry_id, created_at)
+             VALUES (?, ?, ?)
+             ON CONFLICT(operation_id) DO UPDATE SET entry_id = excluded.entry_id`
+          )
+          .run(operationId, entryId, new Date().toISOString()),
+      removeCash: (operationId: number) =>
+        raw.prepare("DELETE FROM operation_cash_entries WHERE operation_id = ?").run(operationId)
+          .changes,
       /** Estado do vinculo de cada operacao, para a listagem. */
       listByOperations: (ids: number[]) => {
         if (ids.length === 0) return [];

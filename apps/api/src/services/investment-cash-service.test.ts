@@ -1,4 +1,4 @@
-import { createTestDatabase, type AppDatabase } from "@projeto41/db";
+import { createTestDatabase, migration009BrokerCash, type AppDatabase } from "@projeto41/db";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   ReconciledLinkError,
@@ -31,7 +31,8 @@ function counts() {
     operations: one("SELECT COUNT(*) AS n FROM operations"),
     entries: one("SELECT COUNT(*) AS n FROM entries"),
     transfers: one("SELECT COUNT(*) AS n FROM transfers"),
-    links: one("SELECT COUNT(*) AS n FROM operation_transfers")
+    links: one("SELECT COUNT(*) AS n FROM operation_transfers"),
+    cash: one("SELECT COUNT(*) AS n FROM operation_cash_entries")
   };
 }
 
@@ -51,18 +52,18 @@ beforeEach(() => {
 });
 
 describe("compra e venda", () => {
-  it("cria a operacao, a transferencia e debita o banco pelo valor exato", () => {
+  it("pagar pelo banco aporta no caixa e o caixa compra: o caixa fecha em zero", () => {
     const { id, transferId } = registerOperation(db, { ...BUY, accountId: checking });
     expect(transferId).not.toBeNull();
-    expect(counts()).toEqual({ operations: 1, entries: 2, transfers: 1, links: 1 });
+    expect(counts()).toEqual({ operations: 1, entries: 3, transfers: 1, links: 1, cash: 1 });
 
     expect(balanceOf(checking)).toBe(1_000_00 - 500_000);
-    expect(balanceOf(cryptoAccount)).toBe(500_000);
+    expect(balanceOf(cryptoAccount)).toBe(0);
 
     const entry = db.ledger.entries.listAll({ accountId: checking })[0]!;
     expect(entry.transferPurpose).toBe("investment");
     expect(entry.categoryId).toBeNull();
-    expect(entry.description).toBe("Compra BTC 0,01");
+    expect(entry.description).toBe("Aporte · Compra BTC 0,01");
     expect(db.operationLinks.get(id)?.transferId).toBe(transferId);
   });
 
@@ -98,14 +99,14 @@ describe("compra e venda", () => {
     expect(() =>
       registerOperation(db, { ...BUY, currency: "USD", total: 1000, accountId: checking })
     ).toThrow(/cotacao/i);
-    expect(counts()).toEqual({ operations: 0, entries: 0, transfers: 0, links: 0 });
+    expect(counts()).toEqual({ operations: 0, entries: 0, transfers: 0, links: 0, cash: 0 });
   });
 
   it("com o auto-debito desligado, a operacao nasce sem nenhum lancamento", () => {
     db.settings.set("investment.auto_debit", "0");
     const { transferId } = registerOperation(db, { ...BUY, accountId: checking });
     expect(transferId).toBeNull();
-    expect(counts()).toEqual({ operations: 1, entries: 0, transfers: 0, links: 0 });
+    expect(counts()).toEqual({ operations: 1, entries: 0, transfers: 0, links: 0, cash: 0 });
   });
 
   it("sem conta escolhida, nao movimenta caixa", () => {
@@ -120,8 +121,8 @@ describe("edicao", () => {
     updateOperation(db, id, { ...BUY, total: 3000, accountId: checking });
 
     expect(balanceOf(checking)).toBe(1_000_00 - 300_000);
-    expect(balanceOf(cryptoAccount)).toBe(300_000);
-    expect(counts().entries).toBe(2);
+    expect(balanceOf(cryptoAccount)).toBe(0);
+    expect(counts().entries).toBe(3);
   });
 
   it("move so a ponta bancaria ao trocar de conta", () => {
@@ -137,7 +138,7 @@ describe("edicao", () => {
 
     expect(balanceOf(checking)).toBe(1_000_00);
     expect(balanceOf(other)).toBe(-500_000);
-    expect(balanceOf(cryptoAccount)).toBe(500_000);
+    expect(balanceOf(cryptoAccount)).toBe(0);
   });
 
   it("vincula uma operacao que nasceu sem conta", () => {
@@ -151,7 +152,7 @@ describe("edicao", () => {
   it("desvincula ao tirar a conta", () => {
     const { id } = registerOperation(db, { ...BUY, accountId: checking });
     updateOperation(db, id, { ...BUY, accountId: null });
-    expect(counts()).toEqual({ operations: 1, entries: 0, transfers: 0, links: 0 });
+    expect(counts()).toEqual({ operations: 1, entries: 0, transfers: 0, links: 0, cash: 0 });
     expect(balanceOf(checking)).toBe(1_000_00);
   });
 });
@@ -160,7 +161,7 @@ describe("exclusao", () => {
   it("remove operacao, vinculo, transferencia e as duas entries", () => {
     const { id } = registerOperation(db, { ...BUY, accountId: checking });
     removeOperation(db, id);
-    expect(counts()).toEqual({ operations: 0, entries: 0, transfers: 0, links: 0 });
+    expect(counts()).toEqual({ operations: 0, entries: 0, transfers: 0, links: 0, cash: 0 });
     expect(balanceOf(checking)).toBe(1_000_00);
   });
 
@@ -184,9 +185,79 @@ describe("exclusao", () => {
   it("desvincular mantem a operacao e devolve o saldo", () => {
     const { id } = registerOperation(db, { ...BUY, accountId: checking });
     unlinkOperation(db, id);
-    expect(counts()).toEqual({ operations: 1, entries: 0, transfers: 0, links: 0 });
+    expect(counts()).toEqual({ operations: 1, entries: 0, transfers: 0, links: 0, cash: 0 });
     expect(balanceOf(checking)).toBe(1_000_00);
     expect(db.operations.list()[0]?.accountId).toBeNull();
+  });
+});
+
+describe("caixa da corretora", () => {
+  const deposit = (amountCents: number) =>
+    db.ledger.entries.createTransfer({
+      fromAccountId: checking,
+      toAccountId: cryptoAccount,
+      date: "2026-05-01",
+      amountCents
+    });
+
+  it("aporte e transferencia de investimento e fica em caixa", () => {
+    const { fromEntryId } = deposit(800_00);
+    expect(db.ledger.entries.get(fromEntryId)?.transferPurpose).toBe("investment");
+    expect(balanceOf(cryptoAccount)).toBe(800_00);
+  });
+
+  it("comprar com o caixa nao toca no banco", () => {
+    deposit(800_00);
+    const { transferId } = registerOperation(db, { ...BUY, total: 300, accountId: cryptoAccount });
+    expect(transferId).toBeNull();
+    expect(balanceOf(checking)).toBe(1_000_00 - 800_00);
+    expect(balanceOf(cryptoAccount)).toBe(800_00 - 300_00);
+    expect(counts()).toMatchObject({ transfers: 1, links: 0, cash: 1 });
+  });
+
+  it("venda sem conta de destino fica no caixa para realocar", () => {
+    registerOperation(db, { ...BUY, type: "sell", total: 200, accountId: cryptoAccount });
+    expect(balanceOf(cryptoAccount)).toBe(200_00);
+    expect(balanceOf(checking)).toBe(1_000_00);
+  });
+
+  it("converter caixa em ativo nao e gasto nem entrada", () => {
+    deposit(800_00);
+    registerOperation(db, { ...BUY, total: 300, accountId: cryptoAccount });
+    const month = db.ledger.reports.monthSummary({ from: "2026-05-01", to: "2026-05-31" });
+    expect(month).toEqual({ incomeCents: 0, expenseCents: 0, netCents: 0 });
+  });
+
+  it("o lancamento de caixa so muda pela operacao", () => {
+    const { id } = registerOperation(db, { ...BUY, total: 300, accountId: cryptoAccount });
+    const cash = db.operationLinks.getCash(id)!;
+    expect(() => db.ledger.entries.remove(cash.entryId)).toThrow(/edite ou exclua a operacao/);
+    removeOperation(db, id);
+    expect(counts()).toMatchObject({ operations: 0, entries: 0, cash: 0 });
+  });
+
+  it("trocar o caixa pelo banco na edicao passa a aportar automaticamente", () => {
+    deposit(800_00);
+    const { id } = registerOperation(db, { ...BUY, total: 300, accountId: cryptoAccount });
+    updateOperation(db, id, { ...BUY, total: 300, accountId: checking });
+    expect(balanceOf(cryptoAccount)).toBe(800_00);
+    expect(balanceOf(checking)).toBe(1_000_00 - 800_00 - 300_00);
+  });
+
+  it("a migracao 009 fecha em zero o caixa das operacoes antigas", () => {
+    // Simula o banco de antes: so a transferencia, sem o lancamento de caixa.
+    const { id } = registerOperation(db, { ...BUY, accountId: checking });
+    const cash = db.operationLinks.getCash(id)!;
+    db.operationLinks.removeCash(id);
+    db.raw.prepare("DELETE FROM entries WHERE id = ?").run(cash.entryId);
+    expect(balanceOf(cryptoAccount)).toBe(500_000);
+
+    migration009BrokerCash.up(db.raw);
+    expect(balanceOf(cryptoAccount)).toBe(0);
+    expect(db.operationLinks.getCash(id)).toBeDefined();
+    // Rodar de novo nao duplica.
+    migration009BrokerCash.up(db.raw);
+    expect(counts().cash).toBe(1);
   });
 });
 

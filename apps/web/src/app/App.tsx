@@ -1,6 +1,7 @@
 import { Eye, EyeOff, Menu, Moon, RefreshCw, ShieldCheck, Sun, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AllocationPage } from "../pages/Allocation.js";
+import { BrokerCashPage } from "../pages/BrokerCash.js";
 import { ContributionsPage } from "../pages/Contributions.js";
 import { DashboardPage } from "../pages/Dashboard.js";
 import { HistoryPage } from "../pages/History.js";
@@ -323,8 +324,17 @@ export function App() {
         ) : (
           <div className="page">
             {page === "dashboard" && dashboard && <DashboardPage data={dashboard} />}
+            {page === "broker-cash" && (
+              <BrokerCashPage
+                dashboard={dashboard}
+                onChanged={loadDashboard}
+                onAllocate={(portfolio) => navigate(portfolio, { openTrade: true })}
+              />
+            )}
             {page === "crypto" && (
               <PortfolioPage
+                key={preset.key}
+                openTrade={preset.value.openTrade}
                 title="Carteira cripto"
                 subtitle="Posições consolidadas em USD e convertidas para BRL"
                 portfolio="crypto"
@@ -336,6 +346,8 @@ export function App() {
             )}
             {page === "b3" && (
               <PortfolioPage
+                key={preset.key}
+                openTrade={preset.value.openTrade}
                 title="Bolsa brasileira"
                 subtitle="Ativos, preço médio e dividendos acumulados"
                 portfolio="b3"
@@ -347,7 +359,15 @@ export function App() {
             {page === "positions" && <PositionsPage onChanged={loadDashboard} />}
             {page === "contributions" && <ContributionsPage />}
             {page === "planning" && <PlanningPage />}
-            {page === "allocation" && dashboard && <AllocationPage dashboard={dashboard} />}
+            {page === "allocation" && dashboard && (
+              <AllocationPage
+                dashboard={dashboard}
+                onAllocate={(destination) =>
+                  navigate(destination, destination === "positions" ? {} : { openTrade: true })
+                }
+                onOpenCash={() => navigate("broker-cash")}
+              />
+            )}
             {page === "history" && (
               <HistoryPage
                 history={dashboard?.history ?? []}
@@ -364,7 +384,7 @@ export function App() {
             {page === "transactions" && <TransactionsPage key={preset.key} preset={preset.value} />}
             {page === "expenses" && <ExpensesPage key={preset.key} preset={preset.value} />}
             {page === "income" && <IncomePage key={preset.key} preset={preset.value} />}
-            {page === "accounts" && <AccountsPage />}
+            {page === "accounts" && <AccountsPage onOpenCash={() => navigate("broker-cash")} />}
             {page === "categories" && <CategoriesPage />}
             {page === "spending-allocation" && <SpendingAllocationPage />}
           </div>

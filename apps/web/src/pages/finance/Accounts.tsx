@@ -1,6 +1,8 @@
 import {
   Archive,
   ArchiveRestore,
+  ArrowRight,
+  Banknote,
   Pencil,
   Plus,
   Save,
@@ -18,7 +20,6 @@ import type {
 } from "@projeto41/contracts";
 import { ColorDot, ColorPicker } from "../../components/ColorPicker.js";
 import { DateField } from "../../components/datepicker.js";
-import { InvestmentCashPanel } from "../../components/finance/InvestmentCashPanel.js";
 import { Drawer, useConfirm } from "../../components/dialog.js";
 import {
   AnimatedNumber,
@@ -59,7 +60,7 @@ const KINDS: AccountKind[] = ["checking", "savings", "cash", "meal_voucher", "cr
 
 type Draft = Partial<AccountRecord> & { openingBalanceText?: string };
 
-export function AccountsPage() {
+export function AccountsPage({ onOpenCash }: { onOpenCash?: () => void }) {
   const toast = useToast();
   const confirm = useConfirm();
   const [balances, setBalances] = useState<BalancesResult | null>(null);
@@ -280,7 +281,23 @@ export function AccountsPage() {
         </>
       )}
 
-      <InvestmentCashPanel accounts={balances?.accounts ?? []} />
+      {/* Aporte, resgate e débito automático vivem no módulo de investimentos,
+          perto das operações que eles afetam. Daqui, só o caminho até lá. */}
+      {onOpenCash && (
+        <Panel className="fin-bridge">
+          <Banknote size={20} aria-hidden />
+          <div>
+            <strong>Investir a partir daqui</strong>
+            <span>
+              Aporte do banco para o caixa da corretora e escolha como as compras pagam em
+              Investimentos › Em caixa.
+            </span>
+          </div>
+          <Button variant="ghost" icon={ArrowRight} onClick={onOpenCash}>
+            Abrir Em caixa
+          </Button>
+        </Panel>
+      )}
 
       {editingPerson && (
         <PersonDrawer
@@ -372,9 +389,16 @@ function OwnerCard({
   onRestoreAccount: (account: AccountRecord) => void;
 }) {
   const archivedPerson = person != null && !person.active;
-  // Soma de dinheiro, não de dívida: cartão e conta arquivada ficam de fora.
+  // Soma de dinheiro, não de dívida: cartão e conta arquivada ficam de fora. O
+  // caixa da corretora entra: é dinheiro da pessoa, só que já do lado dos
+  // investimentos.
   const balance = accounts
-    .filter((account) => !account.archived && account.kind !== "credit_card" && account.includeInNetWorth)
+    .filter(
+      (account) =>
+        !account.archived &&
+        account.kind !== "credit_card" &&
+        (account.includeInNetWorth || account.kind === "investment")
+    )
     .reduce((total, account) => total + account.currentBalanceCents, 0);
 
   return (

@@ -94,56 +94,61 @@ function investmentAccountFor(db: AppDatabase, portfolio: "crypto" | "b3"): numb
   return portfolio === "crypto" ? settings.cryptoAccountId : settings.b3AccountId;
 }
 
-/** Cria a transferência das duas pontas e devolve o id do `transfer`. */
-function createLinkedTransfer(
+/**
+ * O caminho do dinheiro numa operação (migração 009):
+ *
+ *     banco ──aporte──▶ caixa da corretora ──compra──▶ ativo
+ *     banco ◀─resgate── caixa da corretora ◀──venda─── ativo
+ *
+ * Toda compra consome o caixa da corretora e toda venda o repõe — é o
+ * lançamento de caixa, `kind='adjustment'`, que nenhum relatório de gasto vê.
+ * Pagar direto de uma conta bancária é o mesmo caminho com um aporte
+ * automático antes: o banco manda o valor para o caixa e o caixa compra. Na
+ * venda para o banco, o caixa recebe e resgata na hora.
+ *
+ * `accountId` na operação diz de onde sai (ou para onde vai) o dinheiro:
+ * a própria conta de corretora é "usar o caixa"; outra conta é "aporte
+ * automático"; nulo é "não movimentar".
+ */
+function createCashLegs(
   db: AppDatabase,
+  operationId: number,
   operation: Operation & { accountId?: number | null },
   amount: LedgerAmount
-): number | null {
-  const bankAccountId = operation.accountId ?? null;
-  const investmentAccountId = investmentAccountFor(db, operation.portfolio);
-  if (bankAccountId == null || investmentAccountId == null) return null;
-  if (bankAccountId === investmentAccountId) return null;
+): { transferId: number | null; cashEntryId: number | null } {
+  const sourceId = operation.accountId ?? null;
+  const brokerId = investmentAccountFor(db, operation.portfolio);
+  if (sourceId == null || brokerId == null) return { transferId: null, cashEntryId: null };
 
-  // Compra tira do banco e põe na corretora; venda faz o caminho inverso.
-  const from = operation.type === "buy" ? bankAccountId : investmentAccountId;
-  const to = operation.type === "buy" ? investmentAccountId : bankAccountId;
+  const buying = operation.type === "buy";
+  const cashEntryId = db.ledger.entries.create({
+    accountId: brokerId,
+    date: operation.date,
+    amountCents: buying ? -amount.cents : amount.cents,
+    kind: "adjustment",
+    status: "cleared",
+    description: describe(operation),
+    notes: amount.note
+  });
+  db.operationLinks.setCash(operationId, cashEntryId);
+
+  if (sourceId === brokerId) return { transferId: null, cashEntryId };
 
   const { fromEntryId } = db.ledger.entries.createTransfer({
-    fromAccountId: from,
-    toAccountId: to,
+    fromAccountId: buying ? sourceId : brokerId,
+    toAccountId: buying ? brokerId : sourceId,
     date: operation.date,
     amountCents: amount.cents,
     // Transferência para investimento nunca conta no alvo de gastos: é
     // justamente para sobrar dinheiro para investir que o alvo existe (6.4).
     purpose: "investment",
     status: "cleared",
-    description: describe(operation),
+    description: `${buying ? "Aporte" : "Resgate"} · ${describe(operation)}`,
     notes: amount.note
   });
-
   const transferId = db.ledger.entries.get(fromEntryId)?.transferId ?? null;
-  return transferId;
-}
-
-export function registerOperation(
-  db: AppDatabase,
-  input: Operation & { accountId?: number | null }
-): { id: number; transferId: number | null } {
-  // Tudo numa transação só: nunca sobra operação sem transferência nem
-  // transferência sem operação.
-  return db.transaction(() => {
-    const settings = readCashSettings(db);
-    const id = db.operations.create(input);
-
-    if (!settings.autoDebit || input.accountId == null) {
-      return { id, transferId: null };
-    }
-    const amount = toLedgerCents(db, input);
-    const transferId = createLinkedTransfer(db, input, amount);
-    if (transferId != null) db.operationLinks.set(id, transferId);
-    return { id, transferId };
-  });
+  if (transferId != null) db.operationLinks.set(operationId, transferId);
+  return { transferId, cashEntryId };
 }
 
 function transferEnds(db: AppDatabase, transferId: number) {
@@ -154,14 +159,58 @@ function transferEnds(db: AppDatabase, transferId: number) {
     .get(transferId) as { fromEntryId: number; toEntryId: number } | undefined;
 }
 
-function assertNotReconciled(db: AppDatabase, transferId: number) {
-  const ends = transferEnds(db, transferId);
-  if (!ends) return;
-  for (const entryId of [ends.fromEntryId, ends.toEntryId]) {
+/** Lançamento conciliado bate com um extrato: apagar desmentiria a conferência. */
+function assertLegsNotReconciled(db: AppDatabase, operationId: number) {
+  const ids: number[] = [];
+  const link = db.operationLinks.get(operationId);
+  if (link) {
+    const ends = transferEnds(db, link.transferId);
+    if (ends) ids.push(ends.fromEntryId, ends.toEntryId);
+  }
+  const cash = db.operationLinks.getCash(operationId);
+  if (cash) ids.push(cash.entryId);
+  for (const entryId of ids) {
     if (db.ledger.entries.get(entryId)?.status === "reconciled") throw new ReconciledLinkError();
   }
 }
 
+/** Desfaz o movimento de caixa da operação (aporte automático e lançamento de caixa). */
+function removeCashLegs(db: AppDatabase, operationId: number): boolean {
+  assertLegsNotReconciled(db, operationId);
+  const link = db.operationLinks.get(operationId);
+  const cash = db.operationLinks.getCash(operationId);
+  if (link) {
+    const ends = transferEnds(db, link.transferId);
+    db.operationLinks.remove(operationId);
+    if (ends) db.ledger.entries.remove(ends.fromEntryId);
+  }
+  if (cash) {
+    db.operationLinks.removeCash(operationId);
+    db.ledger.entries.remove(cash.entryId);
+  }
+  return Boolean(link || cash);
+}
+
+export function registerOperation(
+  db: AppDatabase,
+  input: Operation & { accountId?: number | null }
+): { id: number; transferId: number | null } {
+  // Tudo numa transação só: nunca sobra operação sem lançamento de caixa nem
+  // lançamento sem operação.
+  return db.transaction(() => {
+    const settings = readCashSettings(db);
+    const id = db.operations.create(input);
+    if (!settings.autoDebit || input.accountId == null) return { id, transferId: null };
+    const { transferId } = createCashLegs(db, id, input, toLedgerCents(db, input));
+    return { id, transferId };
+  });
+}
+
+/**
+ * Editar refaz o movimento de caixa do zero. Remendar ponta por ponta era
+ * frágil com três caminhos possíveis (caixa, aporte automático, nenhum), e o
+ * resultado de refazer é o mesmo que o de registrar a operação já editada.
+ */
 export function updateOperation(
   db: AppDatabase,
   id: number,
@@ -169,62 +218,18 @@ export function updateOperation(
 ): { transferId: number | null } {
   return db.transaction(() => {
     const settings = readCashSettings(db);
+    const amount = input.accountId == null ? null : toLedgerCents(db, input);
+    const hadLegs = removeCashLegs(db, id);
     db.operations.update(id, input);
-    const link = db.operationLinks.get(id);
-
-    // Tirar a conta desfaz o vínculo; é o mesmo caminho de "desvincular".
-    if (input.accountId == null) {
-      if (link) unlinkOperation(db, id);
-      return { transferId: null };
-    }
-
-    if (!link) {
-      if (!settings.autoDebit) return { transferId: null };
-      const amount = toLedgerCents(db, input);
-      const transferId = createLinkedTransfer(db, input, amount);
-      if (transferId != null) db.operationLinks.set(id, transferId);
-      return { transferId };
-    }
-
-    assertNotReconciled(db, link.transferId);
-    const ends = transferEnds(db, link.transferId);
-    if (!ends) return { transferId: null };
-
-    const amount = toLedgerCents(db, input);
-    const investmentAccountId = investmentAccountFor(db, input.portfolio);
-    const bankIsFrom = input.type === "buy";
-    const fromAccountId = bankIsFrom ? input.accountId : (investmentAccountId ?? input.accountId);
-    const toAccountId = bankIsFrom ? (investmentAccountId ?? input.accountId) : input.accountId;
-
-    // `entries.update` já mantém o par espelhado; basta reescrever a ponta de
-    // saída com o valor, a data e a conta novos.
-    db.ledger.entries.update(ends.fromEntryId, {
-      accountId: fromAccountId,
-      date: input.date,
-      amountCents: -amount.cents,
-      kind: "transfer",
-      status: "cleared",
-      description: describe(input),
-      notes: amount.note
-    });
-    db.raw
-      .prepare("UPDATE entries SET account_id = ?, updated_at = ? WHERE id = ?")
-      .run(toAccountId, new Date().toISOString(), ends.toEntryId);
-
-    return { transferId: link.transferId };
+    if (amount == null || (!hadLegs && !settings.autoDebit)) return { transferId: null };
+    return { transferId: createCashLegs(db, id, input, amount).transferId };
   });
 }
 
 /** Desfaz o movimento de caixa, mantendo a operação. */
 export function unlinkOperation(db: AppDatabase, id: number) {
   return db.transaction(() => {
-    const link = db.operationLinks.get(id);
-    if (link) {
-      assertNotReconciled(db, link.transferId);
-      const ends = transferEnds(db, link.transferId);
-      db.operationLinks.remove(id);
-      if (ends) db.ledger.entries.remove(ends.fromEntryId);
-    }
+    removeCashLegs(db, id);
     db.raw.prepare("UPDATE operations SET account_id = NULL WHERE id = ?").run(id);
     return { ok: true as const };
   });
@@ -232,15 +237,9 @@ export function unlinkOperation(db: AppDatabase, id: number) {
 
 export function removeOperation(db: AppDatabase, id: number) {
   return db.transaction(() => {
-    const link = db.operationLinks.get(id);
-    if (link) {
-      // Recusar é a única saída aceitável: deixar transferência órfã ou apagar
-      // lançamento conciliado são as duas piores alternativas.
-      assertNotReconciled(db, link.transferId);
-      const ends = transferEnds(db, link.transferId);
-      db.operationLinks.remove(id);
-      if (ends) db.ledger.entries.remove(ends.fromEntryId);
-    }
+    // Recusar é a única saída aceitável: deixar lançamento órfão ou apagar
+    // lançamento conciliado são as duas piores alternativas.
+    removeCashLegs(db, id);
     db.operations.remove(id);
     return { ok: true as const };
   });
@@ -251,13 +250,35 @@ export function listOperationsWithLinks(db: AppDatabase, portfolio?: "crypto" | 
   const operations = db.operations.list(portfolio);
   const links = db.operationLinks.listByOperations(operations.map((operation) => operation.id));
   const byOperation = new Map(links.map((link) => [link.operationId, link]));
+  const cash = new Map(
+    (
+      db.raw
+        .prepare(
+          `SELECT oc.operation_id AS operationId, e.status
+           FROM operation_cash_entries oc
+           JOIN entries e ON e.id = oc.entry_id`
+        )
+        .all() as { operationId: number; status: string }[]
+    ).map((row) => [row.operationId, row])
+  );
+  const names = new Map(
+    (db.raw.prepare("SELECT id, name FROM accounts").all() as { id: number; name: string }[]).map(
+      (row) => [row.id, row.name]
+    )
+  );
   return operations.map((operation) => {
     const link = byOperation.get(operation.id);
+    const cashLeg = cash.get(operation.id);
+    const moved = Boolean(link || cashLeg);
     return {
       ...operation,
-      accountName: link?.accountName ?? null,
+      // De onde saiu (ou para onde foi) o dinheiro: a conta bancária do aporte
+      // automático, ou o próprio caixa da corretora.
+      accountName:
+        moved && operation.accountId != null ? (names.get(operation.accountId) ?? null) : null,
       transferId: link?.transferId ?? null,
-      transferStatus: link?.transferStatus ?? null
+      transferStatus: link?.transferStatus ?? cashLeg?.status ?? null,
+      cashSource: link ? ("bank" as const) : cashLeg ? ("broker" as const) : null
     };
   });
 }

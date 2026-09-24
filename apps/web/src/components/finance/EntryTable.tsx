@@ -264,7 +264,13 @@ function EntryRow({
       <span className="fin-entry-side">
         <strong
           className={`fin-amount ${
-            isTransfer ? "" : entry.amountCents < 0 ? "fin-negative" : "fin-positive"
+            // Transferência e troca de caixa por ativo mudam o dinheiro de
+            // lugar: não são ganho nem gasto, então não levam cor.
+            isTransfer || entry.kind === "adjustment"
+              ? ""
+              : entry.amountCents < 0
+                ? "fin-negative"
+                : "fin-positive"
           }`}
         >
           {merged ? moneyFromCents(Math.abs(entry.amountCents)) : signedMoneyFromCents(entry.amountCents)}

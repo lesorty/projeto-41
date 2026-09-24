@@ -24,13 +24,16 @@ import { currency as fmtCurrency, currencyRaw, decimal, fx, longDate, money, per
 import { portfolioIconUrl } from "../lib/icons.js";
 import { useToast } from "../lib/toast.js";
 import type { Asset, CryptoSearchResult, OperationRecord } from "@projeto41/contracts";
-import { AccountSelect } from "../components/finance/AccountSelect.js";
+import { CashSourceSelect } from "../components/CashSourceSelect.js";
+import { brokerIdOf, type CashSettings } from "../lib/cash.js";
 
 /** A rota devolve o estado do vínculo junto da operação (fase 4). */
 type OperationRow = OperationRecord & {
   accountName?: string | null;
   transferId?: number | null;
   transferStatus?: string | null;
+  /** De onde veio o dinheiro: o caixa da corretora ou uma conta (aporte automático). */
+  cashSource?: "broker" | "bank" | null;
 };
 
 type SortKey = "asset" | "quantity" | "averagePrice" | "price" | "marketValueBrl" | "totalReturn";
@@ -42,6 +45,7 @@ export function PortfolioPage({
   assets,
   investableTotal,
   usdBrl = 0,
+  openTrade = false,
   onChanged
 }: {
   title: string;
@@ -50,6 +54,8 @@ export function PortfolioPage({
   assets: Asset[];
   investableTotal: number;
   usdBrl?: number;
+  /** Chega com a compra aberta: é o "Alocar" do caixa e da meta de alocação. */
+  openTrade?: boolean;
   onChanged: () => Promise<void>;
 }) {
   const toast = useToast();
@@ -58,7 +64,7 @@ export function PortfolioPage({
   const code = isCrypto ? "USD" : "BRL";
 
   const [operations, setOperations] = useState<OperationRow[]>([]);
-  const [drawer, setDrawer] = useState(false);
+  const [drawer, setDrawer] = useState(openTrade);
   const [editing, setEditing] = useState<OperationRow | null>(null);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "marketValueBrl", dir: -1 });
@@ -311,7 +317,9 @@ export function PortfolioPage({
                   <td>
                     {/* A diferença entre operação antiga e nova fica na cara:
                         nada foi vinculado automaticamente. */}
-                    {operation.transferId ? (
+                    {operation.cashSource === "broker" ? (
+                      <Tag tone="info">Caixa</Tag>
+                    ) : operation.cashSource === "bank" || operation.transferId ? (
                       <Tag tone="positive">{operation.accountName ?? "Vinculada"}</Tag>
                     ) : (
                       <Tag tone="muted">Sem caixa</Tag>
@@ -423,13 +431,21 @@ function OperationDrawer({
 
   useEffect(() => {
     if (initial || defaultLoaded) return;
-    void api<{ defaultAccountId: number | null }>("/investments/cash-settings")
+    // O padrão é o caixa da corretora; uma conta configurada vira aporte
+    // automático; com a movimentação desligada, a operação é só registro.
+    void api<CashSettings>("/investments/cash-settings")
       .then((settings) => {
-        setAccountId((current) => current ?? settings.defaultAccountId);
+        setAccountId(
+          (current) =>
+            current ??
+            (settings.autoDebit
+              ? (settings.defaultAccountId ?? brokerIdOf(settings, portfolio))
+              : null)
+        );
         setDefaultLoaded(true);
       })
       .catch(() => setDefaultLoaded(true));
-  }, [initial, defaultLoaded]);
+  }, [initial, defaultLoaded, portfolio]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -495,17 +511,15 @@ function OperationDrawer({
    * O que vai efetivamente sair (ou entrar) na conta, em BRL. Mostrar isso
    * antes de salvar evita o usuário descobrir a conversão depois, no extrato.
    */
-  const movementLabel = (() => {
-    const totalInStored =
-      isCrypto && entryCurrency === "BRL" && usdBrl > 0 ? netTotal / usdBrl : netTotal;
-    if (storedCode === "USD") {
-      if (!(usdBrl > 0)) return "Sem cotação do dólar: a operação será recusada.";
-      return `US$ ${decimal(totalInStored, 2)} · USDBRL ${fx(usdBrl)} · ${money(
-        totalInStored * usdBrl
-      )}`;
-    }
-    return money(totalInStored);
-  })();
+  const totalInStored =
+    isCrypto && entryCurrency === "BRL" && usdBrl > 0 ? netTotal / usdBrl : netTotal;
+  const movementBrl = storedCode === "USD" ? totalInStored * usdBrl : totalInStored;
+  const conversion =
+    storedCode !== "USD"
+      ? undefined
+      : usdBrl > 0
+        ? `US$ ${decimal(totalInStored, 2)} · USDBRL ${fx(usdBrl)}`
+        : "Sem cotação do dólar: a operação será recusada.";
 
   return (
     <Drawer
@@ -571,21 +585,14 @@ function OperationDrawer({
         </Field>
         {/* O campo fica junto do valor, não escondido num avançado (D03): a
             conta é uma escolha do momento da operação. */}
-        <Field
-          label={type === "buy" ? "Debitar de" : "Creditar em"}
-          hint={
-            accountId == null
-              ? "A operação será registrada sem movimentar o caixa."
-              : movementLabel
-          }
-        >
-          <AccountSelect
-            value={accountId}
-            onChange={setAccountId}
-            allowNone
-            exclude={["credit_card", "investment"]}
-          />
-        </Field>
+        <CashSourceSelect
+          portfolio={portfolio}
+          type={type}
+          value={accountId}
+          onChange={setAccountId}
+          amountBrl={movementBrl}
+          conversion={conversion}
+        />
 
         <Field label="Data">
           <DateField value={date} onChange={setDate} />

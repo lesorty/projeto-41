@@ -91,6 +91,7 @@ export function buildDashboard(db: AppDatabase, now = new Date()) {
     // nao soma nada.
     bankOnlyBrl: netWorth.bankOnlyBrl,
     investmentsBrl: netWorth.investmentsBrl,
+    brokerCashBrl: netWorth.brokerCashBrl,
     liabilitiesBrl: netWorth.liabilitiesBrl,
     creditCardCurrentBrl: netWorth.creditCardCurrentBrl,
     investableBrl: netWorth.investableBrl,
