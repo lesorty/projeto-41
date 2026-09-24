@@ -5,7 +5,9 @@ const brlCompact = new Intl.NumberFormat("pt-BR", {
   currency: "BRL",
   maximumFractionDigits: 1
 });
-const usdFmt = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
+// Dólar também no formato brasileiro: "US$ 1.669,27". Em "$1,669.27" ao lado
+// de "R$ 8.582,37" a vírgula e o ponto trocavam de papel na mesma tela.
+const usdFmt = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "USD" });
 const pctFmt = new Intl.NumberFormat("pt-BR", {
   style: "percent",
   minimumFractionDigits: 2,
@@ -24,16 +26,43 @@ export function money(value: number) {
 }
 
 export function usd(value: number) {
-  return masked ? `$ ${MASK}` : usdFmt.format(value || 0);
+  return masked ? `US$ ${MASK}` : usdFmt.format(value || 0);
 }
 
 export function currency(value: number, code: "BRL" | "USD" | string) {
   return code === "USD" ? usd(value) : money(value);
 }
 
+/**
+ * Casas decimais de um preço unitário. Acima de 1 bastam os centavos; abaixo,
+ * o preço precisa de dígitos até mostrar três significativos — senão uma
+ * moeda a US$ 0,0000123 aparecia como "US$ 0,00", que não diz nada.
+ */
+export function priceFractionDigits(value: number) {
+  const magnitude = Math.abs(value || 0);
+  if (magnitude === 0 || magnitude >= 1) return 2;
+  return Math.min(10, Math.max(2, Math.ceil(-Math.log10(magnitude)) + 2));
+}
+
+const priceFormats = new Map<string, Intl.NumberFormat>();
+function priceFormat(code: string, digits: number) {
+  const key = `${code}:${digits}`;
+  let format = priceFormats.get(key);
+  if (!format) {
+    format = new Intl.NumberFormat("pt-BR", {
+      style: "currency",
+      currency: code === "USD" ? "USD" : "BRL",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: digits
+    });
+    priceFormats.set(key, format);
+  }
+  return format;
+}
+
 // Cotações de mercado (preço unitário) não são sensíveis -> nunca mascaradas.
 export function currencyRaw(value: number, code: "BRL" | "USD" | string) {
-  return code === "USD" ? usdFmt.format(value || 0) : brl.format(value || 0);
+  return priceFormat(code, priceFractionDigits(value)).format(value || 0);
 }
 
 export function percent(value: number) {

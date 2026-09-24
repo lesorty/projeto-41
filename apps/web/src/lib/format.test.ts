@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   budgetPair,
   centsToInput,
+  currencyRaw,
+  priceFractionDigits,
   todayIso,
   compactMoneyFromCents,
   debtFromCents,
@@ -62,5 +64,21 @@ describe("todayIso", () => {
     // 23h30 no fuso local: em UTC (Brasil) ja seria o dia seguinte.
     expect(todayIso(new Date(2026, 8, 24, 23, 30))).toBe("2026-09-24");
     expect(todayIso(new Date(2026, 0, 5, 0, 5))).toBe("2026-01-05");
+  });
+});
+
+describe("preços", () => {
+  const nbsp = (text: string) => text.replace(/ /g, " ");
+
+  it("dólar sai no formato brasileiro, como o real", () => {
+    expect(nbsp(currencyRaw(1669.27, "USD"))).toBe("US$ 1.669,27");
+    expect(nbsp(currencyRaw(612345.67, "BRL"))).toBe("R$ 612.345,67");
+  });
+
+  it("preço baixo ganha casas até mostrar o número", () => {
+    expect(nbsp(currencyRaw(0.0000123, "USD"))).toBe("US$ 0,0000123");
+    expect(nbsp(currencyRaw(0.5, "USD"))).toBe("US$ 0,50");
+    expect(nbsp(currencyRaw(0.0421, "BRL"))).toBe("R$ 0,0421");
+    expect(priceFractionDigits(350)).toBe(2);
   });
 });
