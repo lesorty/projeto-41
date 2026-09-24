@@ -4,6 +4,7 @@ import {
   categoryTrendQuerySchema,
   periodSchema,
   personPeriodBudgetInputSchema,
+  reportRangeSchema,
   type CategoryReport,
   type LedgerSummary,
   type TargetReport
@@ -14,9 +15,6 @@ import {
   computeTargets,
   distributeShares,
   endOfMonth,
-  formatMonth,
-  addMonths,
-  parseMonth,
   partialPeriod,
   previousRange,
   previousRangeToDate,
@@ -173,11 +171,16 @@ function buildTargets(db: AppDatabase, period: string): TargetReport {
  */
 export const registerLedgerReportsRoutes: RoutePlugin = (app, { db }) => {
   app.get("/api/ledger/summary", async (request) => {
-    const { period } = z
-      .object({ period: periodSchema.default(currentPeriod()) })
-      .parse(request.query);
-    const range: Range = { from: startOfMonth(period), to: endOfMonth(period) };
-    const previousMonth = formatMonth(addMonths(parseMonth(period), -1));
+    // Sem recorte, o mes corrente — calculado agora, nao quando o servidor
+    // subiu. Com recorte (ano, intervalo), o resumo fala do mesmo periodo que
+    // a rosca ao lado, e compara com o periodo equivalente anterior.
+    const query = request.query as Record<string, unknown>;
+    const chosen = ["from", "to", "period", "year"].some((key) => query[key] != null);
+    const range = chosen
+      ? resolveRange(reportRangeSchema.parse(query))
+      : { from: startOfMonth(currentPeriod()), to: endOfMonth(currentPeriod()) };
+    const period = range.from.slice(0, 7);
+    const previous = previousRange(range);
 
     // Reaproveita o calculo de saldo da fase 1 — nada e reescrito aqui (6.1).
     const balances = db.ledger.balances.consolidated({ asOf: today() });
@@ -198,10 +201,7 @@ export const registerLedgerReportsRoutes: RoutePlugin = (app, { db }) => {
         currentBalanceCents: account.currentBalanceCents
       })),
       month: db.ledger.reports.monthSummary(range),
-      previousMonth: db.ledger.reports.monthSummary({
-        from: startOfMonth(previousMonth),
-        to: endOfMonth(previousMonth)
-      })
+      previousMonth: db.ledger.reports.monthSummary(previous)
     };
     return summary;
   });
@@ -227,7 +227,7 @@ export const registerLedgerReportsRoutes: RoutePlugin = (app, { db }) => {
 
   app.get("/api/ledger/targets", async (request) => {
     const { period } = z
-      .object({ period: periodSchema.default(currentPeriod()) })
+      .object({ period: periodSchema.default(currentPeriod) })
       .parse(request.query);
     return buildTargets(db, period);
   });

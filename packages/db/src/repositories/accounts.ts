@@ -12,6 +12,22 @@ export function createAccountsRepository(db: Db) {
     }
   }
 
+  const REFERENCES = {
+    entries: "SELECT COUNT(*) AS n FROM entries WHERE account_id = ?",
+    installmentPlans: "SELECT COUNT(*) AS n FROM installment_plans WHERE account_id = ?",
+    paidCards: "SELECT COUNT(*) AS n FROM accounts WHERE payment_account_id = ?",
+    goals: "SELECT COUNT(*) AS n FROM goals WHERE account_id = ?",
+    operations: "SELECT COUNT(*) AS n FROM operations WHERE account_id = ?",
+    importBatches: "SELECT COUNT(*) AS n FROM import_batches WHERE account_id = ?",
+    importCounterparts: "SELECT COUNT(*) AS n FROM import_rows WHERE counterparty_account_id = ?"
+  } as const;
+
+  function referencesOf(id: number): Record<keyof typeof REFERENCES, number> {
+    return Object.fromEntries(
+      Object.entries(REFERENCES).map(([key, sql]) => [key, countReferencing(db, sql, id)])
+    ) as Record<keyof typeof REFERENCES, number>;
+  }
+
   const repository = {
     /**
      * Lista sempre com saldo atual e previsto embutidos: a UI nunca soma
@@ -61,6 +77,20 @@ export function createAccountsRepository(db: Db) {
       if (account.paymentAccountId === id) {
         throw new LedgerError("Conta de pagamento nao pode ser o proprio cartao");
       }
+      // Lancamento de cartao tem fatura e o das outras contas nao (4.2). Trocar
+      // o tipo com historico deixaria linhas de um jeito numa conta do outro.
+      const current = db.prepare("SELECT kind FROM accounts WHERE id = ?").get(id) as
+        | { kind: AccountRecord["kind"] }
+        | undefined;
+      if (!current) throw notFound("Conta");
+      const crossesCard =
+        current.kind !== account.kind &&
+        (current.kind === "credit_card" || account.kind === "credit_card");
+      if (crossesCard && referencesOf(id).entries > 0) {
+        throw new LedgerError(
+          "Conta com lancamentos nao vira cartao, nem cartao vira conta: crie uma conta nova"
+        );
+      }
       const changes = db
         .prepare(
           `UPDATE accounts SET person_id=@personId, name=@name, kind=@kind,
@@ -99,13 +129,15 @@ export function createAccountsRepository(db: Db) {
       return changes;
     },
 
-    /** Conta com lancamento vira arquivada; apagar destruiria o historico. */
+    /**
+     * Conta em uso vira arquivada; apagar destruiria o historico. "Em uso" e
+     * qualquer referencia sem cascata: lancamento, parcelamento, cartao que
+     * paga por ela, caixinha, operacao de investimento ou importacao. Olhar so
+     * os lancamentos deixava o DELETE esbarrar na chave estrangeira.
+     */
     remove: (id: number): number => {
-      const used = countReferencing(
-        db,
-        "SELECT COUNT(*) AS n FROM entries WHERE account_id = ?",
-        id
-      );
+      const references = referencesOf(id);
+      const used = Object.values(references).reduce((total, count) => total + count, 0);
       if (used > 0) {
         db.prepare("UPDATE accounts SET archived = 1 WHERE id = ?").run(id);
         return 0;

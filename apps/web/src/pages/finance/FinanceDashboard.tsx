@@ -56,9 +56,13 @@ export function FinanceDashboardPage({ onNavigate }: { onNavigate: FinanceNaviga
       const query = period.period
         ? `?period=${period.period}`
         : filterToQuery({ from: period.from, to: period.to });
+      // Tudo no mesmo recorte. O alvo é mensal: fora de um mês ele não tem o
+      // que comparar, e mostrar o do mês corrente ao lado de um ano confundia.
       const [nextSummary, nextTargets, nextReport] = await Promise.all([
-        api<LedgerSummary>(`/ledger/summary${period.period ? `?period=${period.period}` : ""}`),
-        api<TargetReport>(`/ledger/targets${period.period ? `?period=${period.period}` : ""}`),
+        api<LedgerSummary>(`/ledger/summary${query}`),
+        period.period
+          ? api<TargetReport>(`/ledger/targets?period=${period.period}`)
+          : Promise.resolve(null),
         api<CategoryReport>(`/ledger/reports/categories${query}&compare=0`.replace("?&", "?"))
       ]);
       setSummary(nextSummary);
@@ -202,12 +206,16 @@ export function FinanceDashboardPage({ onNavigate }: { onNavigate: FinanceNaviga
             </button>
           </div>
 
-          {targets && (
+          {targets ? (
             <Panel
               title="Alvo × realizado"
               subtitle="Clique numa barra para ver os gastos da pessoa contra os objetivos"
             >
               <TargetBars report={targets} onSelect={(bar) => open("expenses", bar.personId)} />
+            </Panel>
+          ) : (
+            <Panel title="Alvo × realizado">
+              <p className="fin-muted">O alvo é mensal: escolha um mês para comparar.</p>
             </Panel>
           )}
 

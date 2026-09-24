@@ -700,6 +700,16 @@ export function createEntriesRepository(db: Db) {
           | undefined;
 
         if (transfer) {
+          // A transferencia de uma operacao de investimento pertence a operacao:
+          // apaga-la daqui deixaria a operacao apontando para o nada.
+          const linked = db
+            .prepare("SELECT 1 FROM operation_transfers WHERE transfer_id = ?")
+            .get(transfer.id);
+          if (linked) {
+            throw new LedgerError(
+              "Transferencia criada por uma operacao de investimento: edite ou exclua a operacao"
+            );
+          }
           db.prepare("DELETE FROM transfers WHERE id = ?").run(transfer.id);
           db.prepare("DELETE FROM entries WHERE id IN (?, ?)").run(
             transfer.fromEntryId,

@@ -97,9 +97,16 @@ export function AccountsPage() {
       confirmLabel: "Arquivar"
     });
     if (!ok) return;
-    await api(`/ledger/accounts/${account.id}`, { method: "DELETE" });
-    toast.notify("Conta arquivada");
-    await load();
+    try {
+      // Conta sem uso nenhum é apagada de vez; o servidor diz qual dos dois fez.
+      const result = await api<{ archived: boolean }>(`/ledger/accounts/${account.id}`, {
+        method: "DELETE"
+      });
+      toast.notify(result.archived ? "Conta arquivada" : "Conta removida");
+      await load();
+    } catch (error) {
+      toast.notify(error instanceof Error ? error.message : "Falha ao arquivar", "error");
+    }
   }
 
   async function removePerson(person: PersonRecord) {
@@ -109,11 +116,15 @@ export function AccountsPage() {
       confirmLabel: "Remover"
     });
     if (!ok) return;
-    const result = await api<{ archived: boolean }>(`/ledger/people/${person.id}`, {
-      method: "DELETE"
-    });
-    toast.notify(result.archived ? "Pessoa arquivada" : "Pessoa removida");
-    await load();
+    try {
+      const result = await api<{ archived: boolean }>(`/ledger/people/${person.id}`, {
+        method: "DELETE"
+      });
+      toast.notify(result.archived ? "Pessoa arquivada" : "Pessoa removida");
+      await load();
+    } catch (error) {
+      toast.notify(error instanceof Error ? error.message : "Falha ao remover", "error");
+    }
   }
 
   if (loading) return <Loading />;
@@ -336,7 +347,8 @@ function PersonDrawer({
     event.preventDefault();
     setSaving(true);
     try {
-      const body = { name, kind, color, active: true };
+      // Editar o nome não reativa quem foi arquivado.
+      const body = { name, kind, color, active: initial.active ?? true };
       if (initial.id) {
         await api(`/ledger/people/${initial.id}`, { method: "PUT", body: JSON.stringify(body) });
       } else {
@@ -456,7 +468,12 @@ function AccountDrawer({
         closingDay: isCard ? Number(closingDay) || null : null,
         dueDay: isCard ? Number(dueDay) || null : null,
         creditLimitCents: isCard ? limitCents : null,
-        paymentAccountId: isCard ? paymentAccountId : null
+        paymentAccountId: isCard ? paymentAccountId : null,
+        // O que o formulário não mostra vai como estava: o contrato completa
+        // o ausente com o padrão, e o padrão apagaria ordem, ícone e arquivo.
+        icon: initial.icon ?? null,
+        sortOrder: initial.sortOrder ?? 0,
+        archived: initial.archived ?? false
       };
       if (initial.id) {
         await api(`/ledger/accounts/${initial.id}`, { method: "PUT", body: JSON.stringify(body) });

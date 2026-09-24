@@ -83,6 +83,27 @@ describe("GET /api/ledger/summary", () => {
   it("recusa periodo malformado", async () => {
     expect((await app.inject("/api/ledger/summary?period=2026-13")).statusCode).toBe(400);
   });
+
+  it("resume o mesmo recorte da rosca quando o periodo e um ano ou intervalo", async () => {
+    seedExpense(50000, mercado);
+    seedExpense(20000, lazer, { date: "2026-07-02" });
+
+    const year = await app.inject("/api/ledger/summary?year=2026").then((r) => r.json());
+    expect(year.month.expenseCents).toBe(-70000);
+
+    const range = await app
+      .inject("/api/ledger/summary?from=2026-07-01&to=2026-07-31")
+      .then((r) => r.json());
+    expect(range.month.expenseCents).toBe(-20000);
+  });
+
+  it("sem recorte, usa o mes de hoje", async () => {
+    const response = await app.inject("/api/ledger/summary");
+    expect(response.statusCode).toBe(200);
+    const now = new Date();
+    const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    expect(response.json().period).toBe(month);
+  });
 });
 
 describe("GET /api/ledger/reports/categories", () => {

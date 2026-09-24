@@ -313,6 +313,89 @@ describe("cadastros", () => {
   });
 });
 
+describe("contas em uso e arquivadas", () => {
+  const card = () =>
+    ledger.accounts.create({
+      name: "Cartao",
+      kind: "credit_card",
+      color: "#f00",
+      personId: steylor,
+      closingDay: 20,
+      dueDay: 27,
+      paymentAccountId: savings
+    });
+
+  it("conta que paga um cartao e arquivada, nao esbarra na chave estrangeira", () => {
+    card();
+    expect(ledger.accounts.remove(savings)).toBe(0);
+    expect(ledger.accounts.get(savings, { includeArchived: true })?.archived).toBe(true);
+  });
+
+  it("conta sem uso nenhum e apagada de verdade", () => {
+    expect(ledger.accounts.remove(savings)).toBe(1);
+  });
+
+  it("o consolidado deixa de fora a conta arquivada, como o patrimonio", () => {
+    const before = ledger.balances.consolidated().consolidatedCents;
+    const extra = ledger.accounts.create({
+      name: "Antiga",
+      kind: "checking",
+      color: "#000",
+      personId: steylor,
+      openingBalanceCents: 70_00
+    });
+    expect(ledger.balances.consolidated().consolidatedCents).toBe(before + 70_00);
+    ledger.accounts.archive(extra);
+    expect(ledger.balances.consolidated().consolidatedCents).toBe(before);
+    expect(ledger.balances.byKind().checking).toBe(before);
+  });
+
+  it("conta com lancamentos nao vira cartao", () => {
+    expense();
+    const account = ledger.accounts.get(checking)!;
+    expect(() =>
+      ledger.accounts.update(checking, {
+        ...account,
+        kind: "credit_card",
+        closingDay: 20,
+        dueDay: 27
+      })
+    ).toThrow(/nao vira cartao/);
+    // Mudar entre tipos que nao sao cartao continua livre.
+    expect(ledger.accounts.update(checking, { ...account, kind: "savings" })).toBe(1);
+  });
+});
+
+describe("transferencia de operacao de investimento", () => {
+  it("nao se exclui pelo livro", () => {
+    const database = createTestDatabase();
+    const books = database.ledger;
+    const person = books.people.list()[0]!.id;
+    const from = books.accounts.create({ name: "A", kind: "checking", color: "#000", personId: person });
+    const to = books.accounts.create({ name: "B", kind: "investment", color: "#111", personId: person });
+    const transfer = books.entries.createTransfer({
+      fromAccountId: from,
+      toAccountId: to,
+      date: YESTERDAY,
+      amountCents: 1000,
+      purpose: "investment"
+    });
+    const transferId = (
+      database.raw.prepare("SELECT id FROM transfers WHERE from_entry_id = ?").get(transfer.fromEntryId) as {
+        id: number;
+      }
+    ).id;
+    database.raw.pragma("foreign_keys = OFF");
+    database.raw
+      .prepare("INSERT INTO operation_transfers(operation_id, transfer_id, created_at) VALUES (?, ?, ?)")
+      .run(999, transferId, "2026-01-01T00:00:00Z");
+    database.raw.pragma("foreign_keys = ON");
+
+    expect(() => books.entries.remove(transfer.fromEntryId)).toThrow(/operacao de investimento/);
+    expect(books.entries.get(transfer.fromEntryId)).toBeDefined();
+  });
+});
+
 describe("today", () => {
   it("devolve a data local em ISO", () => {
     expect(today()).toMatch(/^\d{4}-\d{2}-\d{2}$/);

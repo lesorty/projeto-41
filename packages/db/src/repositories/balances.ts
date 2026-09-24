@@ -188,10 +188,14 @@ export function createBalancesRepository(db: Db) {
         ? accounts
         : accounts.filter((account) => !account.archived);
 
-      const counted = accounts.filter(
+      // Os totais seguem `byKind`, que alimenta o Patrimonio: conta arquivada
+      // fica fora dos dois. Somar aqui e nao la dava dois saldos para o mesmo
+      // dinheiro, um no Painel e outro no Patrimonio.
+      const active = accounts.filter((account) => !account.archived);
+      const counted = active.filter(
         (account) => account.includeInNetWorth && account.kind !== "credit_card"
       );
-      const cards = accounts.filter((account) => account.kind === "credit_card");
+      const cards = active.filter((account) => account.kind === "credit_card");
 
       return {
         accounts: visible,
@@ -199,9 +203,10 @@ export function createBalancesRepository(db: Db) {
           (total, account) => total + account.currentBalanceCents,
           0
         ),
-        creditCardStatementCents: cards
-          .filter((account) => !account.archived)
-          .reduce((total, account) => total + (account.currentStatementCents ?? 0), 0),
+        creditCardStatementCents: cards.reduce(
+          (total, account) => total + (account.currentStatementCents ?? 0),
+          0
+        ),
         creditCardDueCents: cards.reduce((total, account) => total + (account.totalDueCents ?? 0), 0)
       };
     }
