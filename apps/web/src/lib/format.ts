@@ -198,6 +198,16 @@ export function budgetPair(spentCents: number, budgetCents: number | null | unde
 }
 
 /** Campo de entrada: converte centavos no texto editável em pt-BR. */
+/**
+ * Hoje em `YYYY-MM-DD` no fuso de quem usa. `toISOString()` é UTC: depois das
+ * 21h em Brasília ele já devolve amanhã, e a compra cai na fatura errada.
+ */
+export function todayIso(date: Date = new Date()): string {
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
 export function centsToInput(cents: number | null | undefined) {
   if (cents == null) return "";
   return (Math.abs(cents) / 100).toFixed(2).replace(".", ",");

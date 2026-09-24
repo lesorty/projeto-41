@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   budgetPair,
   centsToInput,
+  todayIso,
   compactMoneyFromCents,
   debtFromCents,
   moneyFromCents,
@@ -53,5 +54,13 @@ describe("modo privacidade", () => {
   it("nao mascara o campo de edicao, que o usuario precisa enxergar para digitar", () => {
     setValuesMasked(true);
     expect(centsToInput(123456)).toBe("1234,56");
+  });
+});
+
+describe("todayIso", () => {
+  it("usa o dia local, nao o UTC", () => {
+    // 23h30 no fuso local: em UTC (Brasil) ja seria o dia seguinte.
+    expect(todayIso(new Date(2026, 8, 24, 23, 30))).toBe("2026-09-24");
+    expect(todayIso(new Date(2026, 0, 5, 0, 5))).toBe("2026-01-05");
   });
 });

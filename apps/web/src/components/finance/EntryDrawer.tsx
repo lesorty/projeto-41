@@ -17,7 +17,7 @@ import { InstallmentFields } from "./InstallmentFields.js";
 import { PhotoField } from "./PhotoField.js";
 import { RefundDrawer } from "./RefundDrawer.js";
 import { SeriesScopeDialog } from "./SeriesScopeDialog.js";
-import { centsToInput } from "../../lib/format.js";
+import { centsToInput, todayIso } from "../../lib/format.js";
 import { PAYMENT_METHOD_LABEL, STATUS_LABEL, ledgerApi } from "../../lib/ledger.js";
 import type { LedgerReference } from "../../lib/ledger.js";
 import { api } from "../../lib/api.js";
@@ -26,7 +26,10 @@ import { useToast } from "../../lib/toast.js";
 /** Tipos oferecidos no formulário. `adjustment` é interno, não se cria à mão. */
 type FormKind = "expense" | "income" | "transfer";
 
-const today = () => new Date().toISOString().slice(0, 10);
+/** Caixinha e investimento têm fluxo próprio: não são a conta padrão de um gasto. */
+const everydayAccount = (reference: LedgerReference) =>
+  reference.accounts.find((account) => account.kind !== "goal" && account.kind !== "investment") ??
+  reference.accounts[0];
 
 export function EntryDrawer({
   entry,
@@ -47,14 +50,19 @@ export function EntryDrawer({
   const confirm = useConfirm();
   const editing = entry != null;
   const isTransfer = entry?.kind === "transfer";
+  // Estorno é um lançamento de sinal oposto ligado ao original (6.6): o tipo e
+  // o sinal são do original, não do formulário.
+  const isRefund = entry?.refundOfEntryId != null;
+  // Na ponta de entrada de uma transferência, a conta do lançamento é o destino.
+  const incomingLeg = isTransfer && (entry?.amountCents ?? 0) > 0;
 
   const [kind, setKind] = useState<FormKind>(
     entry ? (entry.kind === "adjustment" ? "expense" : (entry.kind as FormKind)) : defaultKind
   );
   const [amount, setAmount] = useState(entry ? centsToInput(entry.amountCents) : "");
-  const [date, setDate] = useState(entry?.date ?? today());
+  const [date, setDate] = useState(entry?.date ?? todayIso());
   const [accountId, setAccountId] = useState<number | null>(
-    entry?.accountId ?? reference.accounts[0]?.id ?? null
+    entry?.accountId ?? everydayAccount(reference)?.id ?? null
   );
   const [toAccountId, setToAccountId] = useState<number | null>(
     entry?.counterpartAccountId ?? reference.accounts[1]?.id ?? null
@@ -79,9 +87,34 @@ export function EntryDrawer({
   const [refunding, setRefunding] = useState(false);
   const [scopeAsk, setScopeAsk] = useState(false);
 
-  const categories = useMemo(
-    () => reference.categories.filter((category) => category.kind === kind),
-    [reference.categories, kind]
+  // Cadastros arquivados saem das listas, mas o lançamento antigo continua
+  // apontando para eles. Sem a opção atual, o select mostraria outra coisa — e
+  // salvar trocaria a categoria (ou a conta) sem ninguém pedir.
+  const categories = useMemo(() => {
+    const options: { id: number; name: string }[] = reference.categories.filter(
+      (category) => category.kind === kind
+    );
+    if (
+      entry?.categoryId != null &&
+      entry.kind === kind &&
+      !options.some((category) => category.id === entry.categoryId)
+    ) {
+      options.push({ id: entry.categoryId, name: `${entry.categoryName ?? "Categoria"} (arquivada)` });
+    }
+    return options;
+  }, [reference.categories, kind, entry]);
+
+  const accountOptions = useMemo(() => {
+    const options: { id: number; name: string }[] = [...reference.accounts];
+    if (entry && !options.some((account) => account.id === entry.accountId)) {
+      options.push({ id: entry.accountId, name: `${entry.accountName ?? "Conta"} (arquivada)` });
+    }
+    return options;
+  }, [reference.accounts, entry]);
+
+  const peopleOptions = useMemo(
+    () => reference.people.filter((person) => person.active || person.id === entry?.personId),
+    [reference.people, entry]
   );
 
   // Trocar entrada/saída invalida a categoria escolhida do outro lado.
@@ -152,12 +185,17 @@ export function EntryDrawer({
             date,
             amountCents: entry.amountCents < 0 ? -Math.abs(cents) : Math.abs(cents),
             kind: "transfer",
+            personId: effectivePersonId,
             status,
             description: description || null,
             notes: notes || null,
             tagIds
           });
         } else {
+          if (reference.accounts.find((item) => item.id === toAccountId)?.kind === "credit_card") {
+            toast.notify("Para pagar o cartão, use Pagar fatura na tela Fatura", "error");
+            return;
+          }
           const created = await ledgerApi.createTransfer({
             fromAccountId: accountId,
             toAccountId,
@@ -188,7 +226,12 @@ export function EntryDrawer({
         });
       } else {
         const resolvedPlaceId = await resolvePlace();
-        const signed = kind === "expense" ? -Math.abs(cents) : Math.abs(cents);
+        const signed =
+          isRefund && entry
+            ? Math.sign(entry.amountCents) * Math.abs(cents)
+            : kind === "expense"
+              ? -Math.abs(cents)
+              : Math.abs(cents);
         const body = {
           accountId,
           personId: effectivePersonId,
@@ -241,9 +284,13 @@ export function EntryDrawer({
       tone: "danger"
     });
     if (!ok) return;
-    await ledgerApi.removeEntry(entry.id);
-    toast.notify("Lançamento excluído");
-    await onSaved();
+    try {
+      await ledgerApi.removeEntry(entry.id);
+      toast.notify("Lançamento excluído");
+      await onSaved();
+    } catch (error) {
+      toast.notify(error instanceof Error ? error.message : "Falha ao excluir", "error");
+    }
   }
 
   return (
@@ -273,15 +320,25 @@ export function EntryDrawer({
       }
     >
       <form id="entry-form" className="stack" onSubmit={submit}>
-        <Segmented<FormKind>
-          value={kind}
-          onChange={setKind}
-          options={[
-            { value: "expense", label: "Saída" },
-            { value: "income", label: "Entrada" },
-            { value: "transfer", label: "Transferência" }
-          ]}
-        />
+        {isRefund ? (
+          <p className="fin-muted">
+            Estorno de um lançamento: o valor abate o original, e o tipo não muda.
+          </p>
+        ) : isTransfer ? (
+          <p className="fin-muted">
+            Transferência: as duas pontas mudam juntas. Para trocar as contas, exclua e crie de novo.
+          </p>
+        ) : (
+          <Segmented<FormKind>
+            value={kind}
+            onChange={setKind}
+            options={[
+              { value: "expense", label: "Saída" },
+              { value: "income", label: "Entrada" },
+              { value: "transfer", label: "Transferência" }
+            ]}
+          />
+        )}
 
         <div className="field-row">
           <Field label="Valor">
@@ -300,12 +357,17 @@ export function EntryDrawer({
         </div>
 
         <div className="field-row">
-          <Field label={kind === "transfer" ? "Conta de origem" : "Conta"}>
+          <Field
+            label={
+              kind !== "transfer" ? "Conta" : incomingLeg ? "Conta de destino" : "Conta de origem"
+            }
+          >
             <select
               value={accountId ?? ""}
               onChange={(event) => setAccountId(Number(event.target.value))}
+              disabled={isTransfer}
             >
-              {reference.accounts.map((item) => (
+              {accountOptions.map((item) => (
                 <option key={item.id} value={item.id}>
                   {item.name}
                 </option>
@@ -314,13 +376,17 @@ export function EntryDrawer({
           </Field>
 
           {kind === "transfer" ? (
-            <Field label="Conta de destino">
+            <Field label={incomingLeg ? "Conta de origem" : "Conta de destino"}>
               <select
                 value={toAccountId ?? ""}
                 onChange={(event) => setToAccountId(Number(event.target.value))}
                 disabled={editing}
               >
-                {reference.accounts.map((item) => (
+                {/* Origem e destino iguais não é transferência. */}
+                {(editing
+                  ? accountOptions
+                  : reference.accounts.filter((item) => item.id !== accountId)
+                ).map((item) => (
                   <option key={item.id} value={item.id}>
                     {item.name}
                   </option>
@@ -347,7 +413,7 @@ export function EntryDrawer({
           )}
         </div>
 
-        {isCard && kind === "expense" && (
+        {isCard && kind === "expense" && !isRefund && (
           <InstallmentFields
             mode={inSeries ? "installments" : installmentMode}
             onModeChange={setInstallmentMode}
@@ -397,7 +463,7 @@ export function EntryDrawer({
               }
             >
               <option value="">Sem pessoa</option>
-              {reference.people.map((person) => (
+              {peopleOptions.map((person) => (
                 <option key={person.id} value={person.id}>
                   {person.name}
                 </option>

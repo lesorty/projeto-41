@@ -452,3 +452,114 @@ describe("uma unica definicao de fatura atual", () => {
     expect(fromBalances?.totalDueCents).toBe(fromCards.totalOwedCents);
   });
 });
+
+describe("editar sem perder o que o formulario nao conhece", () => {
+  /** O corpo que o drawer de lancamento envia: sem fatura nem vinculo de estorno. */
+  const edit = (id: number, patch: Record<string, unknown> = {}) => {
+    const entry = ledger.entries.get(id)!;
+    ledger.entries.update(id, {
+      accountId: entry.accountId,
+      date: entry.date,
+      amountCents: entry.amountCents,
+      kind: entry.kind,
+      categoryId: entry.categoryId,
+      description: "descricao nova",
+      tagIds: [],
+      ...patch
+    });
+    return ledger.entries.get(id)!;
+  };
+
+  it("parcela antecipada continua antecipada", () => {
+    const planId = ledger.installmentPlans.create({
+      accountId: card,
+      purchaseDate: "2026-05-10",
+      totalCents: 30000,
+      installmentCount: 3,
+      categoryId: mercado
+    });
+    const last = ledger.installmentPlans.installments(planId).find((r) => r.installmentNumber === 3)!;
+    ledger.statements.anticipate(card, { entryIds: [last.id], targetMonth: "2026-05" });
+
+    expect(edit(last.id).statementMonth).toBe("2026-05");
+  });
+
+  it("compra na fatura natural acompanha a data nova", () => {
+    const id = cardExpense("2026-05-10", 10000);
+    expect(edit(id, { date: "2026-05-25" }).statementMonth).toBe("2026-06");
+  });
+
+  it("pagamento continua na fatura que pagou", () => {
+    cardExpense("2026-05-10", 10000);
+    const result = ledger.statements.pay(card, "2026-05", { date: "2026-05-27", amountCents: 10000 });
+    expect(edit(result.toEntryId).statementMonth).toBe("2026-05");
+  });
+
+  it("estorno continua estorno, positivo e ligado ao original", () => {
+    const original = cardExpense("2026-05-10", 10000);
+    const refundId = ledger.refunds.create(original, { date: "2026-05-12", amountCents: 4000 });
+    const edited = edit(refundId, { amountCents: 3000 });
+    expect(edited.refundOfEntryId).toBe(original);
+    expect(edited.amountCents).toBe(3000);
+    expect(() => edit(refundId, { amountCents: 12000 })).toThrow(/passariam/);
+  });
+
+  it("desconto de antecipacao nao se edita", () => {
+    const planId = ledger.installmentPlans.create({
+      accountId: card,
+      purchaseDate: "2026-05-10",
+      totalCents: 30000,
+      installmentCount: 3,
+      categoryId: mercado
+    });
+    const last = ledger.installmentPlans.installments(planId).find((r) => r.installmentNumber === 3)!;
+    ledger.statements.anticipate(card, {
+      entryIds: [last.id],
+      targetMonth: "2026-05",
+      discount: { mode: "amount", scope: "total", value: 500 },
+      date: TODAY
+    });
+    const discount = ledger.entries
+      .listAll({ accountId: card })
+      .find((row) => row.refundOfEntryId === last.id)!;
+    expect(() => edit(discount.id)).toThrow(/restaure a parcela/);
+  });
+});
+
+describe("proposito da transferencia avulsa", () => {
+  it("recusa transferencia generica para o cartao", () => {
+    expect(() =>
+      ledger.entries.createTransfer({
+        fromAccountId: checking,
+        toAccountId: card,
+        date: "2026-05-10",
+        amountCents: 1000
+      })
+    ).toThrow(/Pagar fatura/);
+  });
+
+  it("entrar numa caixinha e deposito; sair dela e saque", () => {
+    const goal = ledger.accounts.create({
+      name: "Viagem",
+      kind: "goal",
+      color: "#0f0",
+      personId: steylor,
+      openingBalanceCents: 0
+    });
+    const deposit = ledger.entries.createTransfer({
+      fromAccountId: checking,
+      toAccountId: goal,
+      date: "2026-05-10",
+      amountCents: 1000
+    });
+    const withdrawal = ledger.entries.createTransfer({
+      fromAccountId: goal,
+      toAccountId: checking,
+      date: "2026-05-11",
+      amountCents: 500
+    });
+    expect(ledger.entries.get(deposit.fromEntryId)?.transferPurpose).toBe("goal_deposit");
+    expect(ledger.entries.get(deposit.fromEntryId)?.countsTowardTarget).toBe(true);
+    expect(ledger.entries.get(withdrawal.fromEntryId)?.transferPurpose).toBe("goal_withdrawal");
+  });
+});

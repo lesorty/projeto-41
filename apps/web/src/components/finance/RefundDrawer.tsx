@@ -6,10 +6,9 @@ import { DateField } from "../datepicker.js";
 import { Drawer } from "../dialog.js";
 import { Button, Field } from "../ui.js";
 import { api } from "../../lib/api.js";
-import { centsToInput, moneyFromCents } from "../../lib/format.js";
+import { centsToInput, moneyFromCents, todayIso } from "../../lib/format.js";
 import { useToast } from "../../lib/toast.js";
 
-const today = () => new Date().toISOString().slice(0, 10);
 
 /**
  * Estorno de um lançamento, ou da compra parcelada inteira.
@@ -31,7 +30,7 @@ export function RefundDrawer({
   const isInstallment = entry.installmentPlanId != null;
   const [whole, setWhole] = useState(false);
   const [amount, setAmount] = useState(centsToInput(entry.amountCents));
-  const [date, setDate] = useState(today());
+  const [date, setDate] = useState(todayIso());
   const [description, setDescription] = useState("");
   const [saving, setSaving] = useState(false);
 

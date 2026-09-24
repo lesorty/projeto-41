@@ -7,12 +7,11 @@ import { Drawer } from "../dialog.js";
 import { Button, Field, Segmented } from "../ui.js";
 import { AccountSelect } from "./AccountSelect.js";
 import { api } from "../../lib/api.js";
-import { moneyFromCents } from "../../lib/format.js";
+import { moneyFromCents, todayIso } from "../../lib/format.js";
 import { useToast } from "../../lib/toast.js";
 
 type Direction = "deposit" | "withdraw";
 
-const today = () => new Date().toISOString().slice(0, 10);
 
 export function GoalDepositDrawer({
   goal,
@@ -26,7 +25,7 @@ export function GoalDepositDrawer({
   const toast = useToast();
   const [direction, setDirection] = useState<Direction>("deposit");
   const [amount, setAmount] = useState("");
-  const [date, setDate] = useState(today());
+  const [date, setDate] = useState(todayIso());
   const [accountId, setAccountId] = useState<number | null>(null);
   const [description, setDescription] = useState("");
   const [saving, setSaving] = useState(false);

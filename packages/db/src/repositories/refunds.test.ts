@@ -88,7 +88,9 @@ describe("estorno", () => {
       fromAccountId: checking,
       toAccountId: card,
       date: "2026-05-10",
-      amountCents: 1000
+      amountCents: 1000,
+      // Transferencia avulsa para o cartao e recusada: so pagamento de fatura.
+      purpose: "invoice_payment"
     });
     expect(() => ledger.refunds.create(transfer.fromEntryId, { date: "2026-05-13" })).toThrow(
       /transferencia/i

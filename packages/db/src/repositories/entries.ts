@@ -230,6 +230,71 @@ export function createEntriesRepository(db: Db) {
     return input.amountCents;
   }
 
+  /**
+   * A fatura que um lancamento mantem numa edicao que nao fala dela.
+   *
+   * Se a linha estava na fatura natural da data, ela acompanha a data nova.
+   * Se estava noutra — parcela antecipada, pagamento de uma fatura especifica —
+   * foi uma escolha, e trocar a descricao nao pode desfaze-la. Mudar de conta
+   * zera tudo: o ciclo e o do cartao novo.
+   */
+  function keptStatementMonth(
+    existing: { accountId: number; date: string; statementMonth: string | null },
+    accountId: number
+  ): string | null | undefined {
+    if (existing.statementMonth == null || existing.accountId !== accountId) return undefined;
+    const account = accounts.raw(accountId);
+    if (!account || account.closingDay == null || account.dueDay == null) return undefined;
+    const natural = statementMonthFor(existing.date, account.closingDay, account.dueDay);
+    return existing.statementMonth === natural ? undefined : existing.statementMonth;
+  }
+
+  /**
+   * O proposito de uma transferencia generica sai das contas envolvidas.
+   *
+   * Dinheiro que entra numa caixinha e deposito, e o que sai dela e saque:
+   * so assim ele conta no alvo da caixinha (6.4), venha da tela que vier.
+   * Cartao e diferente: pagar fatura exige saber *qual* fatura, e quem sabe
+   * disso e `statements.pay`. Uma transferencia avulsa para o cartao viraria
+   * "compra" na fatura seguinte.
+   */
+  function transferPurposeFor(input: TransferDraft): TransferPurpose {
+    const purpose = input.purpose ?? "generic";
+    const from = accounts.raw(input.fromAccountId);
+    const to = accounts.raw(input.toAccountId);
+    if (!from) throw notFound("Conta de origem");
+    if (!to) throw notFound("Conta de destino");
+    if (purpose !== "generic") return purpose;
+    if (to.kind === "credit_card") {
+      throw new LedgerError("Para pagar o cartao, use Pagar fatura na tela de fatura");
+    }
+    if (to.kind === "goal") return "goal_deposit";
+    if (from.kind === "goal") return "goal_withdrawal";
+    return "generic";
+  }
+
+  /** Os estornos somados nunca passam do lancamento que estornam (6.6). */
+  function assertRefundFits(originalId: number, refundId: number, amountCents: number) {
+    const original = db
+      .prepare("SELECT amount_cents AS amountCents FROM entries WHERE id = ?")
+      .get(originalId) as { amountCents: number } | undefined;
+    if (!original) throw notFound("Lancamento estornado");
+    if (Math.sign(amountCents) === Math.sign(original.amountCents)) {
+      throw new LedgerError("Estorno tem o sinal oposto ao do lancamento original");
+    }
+    const others = (
+      db
+        .prepare(
+          `SELECT COALESCE(SUM(amount_cents), 0) AS total FROM entries
+           WHERE refund_of_entry_id = ? AND id <> ?`
+        )
+        .get(originalId, refundId) as { total: number }
+    ).total;
+    if (Math.abs(others + amountCents) > Math.abs(original.amountCents)) {
+      throw new LedgerError("Estornos passariam do valor do lancamento original");
+    }
+  }
+
   function replaceTags(entryId: number, tagIds: number[] | undefined) {
     if (!tagIds) return;
     db.prepare("DELETE FROM entry_tags WHERE entry_id = ?").run(entryId);
@@ -454,6 +519,7 @@ export function createEntriesRepository(db: Db) {
         throw new LedgerError("Conta de origem e destino precisam ser diferentes");
       }
       const magnitude = Math.abs(input.amountCents);
+      const purpose = transferPurposeFor(input);
 
       return db.transaction(() => {
         const fromEntryId = insertRow({
@@ -467,7 +533,7 @@ export function createEntriesRepository(db: Db) {
           notes: input.notes ?? null,
           // A regra de 6.4 fica em `deriveCountsTowardTarget`, alimentada pelo
           // purpose: aqui nao se decide nada.
-          transferPurpose: input.purpose ?? "generic",
+          transferPurpose: purpose,
           tagIds: []
         });
         const toEntryId = insertRow({
@@ -480,13 +546,13 @@ export function createEntriesRepository(db: Db) {
           statementMonth: input.statementMonth ?? null,
           description: input.description ?? null,
           notes: input.notes ?? null,
-          transferPurpose: input.purpose ?? "generic",
+          transferPurpose: purpose,
           tagIds: []
         });
         db.prepare(
           `INSERT INTO transfers(from_entry_id, to_entry_id, purpose, created_at)
            VALUES (?, ?, ?, ?)`
-        ).run(fromEntryId, toEntryId, input.purpose ?? "generic", nowIso());
+        ).run(fromEntryId, toEntryId, purpose, nowIso());
         return { fromEntryId, toEntryId };
       })();
     },
@@ -500,7 +566,10 @@ export function createEntriesRepository(db: Db) {
         const existing = db
           .prepare(
             `SELECT e.id, e.kind, e.counts_toward_target AS countsTowardTarget,
-                    e.refund_of_entry_id AS refundOfEntryId,
+                    e.refund_of_entry_id AS refundOfEntryId, e.account_id AS accountId,
+                    e.date, e.amount_cents AS amountCents, e.statement_month AS statementMonth,
+                    EXISTS (SELECT 1 FROM anticipation_discounts d WHERE d.entry_id = e.id)
+                      AS isDiscount,
                     t.id AS transferId, t.purpose AS transferPurpose,
                     t.from_entry_id AS fromEntryId, t.to_entry_id AS toEntryId
              FROM entries e
@@ -513,6 +582,11 @@ export function createEntriesRepository(db: Db) {
               kind: EntryKind;
               countsTowardTarget: number;
               refundOfEntryId: number | null;
+              accountId: number;
+              date: string;
+              amountCents: number;
+              statementMonth: string | null;
+              isDiscount: number;
               transferId: number | null;
               transferPurpose: TransferPurpose | null;
               fromEntryId: number | null;
@@ -520,22 +594,38 @@ export function createEntriesRepository(db: Db) {
             }
           | undefined;
         if (!existing) throw notFound("Lancamento");
+        // O desconto de antecipacao e da antecipacao: nasce e morre com ela.
+        if (existing.isDiscount) {
+          throw new LedgerError(
+            "Desconto de antecipacao nao se edita: restaure a parcela para desfazer"
+          );
+        }
 
-        const defaults = resolveAccountDefaults({ ...input, statementMonth: input.statementMonth });
-        const amount = normalizeAmount(input);
+        // Campo ausente e "nao mexa", nao "apague": um formulario que nao
+        // conhece o vinculo de estorno ou a fatura escolhida nao pode zera-los.
+        const refundOfEntryId =
+          input.refundOfEntryId === undefined ? existing.refundOfEntryId : input.refundOfEntryId;
+        const statementMonth =
+          input.statementMonth === undefined
+            ? keptStatementMonth(existing, input.accountId)
+            : input.statementMonth;
+        const draft = { ...input, refundOfEntryId, statementMonth };
+        if (refundOfEntryId != null) assertRefundFits(refundOfEntryId, id, draft.amountCents);
+
+        const defaults = resolveAccountDefaults(draft);
+        const amount = normalizeAmount(draft);
 
         // Re-derivar em toda edicao apagaria a excecao manual do usuario numa
         // simples troca de descricao. So o que muda o resultado de 6.4 —
         // `kind` e `refund_of_entry_id` — dispara a re-derivacao.
         const flagInputsChanged =
-          input.kind !== existing.kind ||
-          (input.refundOfEntryId ?? null) !== existing.refundOfEntryId;
+          input.kind !== existing.kind || refundOfEntryId !== existing.refundOfEntryId;
         const previousFlag = fromBit(existing.countsTowardTarget);
         const derivedFlag = deriveCountsTowardTarget({
           kind: input.kind,
           amountCents: amount,
           transferPurpose: existing.transferPurpose,
-          refundOfEntryId: input.refundOfEntryId
+          refundOfEntryId
         });
         const nextFlag = input.countsTowardTarget ?? (flagInputsChanged ? derivedFlag : previousFlag);
         const targetFlagReset = flagInputsChanged && nextFlag !== previousFlag;
@@ -563,7 +653,7 @@ export function createEntriesRepository(db: Db) {
           paymentMethod:
             input.paymentMethod ?? (defaults.accountKind === "credit_card" ? "credit" : null),
           statementMonth: defaults.statementMonth,
-          refundOfEntryId: input.refundOfEntryId ?? null,
+          refundOfEntryId,
           countsTowardTarget: nextFlag ? 1 : 0,
           updatedAt: nowIso()
         });
