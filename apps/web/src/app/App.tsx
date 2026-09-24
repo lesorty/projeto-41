@@ -1,34 +1,5 @@
-import {
-  ArrowDownCircle,
-  ArrowUpCircle,
-  BriefcaseBusiness,
-  CalendarDays,
-  ChartNoAxesCombined,
-  Coins,
-  Eye,
-  EyeOff,
-  History,
-  LayoutDashboard,
-  Menu,
-  Moon,
-  ChartPie,
-  CreditCard,
-  Gauge,
-  Landmark,
-  PiggyBank,
-  ReceiptText,
-  Scale,
-  SlidersHorizontal,
-  RefreshCw,
-  ShieldCheck,
-  Tags,
-  Sun,
-  Target,
-  Wallet,
-  X
-} from "lucide-react";
+import { Eye, EyeOff, Menu, Moon, RefreshCw, ShieldCheck, Sun, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { ComponentType } from "react";
 import { AllocationPage } from "../pages/Allocation.js";
 import { ContributionsPage } from "../pages/Contributions.js";
 import { DashboardPage } from "../pages/Dashboard.js";
@@ -60,71 +31,16 @@ import { useTheme } from "../lib/theme.js";
 import { useToast } from "../lib/toast.js";
 import type { LedgerPreset } from "../lib/navigation.js";
 import type { Dashboard } from "@projeto41/contracts";
-
-type Page =
-  | "dashboard"
-  | "crypto"
-  | "b3"
-  | "positions"
-  | "contributions"
-  | "planning"
-  | "allocation"
-  | "history"
-  | "finance"
-  | "reports"
-  | "invoice"
-  | "networth"
-  | "goals"
-  | "transactions"
-  | "expenses"
-  | "income"
-  | "accounts"
-  | "categories"
-  | "spending-allocation";
-
-type NavItem = { id: Page; label: string; icon: ComponentType<{ size?: number | string }> };
-
-const nav: { group: string; items: NavItem[] }[] = [
-  {
-    group: "Resumo",
-    items: [{ id: "dashboard", label: "Visão geral", icon: LayoutDashboard }]
-  },
-  {
-    group: "Carteiras",
-    items: [
-      { id: "crypto", label: "Cripto", icon: Coins },
-      { id: "b3", label: "Bolsa B3", icon: BriefcaseBusiness },
-      { id: "positions", label: "Caixa e renda fixa", icon: Wallet }
-    ]
-  },
-  {
-    group: "Finanças",
-    items: [
-      { id: "finance", label: "Painel", icon: Gauge },
-      { id: "transactions", label: "Transações", icon: ReceiptText },
-      { id: "expenses", label: "Gastos", icon: ArrowDownCircle },
-      { id: "income", label: "Entradas", icon: ArrowUpCircle },
-      { id: "accounts", label: "Contas", icon: Landmark },
-      { id: "invoice", label: "Fatura", icon: CreditCard },
-      { id: "categories", label: "Categorias", icon: Tags },
-      { id: "spending-allocation", label: "Alocação de gastos", icon: SlidersHorizontal },
-      { id: "reports", label: "Relatórios", icon: ChartPie },
-      { id: "goals", label: "Caixinhas", icon: PiggyBank },
-      { id: "networth", label: "Patrimônio", icon: Scale }
-    ]
-  },
-  {
-    group: "Análises",
-    items: [
-      { id: "contributions", label: "Aportes", icon: CalendarDays },
-      { id: "planning", label: "Planejamento", icon: ChartNoAxesCombined },
-      { id: "allocation", label: "Alocação", icon: Target },
-      { id: "history", label: "Histórico", icon: History }
-    ]
-  }
-];
-
-const allItems = nav.flatMap((section) => section.items);
+import {
+  initialPage,
+  lastPageOf,
+  moduleOf,
+  modules,
+  navItem,
+  rememberPage,
+  type ModuleId,
+  type Page
+} from "./modules.js";
 
 const TICKER_HIDDEN_KEY = "projeto41-ticker-hidden";
 
@@ -145,7 +61,7 @@ export function App() {
   const demoMode =
     (import.meta as ImportMeta & { env?: Record<string, string> }).env?.VITE_DEMO_MODE === "true";
 
-  const [page, setPage] = useState<Page>("dashboard");
+  const [page, setPage] = useState<Page>(initialPage);
   // Recorte levado de uma tela para outra (periodo, pessoa). A chave remonta a
   // tela de destino para que ela nasca com o filtro, em vez de herdar o antigo.
   const [preset, setPreset] = useState<{ key: number; value: LedgerPreset }>({
@@ -154,6 +70,7 @@ export function App() {
   });
   const navigate = useCallback((next: Page, value: LedgerPreset = {}) => {
     setPage(next);
+    rememberPage(next);
     setPreset((current) => ({ key: current.key + 1, value }));
     window.scrollTo({ top: 0 });
   }, []);
@@ -164,6 +81,21 @@ export function App() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [tickerHidden, setTickerHidden] = useState<Set<string>>(readTickerHidden);
   const [tickerOpen, setTickerOpen] = useState(false);
+
+  const module = moduleOf(page);
+  const current = navItem(page);
+  const investing = module.id === "investments";
+
+  // O módulo vai para o <html>, como o tema: a cor de destaque de cada um
+  // alcança também o fundo e o que não mora dentro do app-shell.
+  useEffect(() => {
+    document.documentElement.dataset.module = module.id;
+  }, [module.id]);
+
+  const switchModule = (id: ModuleId) => {
+    if (id === module.id) return;
+    navigate(lastPageOf(id));
+  };
 
   useEffect(() => {
     window.localStorage.setItem(TICKER_HIDDEN_KEY, JSON.stringify([...tickerHidden]));
@@ -233,8 +165,6 @@ export function App() {
     }
   }
 
-  const current = allItems.find((item) => item.id === page)!;
-
   const tickerCandidates = useMemo<TickerCandidate[]>(() => {
     if (!dashboard) return [];
     const tagged = [
@@ -259,6 +189,11 @@ export function App() {
     [tickerCandidates, tickerHidden]
   );
 
+  // As telas de finanças buscam os próprios dados: não esperam as cotações.
+  // Só o Patrimônio usa o painel de investimentos, e ele aceita `null`.
+  const usesDashboard = investing || page === "networth";
+  const waiting = investing && loading;
+
   return (
     <div className="app-shell">
       <aside className={`sidebar ${mobileOpen ? "sidebar-open" : ""}`}>
@@ -282,8 +217,32 @@ export function App() {
           </button>
         </div>
 
-        <nav>
-          {nav.map((section) => (
+        <div className="module-switch">
+          <div className="module-switch-options" role="tablist" aria-label="Módulo">
+            {modules.map((option) => {
+              const Icon = option.icon;
+              const active = option.id === module.id;
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  className={active ? "active" : ""}
+                  data-module={option.id}
+                  onClick={() => switchModule(option.id)}
+                >
+                  <Icon size={18} />
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+          <p className="module-switch-tagline">{module.tagline}</p>
+        </div>
+
+        <nav aria-label={`Telas de ${module.label}`}>
+          {module.groups.map((section) => (
             <div className="nav-group" key={section.group}>
               <span className="nav-group-label">{section.group}</span>
               {section.items.map((item) => {
@@ -292,6 +251,7 @@ export function App() {
                   <button
                     key={item.id}
                     className={page === item.id ? "nav-active" : ""}
+                    aria-current={page === item.id ? "page" : undefined}
                     onClick={() => {
                       navigate(item.id);
                       setMobileOpen(false);
@@ -318,7 +278,7 @@ export function App() {
       {mobileOpen && <div className="scrim" onClick={() => setMobileOpen(false)} />}
 
       <main>
-        {tickerCandidates.length > 0 && (
+        {investing && tickerCandidates.length > 0 && (
           <Ticker items={tickerItems} onConfigure={() => setTickerOpen(true)} />
         )}
         <header className="topbar">
@@ -326,14 +286,14 @@ export function App() {
             <Menu />
           </button>
           <div className="topbar-title">
-            <span className="eyebrow">Carteira pessoal</span>
+            <span className="eyebrow">{module.label}</span>
             <h1>
               {current.label}
               {demoMode && <span className="demo-badge">DEMO</span>}
             </h1>
           </div>
           <div className="topbar-actions">
-            {dashboard?.updatedAt && (
+            {investing && dashboard?.updatedAt && (
               <span className="updated-chip">Cotações {relativeTime(dashboard.updatedAt)}</span>
             )}
             <button
@@ -347,16 +307,18 @@ export function App() {
             <button className="icon-toggle" onClick={toggle} aria-label="Alternar tema" title="Alternar tema">
               {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
             </button>
-            <button className="refresh-button" onClick={refreshPrices} disabled={refreshing}>
-              <RefreshCw size={17} className={refreshing ? "spin" : ""} />
-              <span>{refreshing ? "Atualizando" : "Atualizar preços"}</span>
-            </button>
+            {investing && (
+              <button className="refresh-button" onClick={refreshPrices} disabled={refreshing}>
+                <RefreshCw size={17} className={refreshing ? "spin" : ""} />
+                <span>{refreshing ? "Atualizando" : "Atualizar preços"}</span>
+              </button>
+            )}
           </div>
         </header>
 
-        {error && <div className="alert">{error}</div>}
+        {usesDashboard && error && <div className="alert">{error}</div>}
 
-        {loading ? (
+        {waiting ? (
           <Loading />
         ) : (
           <div className="page">

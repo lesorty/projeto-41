@@ -74,6 +74,27 @@
   --shadow-pop: 0 30px 80px -24px rgba(15, 23, 42, 0.28);
 }
 
+/* Cada módulo tem a sua cor de destaque: azul nos investimentos (o padrão
+   acima), violeta nas finanças. Basta olhar a tela para saber onde se está. */
+:root[data-module="finance"] {
+  --accent: #9b87f5;
+  --accent-2: #c084fc;
+  --accent-soft: rgba(155, 135, 245, 0.16);
+  --accent-text: #c3b6ff;
+  --glow: rgba(155, 135, 245, 0.22);
+  --bg-aurora-1: rgba(155, 135, 245, 0.08);
+  --bg-aurora-2: rgba(192, 132, 252, 0.05);
+}
+:root[data-theme="light"][data-module="finance"] {
+  --accent: #6d4ae8;
+  --accent-2: #9333ea;
+  --accent-soft: rgba(109, 74, 232, 0.1);
+  --accent-text: #5b3bd1;
+  --glow: rgba(109, 74, 232, 0.16);
+  --bg-aurora-1: rgba(109, 74, 232, 0.07);
+  --bg-aurora-2: rgba(147, 51, 234, 0.04);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -167,6 +188,56 @@ button {
   font-size: 11px;
   color: var(--text-muted);
   margin-top: 2px;
+}
+
+/* Seletor de módulo: troca o menu inteiro, não só uma tela. */
+.module-switch {
+  padding: 0 4px 10px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 6px;
+}
+.module-switch-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 13px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+}
+/* Ícone sobre o rótulo: lado a lado, "Investimentos" não cabe em metade
+   da barra lateral e o ícone era o primeiro a sumir. */
+.module-switch-options button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 9px 4px 8px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 650;
+  transition: var(--transition);
+}
+.module-switch-options button:hover {
+  color: var(--text);
+}
+.module-switch-options button.active {
+  color: var(--accent-text);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+.module-switch-options button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.module-switch-tagline {
+  margin: 8px 4px 0;
+  font-size: 11px;
+  color: var(--text-faint);
 }
 
 .sidebar nav {
