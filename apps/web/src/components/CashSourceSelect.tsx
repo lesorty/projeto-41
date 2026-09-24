@@ -1,64 +1,72 @@
 import { Field } from "./ui.js";
-import { money, moneyFromCents } from "../lib/format.js";
-import { brokerIdOf, isFundingAccount, type Portfolio, useBrokerCash } from "../lib/cash.js";
+import { currency, money, moneyFromCents } from "../lib/format.js";
+import { POSITION_CATEGORY_LABEL, useInvestmentCash } from "../lib/cash.js";
+
+/** De onde sai o dinheiro de uma operação: um caixa, uma conta, ou nada. */
+export type CashSource = { positionId: number | null; accountId: number | null };
+
+const encode = (source: CashSource) =>
+  source.positionId != null ? `p:${source.positionId}` : source.accountId != null ? `a:${source.accountId}` : "";
+
+const decode = (value: string): CashSource => {
+  const [kind, id] = value.split(":");
+  if (kind === "p") return { positionId: Number(id), accountId: null };
+  if (kind === "a") return { positionId: null, accountId: Number(id) };
+  return { positionId: null, accountId: null };
+};
 
 /**
  * De onde sai o dinheiro de uma compra (ou para onde vai o de uma venda).
  *
- * Três respostas, na ordem em que costumam ser usadas:
+ * 1. **Um caixa** — uma posição de "Caixa e renda fixa" (Caixa BR, Dólar,
+ *    Reserva). É o caminho natural: aporta uma vez, aloca aos poucos.
+ * 2. **Uma conta bancária** — o banco paga direto, sem passar por caixa.
+ * 3. **Não movimentar** — a operação vira só registro.
  *
- * 1. **Caixa da corretora** — o dinheiro que já foi aportado e espera ser
- *    alocado. É o caminho natural: aporta uma vez, compra várias.
- * 2. **Uma conta bancária** — aporte (ou resgate) automático: o valor passa
- *    pelo caixa na mesma hora, sem sobrar nada nele.
- * 3. **Não movimentar** — a operação vira só registro, sem tocar em conta.
- *
- * A linha de baixo diz, em reais, o que vai acontecer antes de salvar.
+ * A linha de baixo diz o que vai acontecer antes de salvar.
  */
 export function CashSourceSelect({
-  portfolio,
   type,
   value,
   onChange,
   amountBrl,
   conversion
 }: {
-  portfolio: Portfolio;
   type: "buy" | "sell";
-  value: number | null;
-  onChange: (value: number | null) => void;
+  value: CashSource;
+  onChange: (value: CashSource) => void;
   /** Valor da operação em BRL, para dizer se o caixa cobre. */
   amountBrl: number;
   /** Detalhe da conversão de moeda, quando há. */
   conversion?: string;
 }) {
-  const { settings, accounts } = useBrokerCash();
-  const brokerId = settings ? brokerIdOf(settings, portfolio) : null;
-  const broker = accounts.find((account) => account.id === brokerId) ?? null;
-  const banks = accounts.filter(isFundingAccount);
-  const chosen = accounts.find((account) => account.id === value) ?? null;
+  const { caixas, banks } = useInvestmentCash();
   const buying = type === "buy";
-
-  const brokerCash = (broker?.currentBalanceCents ?? 0) / 100;
-  const after = buying ? brokerCash - amountBrl : brokerCash + amountBrl;
+  const caixa = caixas.find((position) => position.id === value.positionId) ?? null;
+  const bank = banks.find((account) => account.id === value.accountId) ?? null;
 
   let hint: string;
   let tone = "";
-  if (value == null) {
-    hint = "Só registra a operação: nenhuma conta é movimentada.";
-  } else if (broker && value === broker.id) {
-    if (buying && after < -0.005) {
+  if (caixa) {
+    // Caixa em dólar mostra o saldo em dólar; o aviso de "não cobre" só se
+    // calcula com certeza em reais, então fica para o servidor nesse caso.
+    const after = caixa.currentValue + (buying ? -amountBrl : amountBrl);
+    if (caixa.currency === "BRL" && buying && after < -0.005) {
       tone = "fin-negative";
-      hint = `O caixa tem ${money(brokerCash)}: faltam ${money(-after)}. Aporte antes ou pague por uma conta.`;
-    } else {
+      hint = `${caixa.name} tem ${money(caixa.currentValue)}: faltam ${money(-after)}. Aporte antes ou pague pela conta.`;
+    } else if (caixa.currency === "BRL") {
       hint = buying
-        ? `Sai do caixa da corretora. Ficam ${money(after)} em caixa.`
-        : `O valor fica em caixa para realocar: ${money(after)} depois da venda.`;
+        ? `Sai de ${caixa.name}. Ficam ${money(after)} nele.`
+        : `Entra em ${caixa.name} para realocar: ${money(after)} depois da venda.`;
+    } else {
+      hint = buying ? `Sai de ${caixa.name}, convertido pela cotação.` : `Entra em ${caixa.name}, convertido pela cotação.`;
     }
-  } else {
+  } else if (bank) {
     hint = buying
-      ? `Aporte automático: ${money(amountBrl)} sai de ${chosen?.name ?? "da conta"}, passa pelo caixa e vira ativo.`
-      : `Resgate automático: ${money(amountBrl)} volta para ${chosen?.name ?? "a conta"}.`;
+      ? `${money(amountBrl)} sai direto de ${bank.name}.`
+      : `${money(amountBrl)} volta direto para ${bank.name}.`;
+  } else {
+    hint = "Só registra a operação: nenhum dinheiro é movimentado.";
   }
 
   return (
@@ -67,25 +75,25 @@ export function CashSourceSelect({
       hint={
         <span className={tone}>
           {hint}
-          {conversion && value != null ? ` · ${conversion}` : ""}
+          {conversion && (caixa || bank) ? ` · ${conversion}` : ""}
         </span>
       }
     >
-      <select
-        value={value ?? ""}
-        onChange={(event) => onChange(event.target.value ? Number(event.target.value) : null)}
-      >
-        {broker && (
-          <optgroup label="Investimentos">
-            <option value={broker.id}>
-              Caixa da corretora ({broker.name}) · {moneyFromCents(broker.currentBalanceCents)}
-            </option>
+      <select value={encode(value)} onChange={(event) => onChange(decode(event.target.value))}>
+        {caixas.length > 0 && (
+          <optgroup label="Caixas de investimento">
+            {caixas.map((position) => (
+              <option key={position.id} value={`p:${position.id}`}>
+                {position.name} ({POSITION_CATEGORY_LABEL[position.category] ?? position.category}) ·{" "}
+                {currency(position.currentValue, position.currency)}
+              </option>
+            ))}
           </optgroup>
         )}
         {banks.length > 0 && (
-          <optgroup label={buying ? "Aporte automático de" : "Resgate automático para"}>
+          <optgroup label={buying ? "Direto da conta" : "Direto para a conta"}>
             {banks.map((account) => (
-              <option key={account.id} value={account.id}>
+              <option key={account.id} value={`a:${account.id}`}>
                 {account.name} · {moneyFromCents(account.currentBalanceCents)}
               </option>
             ))}

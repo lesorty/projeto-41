@@ -1,4 +1,14 @@
-import { Banknote, Coins, DollarSign, Landmark, PiggyBank, Plus, Save, Trash2 } from "lucide-react";
+import {
+  ArrowRightLeft,
+  Banknote,
+  Coins,
+  DollarSign,
+  Landmark,
+  PiggyBank,
+  Plus,
+  Save,
+  Trash2
+} from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Drawer, useConfirm } from "../components/dialog.js";
@@ -20,7 +30,14 @@ const groups = [
 const tracksInvested = (category: string) =>
   groups.find((group) => group.id === category)?.tracksInvested ?? false;
 
-export function PositionsPage({ onChanged }: { onChanged: () => Promise<void> }) {
+export function PositionsPage({
+  onChanged,
+  onOpenCash
+}: {
+  onChanged: () => Promise<void>;
+  /** Aporte e resgate pelo banco moram em Em caixa. */
+  onOpenCash?: () => void;
+}) {
   const toast = useToast();
   const confirm = useConfirm();
   const [positions, setPositions] = useState<ManualPositionRecord[]>([]);
@@ -37,14 +54,28 @@ export function PositionsPage({ onChanged }: { onChanged: () => Promise<void> })
       confirmLabel: "Excluir"
     });
     if (!ok) return;
-    await api(`/positions/${position.id}`, { method: "DELETE" });
+    try {
+      await api(`/positions/${position.id}`, { method: "DELETE" });
+    } catch (error) {
+      // Posição com aporte do banco ou operação não some sem desfazer antes.
+      toast.notify(error instanceof Error ? error.message : "Falha ao excluir", "error");
+      return;
+    }
     await Promise.all([load(), onChanged()]);
     toast.notify("Posição excluída");
   }
 
   return (
     <div className="positions">
-      <SectionHeading title="Caixa e renda fixa" subtitle="Contas e aplicações atualizadas por você">
+      <SectionHeading
+        title="Caixa e renda fixa"
+        subtitle="Os caixas e as aplicações. Aporte e resgate pela conta bancária em Em caixa"
+      >
+        {onOpenCash && (
+          <Button variant="ghost" icon={ArrowRightLeft} onClick={onOpenCash}>
+            Aportar e resgatar
+          </Button>
+        )}
         <Button icon={Plus} onClick={() => setEditing({})}>
           Nova posição
         </Button>

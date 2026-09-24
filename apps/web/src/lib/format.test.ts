@@ -68,7 +68,7 @@ describe("todayIso", () => {
 });
 
 describe("preços", () => {
-  const nbsp = (text: string) => text.replace(/ /g, " ");
+  const nbsp = (text: string) => text.replace(/\s/g, " ");
 
   it("dólar sai no formato brasileiro, como o real", () => {
     expect(nbsp(currencyRaw(1669.27, "USD"))).toBe("US$ 1.669,27");

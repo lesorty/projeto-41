@@ -1,5 +1,6 @@
 import { manualPositionSchema } from "@projeto41/contracts";
 import { z } from "zod";
+import { removePosition } from "../services/investment-cash-service.js";
 import type { RoutePlugin } from "./index.js";
 
 /** Posicoes manuais, metas de alocacao e planejamento: tudo cadastro do usuario. */
@@ -16,7 +17,7 @@ export const registerPositionsRoutes: RoutePlugin = (app, { db }) => {
   });
   app.delete("/api/positions/:id", async (request) => {
     const { id } = z.object({ id: z.coerce.number().int().positive() }).parse(request.params);
-    db.positions.remove(id);
+    removePosition(db, id);
     return { ok: true };
   });
 

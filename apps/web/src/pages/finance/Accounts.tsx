@@ -289,8 +289,8 @@ export function AccountsPage({ onOpenCash }: { onOpenCash?: () => void }) {
           <div>
             <strong>Investir a partir daqui</strong>
             <span>
-              Aporte do banco para o caixa da corretora e escolha como as compras pagam em
-              Investimentos › Em caixa.
+              Aporte da conta para um caixa ou direto na renda fixa, e escolha como as compras pagam,
+              em Investimentos › Em caixa.
             </span>
           </div>
           <Button variant="ghost" icon={ArrowRight} onClick={onOpenCash}>
@@ -358,7 +358,7 @@ function AccountFigure({ account }: { account: AccountRecord }) {
       </strong>
       <small>
         {account.kind === "investment"
-          ? "caixa para investir"
+          ? "aportado nos investimentos"
           : account.includeInNetWorth
             ? "no patrimônio"
             : "fora do patrimônio"}
@@ -389,15 +389,12 @@ function OwnerCard({
   onRestoreAccount: (account: AccountRecord) => void;
 }) {
   const archivedPerson = person != null && !person.active;
-  // Soma de dinheiro, não de dívida: cartão e conta arquivada ficam de fora. O
-  // caixa da corretora entra: é dinheiro da pessoa, só que já do lado dos
-  // investimentos.
+  // Soma de dinheiro, não de dívida: cartão, conta arquivada e a ponte dos
+  // investimentos (cujo dinheiro está nas posições) ficam de fora.
   const balance = accounts
     .filter(
       (account) =>
-        !account.archived &&
-        account.kind !== "credit_card" &&
-        (account.includeInNetWorth || account.kind === "investment")
+        !account.archived && account.kind !== "credit_card" && account.includeInNetWorth
     )
     .reduce((total, account) => total + account.currentBalanceCents, 0);
 

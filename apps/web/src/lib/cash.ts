@@ -1,47 +1,76 @@
 import { useCallback, useEffect, useState } from "react";
-import type { AccountRecord } from "@projeto41/contracts";
+import type { AccountRecord, ManualPositionRecord } from "@projeto41/contracts";
 import { api } from "./api.js";
 
 /**
- * O caixa da corretora: dinheiro que saiu do banco e espera virar ativo.
+ * O dinheiro entre o banco e os investimentos.
  *
- *     banco ──aporte──▶ em caixa ──compra──▶ carteira
- *     banco ◀─resgate── em caixa ◀──venda─── carteira
+ *     conta bancária ──aporte──▶ caixa ──alocar──▶ renda fixa, cripto, B3…
+ *     conta bancária ◀─resgate── caixa ◀──venda───
  *
- * Cada carteira (cripto, B3) tem a sua conta de corretora no livro, e o saldo
- * dela é o caixa. O servidor faz a contabilidade; aqui só se lê e se escolhe.
+ * Os caixas são as posições que o usuário cria em "Caixa e renda fixa" — não
+ * existe outro conceito de caixa no módulo. O servidor faz a contabilidade
+ * (posição e livro mudam juntos); aqui só se lê e se escolhe.
  */
 
 export type CashSettings = {
-  /** Registrar operação movimenta dinheiro. Desligado, a operação é só registro. */
+  /** Registrar operação pela conta movimenta o banco. Desligado, é só registro. */
   autoDebit: boolean;
-  /** Nulo: pagar com o caixa da corretora. Uma conta: aporte automático dela. */
+  /** Conta que paga direto, sem passar por caixa. */
   defaultAccountId: number | null;
-  cryptoAccountId: number | null;
-  b3AccountId: number | null;
+  /** Caixa que paga por padrão; tem precedência sobre a conta. */
+  defaultPositionId: number | null;
 };
 
-export type Portfolio = "crypto" | "b3";
+export type PositionMovement = {
+  id: number;
+  positionId: number;
+  positionName: string;
+  positionCategory: string;
+  positionCurrency: string;
+  date: string;
+  kind: "deposit" | "withdrawal" | "move_in" | "move_out" | "buy" | "sell";
+  amount: number;
+  transferId: number | null;
+  operationId: number | null;
+  pairId: number | null;
+  description: string | null;
+  accountName: string | null;
+  transferStatus: string | null;
+};
 
-export const brokerIdOf = (settings: CashSettings, portfolio: Portfolio) =>
-  portfolio === "crypto" ? settings.cryptoAccountId : settings.b3AccountId;
+/** Onde o dinheiro espera: pode pagar uma compra e receber uma venda. */
+export const LIQUID_CATEGORIES = ["cash", "dollar", "reserve"] as const;
+export const isLiquid = (position: Pick<ManualPositionRecord, "category">) =>
+  (LIQUID_CATEGORIES as readonly string[]).includes(position.category);
+
+export const POSITION_CATEGORY_LABEL: Record<string, string> = {
+  cash: "Caixa BR",
+  dollar: "Dólar",
+  reserve: "Reserva",
+  fixed_income: "Renda fixa",
+  global: "Ações globais"
+};
 
 /** Contas de onde um aporte pode sair: dinheiro de verdade, sem cartão. */
 export const isFundingAccount = (account: AccountRecord) =>
   account.kind !== "credit_card" && account.kind !== "investment" && !account.archived;
 
-export function useBrokerCash() {
+export function useInvestmentCash() {
   const [settings, setSettings] = useState<CashSettings | null>(null);
   const [accounts, setAccounts] = useState<AccountRecord[]>([]);
+  const [positions, setPositions] = useState<ManualPositionRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
   const reload = useCallback(async () => {
-    const [nextSettings, nextAccounts] = await Promise.all([
+    const [nextSettings, nextAccounts, nextPositions] = await Promise.all([
       api<CashSettings>("/investments/cash-settings"),
-      api<AccountRecord[]>("/ledger/accounts")
+      api<AccountRecord[]>("/ledger/accounts"),
+      api<ManualPositionRecord[]>("/positions")
     ]);
     setSettings(nextSettings);
     setAccounts(nextAccounts);
+    setPositions(nextPositions);
     setLoading(false);
   }, []);
 
@@ -49,14 +78,15 @@ export function useBrokerCash() {
     void reload().catch(() => setLoading(false));
   }, [reload]);
 
-  const brokers = settings
-    ? (["crypto", "b3"] as const).map((portfolio) => ({
-        portfolio,
-        account: accounts.find((account) => account.id === brokerIdOf(settings, portfolio)) ?? null
-      }))
-    : [];
-
-  return { settings, accounts, brokers, loading, reload };
+  return {
+    settings,
+    accounts,
+    banks: accounts.filter(isFundingAccount),
+    positions,
+    caixas: positions.filter(isLiquid),
+    loading,
+    reload
+  };
 }
 
 export type AllocationGap = { category: string; targetBrl: number; actualBrl: number };
@@ -88,7 +118,10 @@ export function suggestCashAllocation(
     .sort((a, b) => b.amountBrl - a.amountBrl);
 }
 
-/** Para qual tela vai cada classe da meta quando o usuário decide alocar. */
+/**
+ * Para onde vai cada classe da meta quando o usuário decide alocar: as
+ * carteiras abrem a compra; o resto é mover de um caixa para uma posição.
+ */
 export function destinationOf(category: string): "crypto" | "b3" | "positions" {
   if (category === "bitcoin" || category === "shitcoins") return "crypto";
   if (category === "bolsa_brasil") return "b3";

@@ -43,7 +43,7 @@ export type Page =
   | "crypto"
   | "b3"
   | "positions"
-  | "broker-cash"
+  | "investment-cash"
   | "contributions"
   | "planning"
   | "allocation"
@@ -89,7 +89,7 @@ export const modules: AppModule[] = [
       {
         group: "Carteiras",
         items: [
-          { id: "broker-cash", label: "Em caixa", icon: Banknote },
+          { id: "investment-cash", label: "Em caixa", icon: Banknote },
           { id: "crypto", label: "Cripto", icon: Coins },
           { id: "b3", label: "Bolsa B3", icon: BriefcaseBusiness },
           { id: "positions", label: "Caixa e renda fixa", icon: Wallet }

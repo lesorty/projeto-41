@@ -4358,3 +4358,47 @@ main {
     flex-wrap: wrap;
   }
 }
+
+/* Extrato dos caixas: data, o que aconteceu, valor e desfazer. */
+.cash-moves {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.cash-moves li {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) auto 36px;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.cash-moves li:last-child {
+  border-bottom: 0;
+}
+.cash-move-date {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+.cash-move-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.cash-move-main small {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+.cash-moves strong {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.cash-move-spacer {
+  width: 36px;
+}
+.cash-row-actions {
+  display: inline-flex;
+  gap: 4px;
+}

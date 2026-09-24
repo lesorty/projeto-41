@@ -65,6 +65,37 @@ export type CryptoAsset = {
 
 export type AppDatabase = ReturnType<typeof createDatabase>;
 
+export type PositionMovementKind =
+  | "deposit"
+  | "withdrawal"
+  | "move_in"
+  | "move_out"
+  | "buy"
+  | "sell";
+
+export type PositionMovementRow = {
+  id: number;
+  positionId: number;
+  date: string;
+  kind: PositionMovementKind;
+  /** Mudança no valor atual, na moeda da posição: positiva entra, negativa sai. */
+  amount: number;
+  /** Mudança no investido (só renda fixa e ações globais acompanham o investido). */
+  investedDelta: number;
+  transferId: number | null;
+  operationId: number | null;
+  pairId: number | null;
+  description: string | null;
+};
+
+export type PositionMovement = PositionMovementRow & {
+  positionName: string;
+  positionCategory: string;
+  positionCurrency: string;
+  accountName: string | null;
+  transferStatus: string | null;
+};
+
 export function createDatabase(path: string) {
   const raw = new Database(path);
   raw.pragma("journal_mode = WAL");
@@ -167,7 +198,101 @@ export function createDatabase(path: string) {
         return Number(result.lastInsertRowid);
       },
       remove: (id: number) =>
-        raw.prepare("DELETE FROM manual_positions WHERE id=?").run(id).changes
+        raw.prepare("DELETE FROM manual_positions WHERE id=?").run(id).changes,
+      get: (id: number) =>
+        raw
+          .prepare(
+            `SELECT id, category, name, invested, current_value AS currentValue,
+             currency, notes FROM manual_positions WHERE id = ?`
+          )
+          .get(id) as (ManualPosition & { id: number }) | undefined,
+      /** Soma ao valor atual e ao investido: é assim que um movimento mexe na posição. */
+      applyDelta: (id: number, amount: number, investedDelta: number) =>
+        raw
+          .prepare(
+            `UPDATE manual_positions
+             SET current_value = current_value + ?, invested = MAX(invested + ?, 0)
+             WHERE id = ?`
+          )
+          .run(amount, investedDelta, id).changes
+    },
+    // Extrato das posições (migração 010): cada aporte, resgate, movimento
+    // entre posições e compra ou venda paga por um caixa.
+    positionMovements: {
+      list: (options: { positionId?: number; limit?: number } = {}) =>
+        raw
+          .prepare(
+            `SELECT m.id, m.position_id AS positionId, p.name AS positionName,
+                    p.category AS positionCategory, p.currency AS positionCurrency,
+                    m.date, m.kind, m.amount, m.invested_delta AS investedDelta,
+                    m.transfer_id AS transferId, m.operation_id AS operationId,
+                    m.pair_id AS pairId, m.description, a.name AS accountName,
+                    e.status AS transferStatus
+             FROM position_movements m
+             JOIN manual_positions p ON p.id = m.position_id
+             LEFT JOIN transfers t ON t.id = m.transfer_id
+             LEFT JOIN entries e ON e.id = CASE WHEN m.kind = 'deposit' THEN t.from_entry_id
+                                                ELSE t.to_entry_id END
+             LEFT JOIN accounts a ON a.id = e.account_id
+             ${options.positionId ? "WHERE m.position_id = @positionId" : ""}
+             ORDER BY m.date DESC, m.id DESC
+             LIMIT @limit`
+          )
+          .all({ positionId: options.positionId ?? null, limit: options.limit ?? 50 }) as PositionMovement[],
+      get: (id: number) =>
+        raw
+          .prepare(
+            `SELECT id, position_id AS positionId, date, kind, amount,
+                    invested_delta AS investedDelta, transfer_id AS transferId,
+                    operation_id AS operationId, pair_id AS pairId, description
+             FROM position_movements WHERE id = ?`
+          )
+          .get(id) as PositionMovementRow | undefined,
+      byOperation: (operationId: number) =>
+        raw
+          .prepare(
+            `SELECT id, position_id AS positionId, date, kind, amount,
+                    invested_delta AS investedDelta, transfer_id AS transferId,
+                    operation_id AS operationId, pair_id AS pairId, description
+             FROM position_movements WHERE operation_id = ?`
+          )
+          .get(operationId) as PositionMovementRow | undefined,
+      create: (row: Omit<PositionMovementRow, "id">) =>
+        Number(
+          raw
+            .prepare(
+              `INSERT INTO position_movements
+               (position_id, date, kind, amount, invested_delta, transfer_id, operation_id,
+                pair_id, description, created_at)
+               VALUES (@positionId, @date, @kind, @amount, @investedDelta, @transferId,
+                       @operationId, @pairId, @description, @createdAt)`
+            )
+            .run({ ...row, createdAt: new Date().toISOString() }).lastInsertRowid
+        ),
+      setPair: (id: number, pairId: number) =>
+        raw.prepare("UPDATE position_movements SET pair_id = ? WHERE id = ?").run(pairId, id),
+      remove: (id: number) => {
+        // O par de um movimento entre posicoes aponta para ele: solta antes.
+        raw.prepare("UPDATE position_movements SET pair_id = NULL WHERE pair_id = ?").run(id);
+        return raw.prepare("DELETE FROM position_movements WHERE id = ?").run(id).changes;
+      },
+      /** Movimentos que ligam a posição ao banco ou a operações. */
+      countLinked: (positionId: number) =>
+        (
+          raw
+            .prepare(
+              `SELECT COUNT(*) AS n FROM position_movements
+               WHERE position_id = ? AND (transfer_id IS NOT NULL OR operation_id IS NOT NULL)`
+            )
+            .get(positionId) as { n: number }
+        ).n,
+      /** Posições que já receberam dinheiro do banco: integradas, não manuais. */
+      integratedPositionIds: () =>
+        (
+          raw
+            .prepare("SELECT DISTINCT position_id AS id FROM position_movements WHERE transfer_id IS NOT NULL")
+            .all() as { id: number }[]
+        ).map((row) => row.id)
     },
     dividends: {
       list: () =>
@@ -351,25 +476,7 @@ export function createDatabase(path: string) {
       remove: (operationId: number) =>
         raw.prepare("DELETE FROM operation_transfers WHERE operation_id = ?").run(operationId)
           .changes,
-      /** O lancamento que converte caixa da corretora em ativo (ou de volta). */
-      getCash: (operationId: number) =>
-        raw
-          .prepare(
-            `SELECT operation_id AS operationId, entry_id AS entryId
-             FROM operation_cash_entries WHERE operation_id = ?`
-          )
-          .get(operationId) as { operationId: number; entryId: number } | undefined,
-      setCash: (operationId: number, entryId: number) =>
-        raw
-          .prepare(
-            `INSERT INTO operation_cash_entries(operation_id, entry_id, created_at)
-             VALUES (?, ?, ?)
-             ON CONFLICT(operation_id) DO UPDATE SET entry_id = excluded.entry_id`
-          )
-          .run(operationId, entryId, new Date().toISOString()),
-      removeCash: (operationId: number) =>
-        raw.prepare("DELETE FROM operation_cash_entries WHERE operation_id = ?").run(operationId)
-          .changes,
+
       /** Estado do vinculo de cada operacao, para a listagem. */
       listByOperations: (ids: number[]) => {
         if (ids.length === 0) return [];

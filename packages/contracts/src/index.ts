@@ -15,7 +15,12 @@ export const operationSchema = z.object({
   currency: currencySchema,
   notes: z.string().trim().optional(),
   /** Conta do livro que paga a compra ou recebe a venda (fase 4). */
-  accountId: z.number().int().positive().nullable().optional()
+  accountId: z.number().int().positive().nullable().optional(),
+  /**
+   * Caixa (posição de "Caixa e renda fixa") que paga a compra ou recebe a
+   * venda. Exclusivo com `accountId`: o dinheiro vem de um lugar só.
+   */
+  positionId: z.number().int().positive().nullable().optional()
 });
 
 export const manualPositionSchema = z.object({

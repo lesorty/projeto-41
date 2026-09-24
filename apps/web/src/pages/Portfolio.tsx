@@ -24,16 +24,17 @@ import { currency as fmtCurrency, currencyRaw, decimal, fx, longDate, money, per
 import { portfolioIconUrl } from "../lib/icons.js";
 import { useToast } from "../lib/toast.js";
 import type { Asset, CryptoSearchResult, OperationRecord } from "@projeto41/contracts";
-import { CashSourceSelect } from "../components/CashSourceSelect.js";
-import { brokerIdOf, type CashSettings } from "../lib/cash.js";
+import { CashSourceSelect, type CashSource } from "../components/CashSourceSelect.js";
+import type { CashSettings } from "../lib/cash.js";
 
 /** A rota devolve o estado do vínculo junto da operação (fase 4). */
 type OperationRow = OperationRecord & {
   accountName?: string | null;
   transferId?: number | null;
   transferStatus?: string | null;
-  /** De onde veio o dinheiro: o caixa da corretora ou uma conta (aporte automático). */
-  cashSource?: "broker" | "bank" | null;
+  /** De onde veio o dinheiro: um caixa de investimento ou uma conta bancária. */
+  cashSource?: "position" | "bank" | null;
+  positionId?: number | null;
 };
 
 type SortKey = "asset" | "quantity" | "averagePrice" | "price" | "marketValueBrl" | "totalReturn";
@@ -46,6 +47,7 @@ export function PortfolioPage({
   investableTotal,
   usdBrl = 0,
   openTrade = false,
+  payWithPositionId,
   onChanged
 }: {
   title: string;
@@ -56,6 +58,8 @@ export function PortfolioPage({
   usdBrl?: number;
   /** Chega com a compra aberta: é o "Alocar" do caixa e da meta de alocação. */
   openTrade?: boolean;
+  /** Caixa que já vem escolhido para pagar a compra aberta. */
+  payWithPositionId?: number;
   onChanged: () => Promise<void>;
 }) {
   const toast = useToast();
@@ -317,8 +321,8 @@ export function PortfolioPage({
                   <td>
                     {/* A diferença entre operação antiga e nova fica na cara:
                         nada foi vinculado automaticamente. */}
-                    {operation.cashSource === "broker" ? (
-                      <Tag tone="info">Caixa</Tag>
+                    {operation.cashSource === "position" ? (
+                      <Tag tone="info">{operation.accountName ?? "Caixa"}</Tag>
                     ) : operation.cashSource === "bank" || operation.transferId ? (
                       <Tag tone="positive">{operation.accountName ?? "Vinculada"}</Tag>
                     ) : (
@@ -345,6 +349,7 @@ export function PortfolioPage({
 
       {drawer && (
         <OperationDrawer
+          payWithPositionId={editing ? undefined : payWithPositionId}
           portfolio={portfolio}
           initial={editing}
           usdBrl={usdBrl}
@@ -362,12 +367,14 @@ export function PortfolioPage({
 }
 
 function OperationDrawer({
+  payWithPositionId,
   portfolio,
   initial,
   usdBrl,
   onClose,
   onSaved
 }: {
+  payWithPositionId?: number;
   portfolio: "crypto" | "b3";
   initial: OperationRow | null;
   usdBrl: number;
@@ -404,7 +411,10 @@ function OperationDrawer({
   );
   const solved = recent[2] as TradeField;
   const [saving, setSaving] = useState(false);
-  const [accountId, setAccountId] = useState<number | null>(initial?.accountId ?? null);
+  const [source, setSource] = useState<CashSource>({
+    positionId: initial?.positionId ?? payWithPositionId ?? null,
+    accountId: initial?.positionId != null ? null : (initial?.accountId ?? null)
+  });
   const [defaultLoaded, setDefaultLoaded] = useState(false);
 
   function editField(field: TradeField, raw: string) {
@@ -431,21 +441,24 @@ function OperationDrawer({
 
   useEffect(() => {
     if (initial || defaultLoaded) return;
-    // O padrão é o caixa da corretora; uma conta configurada vira aporte
-    // automático; com a movimentação desligada, a operação é só registro.
+    // O padrão é o caixa escolhido; sem caixa, a conta (se o débito estiver
+    // ligado); sem nenhum dos dois, a operação é só registro.
     void api<CashSettings>("/investments/cash-settings")
       .then((settings) => {
-        setAccountId(
-          (current) =>
-            current ??
-            (settings.autoDebit
-              ? (settings.defaultAccountId ?? brokerIdOf(settings, portfolio))
-              : null)
-        );
+        setSource((current) => {
+          if (current.positionId != null || current.accountId != null) return current;
+          if (settings.defaultPositionId != null) {
+            return { positionId: settings.defaultPositionId, accountId: null };
+          }
+          return {
+            positionId: null,
+            accountId: settings.autoDebit ? settings.defaultAccountId : null
+          };
+        });
         setDefaultLoaded(true);
       })
       .catch(() => setDefaultLoaded(true));
-  }, [initial, defaultLoaded, portfolio]);
+  }, [initial, defaultLoaded]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -483,7 +496,8 @@ function OperationDrawer({
         quantity,
         total,
         currency: storedCode,
-        accountId,
+        accountId: source.accountId,
+        positionId: source.positionId,
         notes: initial?.notes ?? "",
         ...(isCrypto && slug ? { slug, name: assetName } : {})
       };
@@ -586,10 +600,9 @@ function OperationDrawer({
         {/* O campo fica junto do valor, não escondido num avançado (D03): a
             conta é uma escolha do momento da operação. */}
         <CashSourceSelect
-          portfolio={portfolio}
           type={type}
-          value={accountId}
-          onChange={setAccountId}
+          value={source}
+          onChange={setSource}
           amountBrl={movementBrl}
           conversion={conversion}
         />

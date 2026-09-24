@@ -1,45 +1,96 @@
 import { z } from "zod";
-import { readCashSettings, writeCashSettings } from "../services/investment-cash-service.js";
+import {
+  depositToPosition,
+  moveBetweenPositions,
+  readCashSettings,
+  undoMovement,
+  withdrawFromPosition,
+  writeCashSettings
+} from "../services/investment-cash-service.js";
 import type { RoutePlugin } from "./index.js";
 
+const id = z.number().int().positive();
 const settingsSchema = z.object({
   autoDebit: z.boolean(),
-  defaultAccountId: z.number().int().positive().nullable(),
-  cryptoAccountId: z.number().int().positive().nullable(),
-  b3AccountId: z.number().int().positive().nullable()
+  defaultAccountId: id.nullable(),
+  defaultPositionId: id.nullable()
 });
+const date = z.string().date();
+const cents = z.number().int().positive();
 
+/**
+ * O dinheiro entre o banco e as posições de investimento (migração 010).
+ * Toda mutação devolve as posições e os saldos de novo: as duas telas que
+ * mostram esse dinheiro mudam juntas.
+ */
 export const registerInvestmentCashRoutes: RoutePlugin = (app, { db }) => {
+  const snapshot = () => ({
+    positions: db.positions.list(),
+    balances: db.ledger.balances.consolidated()
+  });
+
+  const kindOf = (accountId: number | null) =>
+    accountId == null
+      ? null
+      : ((db.raw.prepare("SELECT kind FROM accounts WHERE id = ?").get(accountId) as
+          | { kind: string }
+          | undefined)?.kind ?? null);
+
   app.get("/api/investments/cash-settings", async () => readCashSettings(db));
 
   app.put("/api/investments/cash-settings", async (request, reply) => {
     const settings = settingsSchema.parse(request.body);
-
-    const kindOf = (id: number | null) =>
-      id == null
-        ? null
-        : ((db.raw.prepare("SELECT kind FROM accounts WHERE id = ?").get(id) as
-            | { kind: string }
-            | undefined)?.kind ?? null);
-
-    // As contas de destino precisam ser de investimento; sem isso o dinheiro
-    // sairia do banco e entraria numa conta que conta duas vezes no patrimonio.
-    for (const [label, id] of [
-      ["cripto", settings.cryptoAccountId],
-      ["B3", settings.b3AccountId]
-    ] as const) {
-      if (id != null && kindOf(id) !== "investment") {
-        return reply
-          .status(400)
-          .send({ error: `A conta de destino de ${label} precisa ser do tipo investimento` });
-      }
-    }
     // Comprar acao no cartao nao e um caso que este app modela.
-    if (kindOf(settings.defaultAccountId) === "credit_card") {
-      return reply.status(400).send({ error: "A conta padrao nao pode ser um cartao de credito" });
+    const kind = kindOf(settings.defaultAccountId);
+    if (kind === "credit_card" || kind === "investment") {
+      return reply
+        .status(400)
+        .send({ error: "A conta padrao precisa ser uma conta bancaria, nao cartao nem investimento" });
     }
-
+    if (settings.defaultPositionId != null && !db.positions.get(settings.defaultPositionId)) {
+      return reply.status(400).send({ error: "Caixa padrao nao encontrado" });
+    }
     writeCashSettings(db, settings);
     return { ok: true, settings: readCashSettings(db) };
+  });
+
+  app.get("/api/investments/movements", async (request) => {
+    const query = z
+      .object({
+        positionId: z.coerce.number().int().positive().optional(),
+        limit: z.coerce.number().int().positive().max(500).optional()
+      })
+      .parse(request.query);
+    return db.positionMovements.list(query);
+  });
+
+  app.post("/api/investments/deposit", async (request, reply) => {
+    const input = z
+      .object({ positionId: id, fromAccountId: id, amountCents: cents, date })
+      .parse(request.body);
+    const result = depositToPosition(db, input);
+    return reply.status(201).send({ ...result, ...snapshot() });
+  });
+
+  app.post("/api/investments/withdraw", async (request, reply) => {
+    const input = z
+      .object({ positionId: id, toAccountId: id, amountCents: cents, date })
+      .parse(request.body);
+    const result = withdrawFromPosition(db, input);
+    return reply.status(201).send({ ...result, ...snapshot() });
+  });
+
+  app.post("/api/investments/move", async (request, reply) => {
+    const input = z
+      .object({ fromPositionId: id, toPositionId: id, amount: z.number().positive(), date })
+      .parse(request.body);
+    const result = moveBetweenPositions(db, input);
+    return reply.status(201).send({ ...result, ...snapshot() });
+  });
+
+  app.delete("/api/investments/movements/:id", async (request) => {
+    const params = z.object({ id: z.coerce.number().int().positive() }).parse(request.params);
+    undoMovement(db, params.id);
+    return { ok: true, ...snapshot() };
   });
 };

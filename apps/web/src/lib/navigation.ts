@@ -12,6 +12,8 @@ export type LedgerPreset = {
   personId?: number;
   /** Na carteira: chegar com a compra aberta (o "Alocar" do caixa). */
   openTrade?: boolean;
+  /** E, nessa compra, pagar com este caixa. */
+  payWithPositionId?: number;
 };
 
 export type FinanceDestination = "expenses" | "income" | "transactions" | "reports";

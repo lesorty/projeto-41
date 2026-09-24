@@ -104,7 +104,9 @@ describe("migration 005 — investment link", () => {
 
   it("semeia as contas de corretora e a configuracao, de forma idempotente", () => {
     const db = dbBeforePhase4();
-    runMigrations(db, migrations);
+    // So ate a 005: a 010 junta as duas numa ponte unica, e isso e dela.
+    const upTo005 = migrations.filter((migration) => migration.version <= 5);
+    runMigrations(db, upTo005);
 
     const accounts = db
       .prepare("SELECT name, include_in_net_worth AS flag FROM accounts WHERE kind='investment'")
@@ -117,7 +119,7 @@ describe("migration 005 — investment link", () => {
     expect(Number(setting(db, "investment.crypto_account_id"))).toBeGreaterThan(0);
 
     // Reaplicar nao duplica nem sobrescreve.
-    runMigrations(db, migrations);
+    runMigrations(db, upTo005);
     expect(
       db.prepare("SELECT COUNT(*) AS n FROM accounts WHERE kind='investment'").get()
     ).toEqual({ n: 2 });

@@ -69,10 +69,10 @@ export function AllocationPage({
     [targets, dashboard, investable]
   );
 
-  // O caixa da corretora é o dinheiro pronto para ir para a meta. A sugestão
-  // reparte ele entre as classes que estão abaixo do alvo, na proporção do
-  // que falta a cada uma.
-  const brokerCash = dashboard.brokerCashBrl ?? 0;
+  // Os caixas (posições Caixa BR) são o dinheiro pronto para ir para a meta.
+  // A sugestão reparte ele entre as classes que estão abaixo do alvo, na
+  // proporção do que falta a cada uma.
+  const brokerCash = dashboard.categories.cash ?? 0;
   const suggestion = useMemo(
     () =>
       suggestCashAllocation(
@@ -148,8 +148,8 @@ export function AllocationPage({
       >
         {brokerCash <= 0 ? (
           <p className="fin-muted">
-            Nada em caixa agora. O dinheiro chega pelo aporte, em Investimentos › Em caixa, e daqui
-            vai para a classe que está mais longe da meta.
+            Nada em caixa agora. O dinheiro chega por aporte da conta bancária num caixa, em
+            Investimentos › Em caixa, e daqui vai para a classe que está mais longe da meta.
           </p>
         ) : targets.length === 0 ? (
           <p className="fin-muted">

@@ -33,8 +33,6 @@ export type NetWorth = {
   schemaVersion: 2;
   classes: Record<string, number>;
   investmentsBrl: number;
-  /** Caixa das corretoras, já incluído em `classes.cash`. */
-  brokerCashBrl: number;
   bankBrl: number;
   /** Total devido do cartao, positivo. E ele que entra no patrimonio. */
   liabilitiesBrl: number;
@@ -73,17 +71,6 @@ export function buildNetWorth(db: AppDatabase, now = new Date()): NetWorth {
       (classes[position.category] ?? 0) +
       position.currentValue * (position.currency === "USD" ? usdBrl : 1);
   }
-  // Caixa da corretora (migração 009): dinheiro que já saiu do banco e espera
-  // ser alocado. É "Caixa BR" do ponto de vista da carteira — entra na base
-  // dos pesos e na meta de alocação como qualquer caixa. As compras já
-  // descontam dele, então não conta duas vezes com o valor de mercado.
-  const brokerCashCents = db.ledger.balances
-    .all()
-    .filter((account) => account.kind === "investment")
-    .reduce((sum, account) => sum + account.currentBalanceCents, 0);
-  const brokerCashBrl = fromCents(brokerCashCents);
-  classes.cash = (classes.cash ?? 0) + brokerCashBrl;
-
   const investmentsBrl = Object.values(classes).reduce((sum, value) => sum + value, 0);
 
   // As classes do livro. `kind='investment'` é descartada incondicionalmente,
@@ -114,10 +101,14 @@ export function buildNetWorth(db: AppDatabase, now = new Date()): NetWorth {
 
   // R-07: posições manuais de caixa/reserva convivendo com contas do livro
   // podem estar contando o mesmo dinheiro duas vezes (D17).
+  // Posição que recebe aporte do banco (010) está integrada: o dinheiro saiu
+  // da conta ao entrar nela, então não há o que contar duas vezes.
+  const integrated = new Set(db.positionMovements.integratedPositionIds());
   const suspicious = manualPositions.filter(
     (position) =>
       (position.category === "cash" || position.category === "reserve") &&
-      position.currentValue > 0
+      position.currentValue > 0 &&
+      !integrated.has(position.id!)
   );
   const ledgerBalanceBrl = fromCents(
     (byKind.checking ?? 0) + (byKind.savings ?? 0) + (byKind.cash ?? 0)
@@ -127,7 +118,6 @@ export function buildNetWorth(db: AppDatabase, now = new Date()): NetWorth {
     schemaVersion: 2,
     classes,
     investmentsBrl,
-    brokerCashBrl,
     bankBrl,
     liabilitiesBrl,
     creditCardCurrentBrl,

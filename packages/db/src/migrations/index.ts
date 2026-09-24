@@ -7,6 +7,7 @@ import { migration006GoalsCdi } from "./006-goals-cdi.js";
 import { migration007ImportRules } from "./007-import-rules.js";
 import { migration008BudgetShareDiscounts } from "./008-budget-share-discounts.js";
 import { migration009BrokerCash } from "./009-broker-cash.js";
+import { migration010PositionCash } from "./010-position-cash.js";
 import type { Migration } from "./runner.js";
 
 /**
@@ -22,8 +23,10 @@ export const migrations: Migration[] = [
   migration006GoalsCdi,
   migration007ImportRules,
   migration008BudgetShareDiscounts,
-  migration009BrokerCash
+  migration009BrokerCash,
+  migration010PositionCash
 ];
 
 export * from "./runner.js";
 export { migration009BrokerCash } from "./009-broker-cash.js";
+export { migration010PositionCash } from "./010-position-cash.js";

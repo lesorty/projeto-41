@@ -270,24 +270,33 @@ export function createEntriesRepository(db: Db) {
     }
     if (to.kind === "goal") return "goal_deposit";
     if (from.kind === "goal") return "goal_withdrawal";
-    // Aporte no caixa da corretora e resgate dele: dinheiro que vai investir
-    // nao e gasto e nao conta no alvo (6.4).
-    if (to.kind === "investment" || from.kind === "investment") return "investment";
+    // A conta-ponte dos investimentos so recebe dinheiro junto de uma posicao
+    // (aporte) ou de uma operacao. Transferencia avulsa para ela sumiria do
+    // patrimonio: o dinheiro sairia do banco sem chegar a posicao nenhuma.
+    if (to.kind === "investment" || from.kind === "investment") {
+      throw new LedgerError("Para investir, use Aportar em Investimentos > Em caixa");
+    }
     return "generic";
   }
 
   /**
-   * Compra e venda movem o caixa da corretora por um lancamento da operacao.
-   * Mexer nele pelo livro desencontraria caixa e carteira: quem manda e a
-   * operacao.
+   * Aporte e resgate sao de Investimentos: o livro mostra, mas quem desfaz e
+   * a tela que tambem devolve o valor da posicao.
    */
   function assertNotOperationCash(entryId: number) {
+    // Aporte e resgate mudam o valor de uma posicao junto com o banco (010).
+    // Apagar so a ponta do livro deixaria a posicao com dinheiro que nao saiu
+    // de lugar nenhum.
     const linked = db
-      .prepare("SELECT 1 FROM operation_cash_entries WHERE entry_id = ?")
-      .get(entryId);
+      .prepare(
+        `SELECT 1 FROM position_movements m
+         JOIN transfers t ON t.id = m.transfer_id
+         WHERE t.from_entry_id = ? OR t.to_entry_id = ?`
+      )
+      .get(entryId, entryId);
     if (linked) {
       throw new LedgerError(
-        "Movimento de caixa de uma operacao de investimento: edite ou exclua a operacao"
+        "Aporte ou resgate de investimento: desfaca em Investimentos > Em caixa"
       );
     }
   }
