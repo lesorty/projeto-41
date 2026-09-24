@@ -1,4 +1,4 @@
-import { createDatabase, type AppDatabase } from "@projeto41/db";
+import { createTestDatabase, type AppDatabase } from "@projeto41/db";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   ReconciledLinkError,
@@ -39,7 +39,7 @@ const balanceOf = (id: number) =>
   db.ledger.balances.forAccount(id, { asOf: "2026-06-01" })?.currentBalanceCents ?? 0;
 
 beforeEach(() => {
-  db = createDatabase(":memory:");
+  db = createTestDatabase();
   checking = db.ledger.accounts.create({
     name: "Nubank",
     kind: "checking",

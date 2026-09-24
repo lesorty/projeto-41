@@ -85,6 +85,22 @@ export const registerLedgerRoutes: RoutePlugin = (app, { db }) => {
     ledger.categories.update(id, categorySchema.parse(request.body));
     return { ok: true, categories: ledger.categories.list() };
   });
+  // Só o objetivo: a tela de alocação de gastos não conhece o resto do
+  // cadastro e um PUT completo zeraria o que ela não mandou.
+  app.put("/api/ledger/categories/:id/budget", async (request) => {
+    const { id } = idParam.parse(request.params);
+    const body = z
+      .object({
+        monthlyBudgetCents: z.number().int().nonnegative().nullable().optional(),
+        budgetSharePerMille: z.number().int().min(0).max(1000).nullable().optional()
+      })
+      .refine((value) => value.monthlyBudgetCents == null || value.budgetSharePerMille == null, {
+        message: "O objetivo e em valor ou em percentual, nao os dois"
+      })
+      .parse(request.body);
+    ledger.categories.setBudget(id, body);
+    return { ok: true, categories: ledger.categories.list() };
+  });
   app.delete("/api/ledger/categories/:id", async (request) => {
     const { id } = idParam.parse(request.params);
     const removed = ledger.categories.remove(id);
@@ -241,7 +257,6 @@ export const registerLedgerRoutes: RoutePlugin = (app, { db }) => {
     const query = z
       .object({
         asOf: z.string().date().optional(),
-        until: z.string().date().optional(),
         includeArchived: z.coerce.boolean().optional()
       })
       .parse(request.query);

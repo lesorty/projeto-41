@@ -1,4 +1,4 @@
-import { createDatabase, type AppDatabase } from "@projeto41/db";
+import { createTestDatabase, type AppDatabase } from "@projeto41/db";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../app.js";
 
@@ -18,7 +18,7 @@ async function post(url: string, payload: Record<string, unknown>) {
 }
 
 beforeEach(async () => {
-  db = createDatabase(":memory:");
+  db = createTestDatabase();
   app = buildApp({ db, priceService });
   await app.ready();
 

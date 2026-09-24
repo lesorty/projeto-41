@@ -113,7 +113,11 @@ export type CategoryReportRow = {
   name: string;
   color: string | null;
   spentCents: number;
+  /** O objetivo ja em centavos para o periodo, venha ele de valor ou de percentual. */
   budgetCents: number | null;
+  budgetMode: "absolute" | "share" | null;
+  /** Presente so no modo percentual: o objetivo como fracao das saidas. */
+  budgetSharePerMille: number | null;
   overBudget: boolean;
   sharePerMille: number;
 };
@@ -166,7 +170,8 @@ export type CategoryTrend = {
 
 export type LedgerSummary = {
   period: string;
-  consolidated: { currentCents: number; projectedCents: number };
+  /** Saldo e fatura, lado a lado e nunca somados: um e dinheiro, o outro divida. */
+  consolidated: { currentCents: number; cardStatementCents: number };
   accounts: {
     id: number;
     name: string;
@@ -175,7 +180,6 @@ export type LedgerSummary = {
     personId: number | null;
     personName: string | null;
     currentBalanceCents: number;
-    projectedBalanceCents: number;
   }[];
   month: { incomeCents: number; expenseCents: number; netCents: number };
   previousMonth: { incomeCents: number; expenseCents: number; netCents: number };

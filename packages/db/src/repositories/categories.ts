@@ -8,6 +8,7 @@ type CategoryRow = {
   color: string;
   icon: string | null;
   monthlyBudgetCents: number | null;
+  budgetSharePerMille: number | null;
   archived: number;
   sortOrder: number;
 };
@@ -15,9 +16,22 @@ type CategoryRow = {
 const SELECT = `
   SELECT id, name, kind, color, icon,
          monthly_budget_cents AS monthlyBudgetCents,
+         budget_share_per_mille AS budgetSharePerMille,
          archived, sort_order AS sortOrder
   FROM categories
 `;
+
+/** Percentual vence: quem mandou os dois ja foi barrado no contrato. */
+function exclusiveBudget(budget: {
+  monthlyBudgetCents?: number | null;
+  budgetSharePerMille?: number | null;
+}) {
+  const share = budget.budgetSharePerMille ?? null;
+  return {
+    budgetSharePerMille: share,
+    monthlyBudgetCents: share != null ? null : (budget.monthlyBudgetCents ?? null)
+  };
+}
 
 const map = (row: CategoryRow): CategoryRecord => ({
   ...row,
@@ -51,16 +65,17 @@ export function createCategoriesRepository(db: Db) {
         db
           .prepare(
             `INSERT INTO categories
-             (name, kind, color, icon, monthly_budget_cents, archived, sort_order, created_at)
-             VALUES (@name, @kind, @color, @icon, @monthlyBudgetCents, @archived,
-                     @sortOrder, @createdAt)`
+             (name, kind, color, icon, monthly_budget_cents, budget_share_per_mille,
+              archived, sort_order, created_at)
+             VALUES (@name, @kind, @color, @icon, @monthlyBudgetCents, @budgetSharePerMille,
+                     @archived, @sortOrder, @createdAt)`
           )
           .run({
             name: category.name,
             kind: category.kind,
             color: category.color,
             icon: category.icon ?? null,
-            monthlyBudgetCents: category.monthlyBudgetCents ?? null,
+            ...exclusiveBudget(category),
             archived: toBit(category.archived, false),
             sortOrder: category.sortOrder ?? 0,
             createdAt: nowIso()
@@ -71,7 +86,9 @@ export function createCategoriesRepository(db: Db) {
       const changes = db
         .prepare(
           `UPDATE categories SET name=@name, kind=@kind, color=@color, icon=@icon,
-           monthly_budget_cents=@monthlyBudgetCents, archived=@archived, sort_order=@sortOrder
+           monthly_budget_cents=@monthlyBudgetCents,
+           budget_share_per_mille=@budgetSharePerMille,
+           archived=@archived, sort_order=@sortOrder
            WHERE id=@id`
         )
         .run({
@@ -80,7 +97,7 @@ export function createCategoriesRepository(db: Db) {
           kind: category.kind,
           color: category.color,
           icon: category.icon ?? null,
-          monthlyBudgetCents: category.monthlyBudgetCents ?? null,
+          ...exclusiveBudget(category),
           archived: toBit(category.archived, false),
           sortOrder: category.sortOrder ?? 0
         }).changes;
@@ -88,11 +105,30 @@ export function createCategoriesRepository(db: Db) {
       return changes;
     },
 
-    /** Orcamento e editado direto da tabela de totais da fase 2. */
-    setBudget: (id: number, monthlyBudgetCents: number | null): number => {
+    /**
+     * Grava o objetivo sem tocar no resto do cadastro. E o caminho da tela de
+     * alocacao de gastos, que so conhece o objetivo: um PUT completo zeraria
+     * cor, ordem e arquivamento que ela nao mandou.
+     *
+     * Definir um modo apaga o outro — objetivo em valor e em percentual sao
+     * exclusivos.
+     */
+    setBudget: (
+      id: number,
+      budget: number | null | { monthlyBudgetCents?: number | null; budgetSharePerMille?: number | null }
+    ): number => {
+      const normalized =
+        typeof budget === "object" && budget !== null
+          ? exclusiveBudget(budget)
+          : { monthlyBudgetCents: budget, budgetSharePerMille: null };
       const changes = db
-        .prepare("UPDATE categories SET monthly_budget_cents = ? WHERE id = ?")
-        .run(monthlyBudgetCents, id).changes;
+        .prepare(
+          `UPDATE categories
+             SET monthly_budget_cents = @monthlyBudgetCents,
+                 budget_share_per_mille = @budgetSharePerMille
+           WHERE id = @id`
+        )
+        .run({ id, ...normalized }).changes;
       if (changes === 0) throw notFound("Categoria");
       return changes;
     },

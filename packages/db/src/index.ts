@@ -482,3 +482,4 @@ function ensureColumn(db: Database.Database, table: string, column: string, type
 
 export * from "./repositories/index.js";
 export * from "./migrations/index.js";
+export * from "./testing.js";

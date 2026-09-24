@@ -1,19 +1,18 @@
 import type { AccountKind, AccountRecord, BalancesResult } from "@projeto41/contracts";
-import { endOfMonth, monthOf, statementMonthFor } from "@projeto41/finance";
+import { monthOf, statementMonthFor } from "@projeto41/finance";
 import { fromBit, today, type Db } from "./shared.js";
 
 /**
  * Saldos derivados por SUM, nunca armazenados (D24).
  *
- * Implementa o plano mestre 6.1 ao pe da letra:
- * - saldo atual  = saldo inicial + lancamentos ate hoje com status liquidado;
- * - saldo previsto = saldo atual + lancamentos `pending` ate o fim do periodo;
+ * - saldo = saldo inicial + lancamentos ate hoje com status liquidado;
  * - consolidado = soma das contas com `include_in_net_worth`, **sem** cartao;
  * - cartao reporta dois numeros distintos: fatura do mes e total devido.
  *
- * O saldo previsto soma apenas o que esta `pending` porque e esse o estado de um
- * lancamento agendado. Um lancamento futuro ja marcado como liquidado e uma
- * contradicao de dados, e o plano mestre optou por nao antecipa-lo.
+ * **Nao existe mais "saldo previsto".** Ele somava o que estava `pending` mas
+ * ignorava a fatura do cartao que ia sair da mesma conta, entao prometia um
+ * numero que nao ia acontecer. O sistema mostra o que e fato — saldo e fatura,
+ * lado a lado — e nao tenta adivinhar entradas e saidas futuras.
  */
 
 type AccountBalanceRow = {
@@ -35,7 +34,6 @@ type AccountBalanceRow = {
   archived: number;
   sortOrder: number;
   clearedCents: number;
-  pendingCents: number;
   allCents: number;
   statementCents: number;
 };
@@ -61,8 +59,6 @@ const BALANCE_SQL = `
     a.sort_order AS sortOrder,
     COALESCE(SUM(CASE WHEN e.status IN ('cleared','reconciled') AND e.date <= @asOf
                       THEN e.amount_cents END), 0) AS clearedCents,
-    COALESCE(SUM(CASE WHEN e.status = 'pending' AND e.date <= @until
-                      THEN e.amount_cents END), 0) AS pendingCents,
     COALESCE(SUM(e.amount_cents), 0) AS allCents,
     COALESCE(SUM(CASE WHEN e.statement_month = @statementMonth
                       THEN e.amount_cents END), 0) AS statementCents,
@@ -77,8 +73,6 @@ const BALANCE_SQL = `
 export type BalanceOptions = {
   /** Data de corte do saldo atual. Padrao: hoje. */
   asOf?: string;
-  /** Fim do periodo do saldo previsto. Padrao: fim do mes de `asOf`. */
-  until?: string;
   /** Mes da fatura a destacar nos cartoes. Padrao: o mes de `asOf`. */
   statementMonth?: string;
   includeArchived?: boolean;
@@ -87,7 +81,6 @@ export type BalanceOptions = {
 function mapAccount(row: AccountBalanceRow, currentStatementCents?: number): AccountRecord {
   const isCard = row.kind === "credit_card";
   const currentBalanceCents = row.openingBalanceCents + row.clearedCents;
-  const projectedBalanceCents = currentBalanceCents + row.pendingCents;
 
   const account: AccountRecord = {
     id: row.id,
@@ -107,8 +100,7 @@ function mapAccount(row: AccountBalanceRow, currentStatementCents?: number): Acc
     includeInNetWorth: fromBit(row.includeInNetWorth),
     archived: fromBit(row.archived),
     sortOrder: row.sortOrder,
-    currentBalanceCents,
-    projectedBalanceCents
+    currentBalanceCents
   };
 
   if (isCard) {
@@ -127,11 +119,8 @@ export function createBalancesRepository(db: Db) {
   const repository = {
     all: (options: BalanceOptions = {}): AccountRecord[] => {
       const asOf = options.asOf ?? today();
-      const until = options.until ?? endOfMonth(monthOf(asOf));
       const statementMonth = options.statementMonth ?? monthOf(asOf);
-      const rows = db
-        .prepare(BALANCE_SQL)
-        .all({ asOf, until, statementMonth }) as AccountBalanceRow[];
+      const rows = db.prepare(BALANCE_SQL).all({ asOf, statementMonth }) as AccountBalanceRow[];
 
       // A fatura "atual" de um cartao e a do ciclo DELE, nunca o mes-calendario:
       // e a mesma definicao de `cards.summary`, e existir duas seria o comeco de
@@ -210,10 +199,9 @@ export function createBalancesRepository(db: Db) {
           (total, account) => total + account.currentBalanceCents,
           0
         ),
-        projectedConsolidatedCents: counted.reduce(
-          (total, account) => total + account.projectedBalanceCents,
-          0
-        ),
+        creditCardStatementCents: cards
+          .filter((account) => !account.archived)
+          .reduce((total, account) => total + (account.currentStatementCents ?? 0), 0),
         creditCardDueCents: cards.reduce((total, account) => total + (account.totalDueCents ?? 0), 0)
       };
     }

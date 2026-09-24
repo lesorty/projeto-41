@@ -5,6 +5,7 @@ import { migration004CreditCard } from "./004-credit-card.js";
 import { migration005InvestmentLink } from "./005-investment-link.js";
 import { migration006GoalsCdi } from "./006-goals-cdi.js";
 import { migration007ImportRules } from "./007-import-rules.js";
+import { migration008BudgetShareDiscounts } from "./008-budget-share-discounts.js";
 import type { Migration } from "./runner.js";
 
 /**
@@ -18,7 +19,8 @@ export const migrations: Migration[] = [
   migration004CreditCard,
   migration005InvestmentLink,
   migration006GoalsCdi,
-  migration007ImportRules
+  migration007ImportRules,
+  migration008BudgetShareDiscounts
 ];
 
 export * from "./runner.js";

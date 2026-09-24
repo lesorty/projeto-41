@@ -49,9 +49,23 @@ export const invoicePaymentSchema = z.object({
   amountCents: centsSchema.positive()
 });
 
+/**
+ * Desconto na antecipacao. `value` e centavos em `amount` e centesimos de
+ * ponto percentual em `percent` (`1250` = 12,5%), para ficar inteiro como todo
+ * o resto do modulo (D19).
+ */
+export const anticipationDiscountSchema = z.object({
+  mode: z.enum(["percent", "amount"]),
+  scope: z.enum(["each", "total"]),
+  value: z.number().int().positive()
+});
+
 export const anticipationSchema = z.object({
   entryIds: z.array(idSchema).min(1),
-  targetMonth: monthSchema
+  targetMonth: monthSchema,
+  discount: anticipationDiscountSchema.nullable().optional(),
+  /** Data do desconto; padrao e hoje. */
+  date: isoDateSchema.optional()
 });
 
 export const restoreNaturalSchema = z.object({ entryIds: z.array(idSchema).min(1) });
@@ -69,6 +83,7 @@ export type CreateInstallmentPlanInput = z.input<typeof createInstallmentPlanSch
 export type UpdateInstallmentPlanInput = z.input<typeof updateInstallmentPlanSchema>;
 export type InvoicePaymentInput = z.input<typeof invoicePaymentSchema>;
 export type AnticipationInput = z.infer<typeof anticipationSchema>;
+export type AnticipationDiscount = z.infer<typeof anticipationDiscountSchema>;
 export type RefundInput = z.input<typeof refundSchema>;
 
 /**

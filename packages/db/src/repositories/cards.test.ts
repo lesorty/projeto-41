@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { createDatabase } from "../index.js";
+import { createTestDatabase } from "../index.js";
 import type { LedgerRepositories } from "./index.js";
 
 /** Hoje fixo: os testes de fatura não podem depender do relógio. */
@@ -15,7 +15,7 @@ beforeEach(() => {
   // `createDatabase` é o caminho real: roda o `migrate()` legado e, em seguida,
   // o runner versionado. Montar só o runner produz um banco que não existe em
   // produção — sem `operations`, por exemplo.
-  ledger = createDatabase(":memory:").ledger;
+  ledger = createTestDatabase().ledger;
 
   steylor = ledger.people.list()[0]!.id;
   checking = ledger.accounts.create({
@@ -314,6 +314,84 @@ describe("antecipacao de parcelas", () => {
     expect(restored.statementMonth).toBe(original.statementMonth);
     expect(restored.date).toBe(original.date);
     expect(ledger.statements.isAnticipated(last.id)).toBe(false);
+  });
+
+  it("abate o desconto na fatura de destino e no total devido", () => {
+    const two = installments.find((row) => row.installmentNumber === 2)!;
+    const three = installments.find((row) => row.installmentNumber === 3)!;
+    const before = ledger.cards.summary(card, TODAY).totalOwedCents;
+
+    ledger.statements.anticipate(card, {
+      entryIds: [two.id, three.id],
+      targetMonth: "2026-05",
+      discount: { mode: "percent", scope: "total", value: 1000 },
+      date: TODAY
+    });
+
+    // As duas parcelas de 100,00 somam 200,00; 10% de desconto e 20,00.
+    const may = ledger.statements.list(card, { asOf: TODAY }).find((s) => s.month === "2026-05");
+    expect(may?.totalCents).toBe(30000 - 2000);
+    expect(ledger.cards.summary(card, TODAY).totalOwedCents).toBe(before - 2000);
+  });
+
+  it("o desconto abate a categoria, como um estorno, e nao vira receita", () => {
+    const three = installments.find((row) => row.installmentNumber === 3)!;
+    ledger.statements.anticipate(card, {
+      entryIds: [three.id],
+      targetMonth: "2026-05",
+      discount: { mode: "amount", scope: "each", value: 1500 },
+      date: TODAY
+    });
+    const rows = ledger.entries.list({ accountId: card, pageSize: 50 }).rows;
+    const discount = rows.find((row) => row.refundOfEntryId === three.id)!;
+    expect(discount.kind).toBe("expense");
+    expect(discount.amountCents).toBe(1500);
+    expect(discount.categoryId).toBe(mercado);
+    expect(discount.statementMonth).toBe("2026-05");
+  });
+
+  it("restaurar a parcela apaga o desconto junto", () => {
+    const three = installments.find((row) => row.installmentNumber === 3)!;
+    const before = ledger.cards.summary(card, TODAY).totalOwedCents;
+    ledger.statements.anticipate(card, {
+      entryIds: [three.id],
+      targetMonth: "2026-05",
+      discount: { mode: "amount", scope: "total", value: 1000 },
+      date: TODAY
+    });
+    ledger.statements.restoreNatural([three.id]);
+
+    const rows = ledger.entries.list({ accountId: card, pageSize: 50 }).rows;
+    expect(rows.some((row) => row.refundOfEntryId === three.id)).toBe(false);
+    expect(ledger.cards.summary(card, TODAY).totalOwedCents).toBe(before);
+  });
+
+  it("nao deixa restaurar o desconto sozinho", () => {
+    const three = installments.find((row) => row.installmentNumber === 3)!;
+    ledger.statements.anticipate(card, {
+      entryIds: [three.id],
+      targetMonth: "2026-05",
+      discount: { mode: "amount", scope: "each", value: 500 },
+      date: TODAY
+    });
+    const discount = ledger.entries
+      .list({ accountId: card, pageSize: 50 })
+      .rows.find((row) => row.refundOfEntryId === three.id)!;
+    expect(() => ledger.statements.restoreNatural([discount.id])).toThrow(/desconto/);
+  });
+
+  it("recusa desconto maior que a parcela sem mover nada", () => {
+    const three = installments.find((row) => row.installmentNumber === 3)!;
+    expect(() =>
+      ledger.statements.anticipate(card, {
+        entryIds: [three.id],
+        targetMonth: "2026-05",
+        discount: { mode: "amount", scope: "each", value: 20000 },
+        date: TODAY
+      })
+    ).toThrow(/passa do valor/);
+    // A transacao inteira volta: a parcela continua na fatura natural.
+    expect(ledger.entries.get(three.id)?.statementMonth).toBe("2026-07");
   });
 
   it("recusa antecipar para uma fatura ja paga", () => {

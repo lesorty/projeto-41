@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createDatabase } from "../index.js";
+import { createTestDatabase } from "../index.js";
 import { runMigrations, type MigrationDatabase } from "./runner.js";
 import { migrations } from "./index.js";
 
@@ -8,7 +8,7 @@ import { migrations } from "./index.js";
  * banco precisa nascer pelo caminho real de construção e não só pelo runner.
  */
 function db() {
-  return createDatabase(":memory:").raw;
+  return createTestDatabase().raw;
 }
 
 function indexNames(raw: MigrationDatabase, table: string) {

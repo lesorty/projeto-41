@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { createDatabase, type AppDatabase } from "@projeto41/db";
+import { createTestDatabase, type AppDatabase } from "@projeto41/db";
 import { buildDashboard } from "./portfolio-service.js";
 
 let db: AppDatabase | undefined;
@@ -7,7 +7,7 @@ afterEach(() => db?.close());
 
 describe("buildDashboard", () => {
   it("consolidates crypto, B3 and manual positions in BRL", () => {
-    db = createDatabase(":memory:");
+    db = createTestDatabase();
     db.operations.create({
       portfolio: "crypto",
       type: "buy",
@@ -50,7 +50,7 @@ describe("buildDashboard", () => {
   });
 
   it("calculates annual return from the first snapshot of the year", () => {
-    db = createDatabase(":memory:");
+    db = createTestDatabase();
     db.positions.upsert({
       category: "cash",
       name: "Conta",
@@ -80,7 +80,7 @@ describe("buildDashboard", () => {
   });
 
   it("returns null when the year's base snapshot predates cash control", () => {
-    const db = createDatabase(":memory:");
+    const db = createTestDatabase();
     db.positions.upsert({
       category: "cash",
       name: "Conta",

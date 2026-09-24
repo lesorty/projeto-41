@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createDatabase, type AppDatabase } from "@projeto41/db";
+import { createTestDatabase, type AppDatabase } from "@projeto41/db";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCdiService } from "./cdi-service.js";
 import { parseSgsPayload, splitWindows } from "./sgs-client.js";
@@ -14,7 +14,7 @@ const jsonResponse = (body: unknown, init: ResponseInit = {}) =>
   new Response(JSON.stringify(body), { status: 200, ...init });
 
 beforeEach(() => {
-  db = createDatabase(":memory:");
+  db = createTestDatabase();
   dir = mkdtempSync(join(tmpdir(), "projeto41-cdi-"));
 });
 

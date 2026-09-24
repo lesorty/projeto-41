@@ -92,6 +92,41 @@ describe("categoryTotals", () => {
     expect(totals[2]?.overBudget).toBe(false);
   });
 
+  it("converte objetivo percentual em centavos sobre o total de saidas", () => {
+    const shareRows: CategoryRow[] = [
+      { categoryId: 1, name: "Mercado", color: null, totalCents: 60000, budgetSharePerMille: 250 },
+      { categoryId: 2, name: "Lazer", color: null, totalCents: 40000, monthlyBudgetCents: 30000 }
+    ];
+    const totals = categoryTotals(shareRows, { range: { from: "2026-03-01", to: "2026-03-31" } });
+    // 25% de 1.000,00 de saidas: objetivo de 250,00, estourado com 600,00.
+    expect(totals[0]).toMatchObject({
+      budgetCents: 25000,
+      budgetMode: "share",
+      budgetSharePerMille: 250,
+      overBudget: true
+    });
+    expect(totals[1]).toMatchObject({ budgetCents: 30000, budgetMode: "absolute", overBudget: true });
+  });
+
+  it("aplica o objetivo percentual em qualquer recorte, nao so em mes inteiro", () => {
+    const totals = categoryTotals(
+      [{ categoryId: 1, name: "Mercado", color: null, totalCents: 1000, budgetSharePerMille: 500 }],
+      { range: { from: "2026-03-10", to: "2026-03-22" } }
+    );
+    expect(totals[0]?.budgetCents).toBe(500);
+  });
+
+  it("nao deixa categoria negativa inflar a base do percentual", () => {
+    const totals = categoryTotals(
+      [
+        { categoryId: 1, name: "Mercado", color: null, totalCents: 1000, budgetSharePerMille: 500 },
+        { categoryId: 2, name: "Estorno", color: null, totalCents: -400 }
+      ],
+      { range: { from: "2026-03-01", to: "2026-03-31" } }
+    );
+    expect(totals[0]?.budgetCents).toBe(500);
+  });
+
   it("preserva total negativo vindo de estorno adiantado (6.6)", () => {
     const totals = categoryTotals(
       [{ categoryId: 1, name: "Mercado", color: null, totalCents: -3000 }],
@@ -109,6 +144,8 @@ describe("topSlices", () => {
       color: "#123456",
       spentCents: (n - index) * 1000,
       budgetCents: null,
+      budgetMode: null,
+      budgetSharePerMille: null,
       overBudget: false
     }));
 
@@ -127,9 +164,9 @@ describe("topSlices", () => {
 
   it("deixa fatia negativa e zerada fora da rosca", () => {
     const slices = topSlices([
-      { categoryId: 1, name: "A", color: null, spentCents: 1000, budgetCents: null, overBudget: false },
-      { categoryId: 2, name: "B", color: null, spentCents: -500, budgetCents: null, overBudget: false },
-      { categoryId: 3, name: "C", color: null, spentCents: 0, budgetCents: null, overBudget: false }
+      { categoryId: 1, name: "A", color: null, spentCents: 1000, budgetCents: null, budgetMode: null, budgetSharePerMille: null, overBudget: false },
+      { categoryId: 2, name: "B", color: null, spentCents: -500, budgetCents: null, budgetMode: null, budgetSharePerMille: null, overBudget: false },
+      { categoryId: 3, name: "C", color: null, spentCents: 0, budgetCents: null, budgetMode: null, budgetSharePerMille: null, overBudget: false }
     ]);
     expect(slices.map((slice) => slice.name)).toEqual(["A"]);
     expect(slices[0]?.sharePerMille).toBe(1000);
@@ -204,6 +241,8 @@ describe("comparePeriods", () => {
     color: null,
     spentCents: cents,
     budgetCents: null,
+    budgetMode: null,
+    budgetSharePerMille: null,
     overBudget: false
   });
 

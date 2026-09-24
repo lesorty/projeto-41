@@ -3,7 +3,7 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
-import { createDatabase, type AppDatabase } from "@projeto41/db";
+import { createTestDatabase, type AppDatabase } from "@projeto41/db";
 import sharp from "sharp";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AttachmentError, createAttachmentService } from "./attachment-service.js";
@@ -48,7 +48,7 @@ async function countFiles(root: string): Promise<number> {
 }
 
 beforeEach(() => {
-  db = createDatabase(":memory:");
+  db = createTestDatabase();
   dir = mkdtempSync(join(tmpdir(), "projeto41-attachments-"));
   service = createAttachmentService({ db, attachmentDir: dir });
 

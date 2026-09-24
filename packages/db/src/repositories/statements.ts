@@ -5,14 +5,30 @@ import type {
   StatementSummary
 } from "@projeto41/contracts";
 import {
+  anticipationDiscounts,
   statementDatesFor,
   statementMonthFor,
   statementMonthsBetween,
-  statementStatus
+  statementStatus,
+  type AnticipationDiscountSpec
 } from "@projeto41/finance";
 import { createCardsRepository } from "./cards.js";
 import { createEntriesRepository } from "./entries.js";
 import { LedgerError, nowIso, today, type Db } from "./shared.js";
+
+type InstallmentRow = {
+  id: number;
+  accountId: number;
+  statementMonth: string | null;
+  personId: number | null;
+  categoryId: number | null;
+  placeId: number | null;
+  amountCents: number;
+  description: string | null;
+  installmentNumber: number | null;
+  countsTowardTarget: number;
+  refundOfEntryId: number | null;
+};
 
 /**
  * Fatura derivada (D22): nao existe tabela de fatura, so a consulta sobre
@@ -21,6 +37,72 @@ import { LedgerError, nowIso, today, type Db } from "./shared.js";
 export function createStatementsRepository(db: Db) {
   const cards = createCardsRepository(db);
   const entries = createEntriesRepository(db);
+
+  const isDiscount = db.prepare("SELECT 1 FROM anticipation_discounts WHERE entry_id = ?");
+
+  function refundedCents(entryId: number): number {
+    return (
+      db
+        .prepare(
+          "SELECT COALESCE(SUM(amount_cents), 0) AS total FROM entries WHERE refund_of_entry_id = ?"
+        )
+        .get(entryId) as { total: number }
+    ).total;
+  }
+
+  function applyDiscounts(
+    installments: InstallmentRow[],
+    spec: AnticipationDiscountSpec,
+    targetMonth: string,
+    date: string
+  ) {
+    let discounts: number[];
+    try {
+      discounts = anticipationDiscounts(
+        installments.map((row) => Math.abs(row.amountCents)),
+        spec
+      );
+    } catch (error) {
+      throw new LedgerError(error instanceof Error ? error.message : String(error));
+    }
+    const register = db.prepare(
+      `INSERT INTO anticipation_discounts(entry_id, installment_entry_id, created_at)
+       VALUES (?, ?, ?)`
+    );
+    const moveTo = db.prepare("UPDATE entries SET statement_month = ? WHERE id = ?");
+
+    installments.forEach((row, index) => {
+      const cents = discounts[index] ?? 0;
+      if (cents <= 0) return;
+      // Estorno e desconto somados nunca passam da parcela: o que sobrasse
+      // seria credito inventado no cartao.
+      if (refundedCents(row.id) + cents > Math.abs(row.amountCents)) {
+        throw new LedgerError(
+          `O desconto somado aos estornos passa do valor da parcela ${row.installmentNumber ?? row.id}`
+        );
+      }
+      const label = row.description ?? "parcela";
+      const number = row.installmentNumber != null ? ` ${row.installmentNumber}` : "";
+      const id = entries.createInternal({
+        accountId: row.accountId,
+        personId: row.personId,
+        date,
+        amountCents: cents,
+        kind: "expense",
+        status: "cleared",
+        categoryId: row.categoryId,
+        placeId: row.placeId,
+        description: `Desconto na antecipação · ${label}${number}`,
+        refundOfEntryId: row.id,
+        countsTowardTarget: row.countsTowardTarget === 1,
+        tagIds: []
+      });
+      // O desconto aparece na mesma fatura para onde a parcela foi, nao na do
+      // dia em que foi lancado.
+      moveTo.run(targetMonth, id);
+      register.run(id, row.id, nowIso());
+    });
+  }
 
   /** Meses que precisam aparecer na navegacao, incluindo os futuros com parcela. */
   function monthsFor(accountId: number, asOf: string, range?: { from?: string; to?: string }) {
@@ -197,10 +279,20 @@ export function createStatementsRepository(db: Db) {
     /**
      * Antecipacao: reescreve so o `statement_month`. **`date` nao muda** — a
      * data do fato e a da compra; o que se move e a fatura.
+     *
+     * Com desconto, cada parcela ganha um abatimento colado a ela: lancamento
+     * de sinal oposto com `refund_of_entry_id` na parcela, na fatura de destino,
+     * registrado em `anticipation_discounts`. Abate a categoria pela soma
+     * natural, como o estorno (6.6), e sai junto se a parcela for restaurada.
      */
     anticipate: (
       accountId: number,
-      input: { entryIds: number[]; targetMonth: string }
+      input: {
+        entryIds: number[];
+        targetMonth: string;
+        discount?: AnticipationDiscountSpec | null;
+        date?: string;
+      }
     ): AnticipationResult => {
       const cycle = cards.cycle(accountId);
       const targetDates = statementDatesFor(input.targetMonth, cycle.closingDay, cycle.dueDay);
@@ -213,16 +305,23 @@ export function createStatementsRepository(db: Db) {
 
       return db.transaction((): AnticipationResult => {
         const result: AnticipationResult = [];
+        const moved: InstallmentRow[] = [];
         for (const entryId of input.entryIds) {
           const row = db
             .prepare(
-              `SELECT id, account_id AS accountId, statement_month AS statementMonth
+              `SELECT id, account_id AS accountId, statement_month AS statementMonth,
+                      person_id AS personId, category_id AS categoryId, place_id AS placeId,
+                      amount_cents AS amountCents, description,
+                      installment_number AS installmentNumber,
+                      counts_toward_target AS countsTowardTarget,
+                      refund_of_entry_id AS refundOfEntryId
                FROM entries WHERE id = ?`
             )
-            .get(entryId) as
-            | { id: number; accountId: number; statementMonth: string | null }
-            | undefined;
+            .get(entryId) as InstallmentRow | undefined;
           if (!row) throw new LedgerError(`Lancamento ${entryId} nao encontrado`, 404);
+          if (row.refundOfEntryId != null) {
+            throw new LedgerError(`Lancamento ${entryId} e um abatimento, nao uma parcela`);
+          }
           if (row.accountId !== accountId) {
             throw new LedgerError(`Lancamento ${entryId} nao pertence a este cartao`);
           }
@@ -237,6 +336,11 @@ export function createStatementsRepository(db: Db) {
             "UPDATE entries SET statement_month = ?, updated_at = ? WHERE id = ?"
           ).run(input.targetMonth, nowIso(), entryId);
           result.push({ entryId, previousStatementMonth: row.statementMonth });
+          moved.push(row);
+        }
+
+        if (input.discount) {
+          applyDiscounts(moved, input.discount, input.targetMonth, input.date ?? today());
         }
         return result;
       })();
@@ -258,6 +362,11 @@ export function createStatementsRepository(db: Db) {
       db.transaction((): AnticipationResult => {
         const result: AnticipationResult = [];
         for (const entryId of entryIds) {
+          if (isDiscount.get(entryId)) {
+            throw new LedgerError(
+              `Lancamento ${entryId} e um desconto de antecipacao; restaure a parcela`
+            );
+          }
           const row = db
             .prepare(
               `SELECT e.id, e.date, e.account_id AS accountId,
@@ -275,6 +384,12 @@ export function createStatementsRepository(db: Db) {
             nowIso(),
             entryId
           );
+          // O desconto so existe porque a parcela foi antecipada: sem a
+          // antecipacao ele seria credito sem motivo. Sai junto.
+          db.prepare(
+            `DELETE FROM entries WHERE id IN
+               (SELECT entry_id FROM anticipation_discounts WHERE installment_entry_id = ?)`
+          ).run(entryId);
           result.push({ entryId, previousStatementMonth: row.statementMonth });
         }
         return result;

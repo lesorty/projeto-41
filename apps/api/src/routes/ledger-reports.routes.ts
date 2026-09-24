@@ -180,13 +180,13 @@ export const registerLedgerReportsRoutes: RoutePlugin = (app, { db }) => {
     const previousMonth = formatMonth(addMonths(parseMonth(period), -1));
 
     // Reaproveita o calculo de saldo da fase 1 — nada e reescrito aqui (6.1).
-    const balances = db.ledger.balances.consolidated({ asOf: today(), until: range.to });
+    const balances = db.ledger.balances.consolidated({ asOf: today() });
 
     const summary: LedgerSummary = {
       period,
       consolidated: {
         currentCents: balances.consolidatedCents,
-        projectedCents: balances.projectedConsolidatedCents
+        cardStatementCents: balances.creditCardStatementCents
       },
       accounts: balances.accounts.map((account) => ({
         id: account.id,
@@ -195,8 +195,7 @@ export const registerLedgerReportsRoutes: RoutePlugin = (app, { db }) => {
         kind: account.kind,
         personId: account.personId ?? null,
         personName: account.personName,
-        currentBalanceCents: account.currentBalanceCents,
-        projectedBalanceCents: account.projectedBalanceCents
+        currentBalanceCents: account.currentBalanceCents
       })),
       month: db.ledger.reports.monthSummary(range),
       previousMonth: db.ledger.reports.monthSummary({

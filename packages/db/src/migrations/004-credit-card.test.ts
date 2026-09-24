@@ -5,6 +5,7 @@ import { migration002LedgerCore } from "./002-ledger-core.js";
 import { migration003BudgetTargets } from "./003-budget-targets.js";
 import { migration004CreditCard } from "./004-credit-card.js";
 import { runMigrations, type MigrationDatabase } from "./runner.js";
+import { seedTestPeople } from "../testing.js";
 
 const BEFORE = [migration001Baseline, migration002LedgerCore, migration003BudgetTargets];
 /**
@@ -17,6 +18,7 @@ function dbAtPhase2() {
   const db = new Database(":memory:");
   db.pragma("foreign_keys = ON");
   runMigrations(db, BEFORE);
+  seedTestPeople(db);
   return db;
 }
 

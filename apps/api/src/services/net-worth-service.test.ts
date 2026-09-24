@@ -1,4 +1,4 @@
-import { createDatabase, type AppDatabase } from "@projeto41/db";
+import { createTestDatabase, type AppDatabase } from "@projeto41/db";
 import { beforeEach, describe, expect, it } from "vitest";
 import { LEDGER_CLASSES, buildNetWorth, markCashControlStart } from "./net-worth-service.js";
 
@@ -15,7 +15,7 @@ const account = (overrides: Record<string, unknown>) =>
   } as Parameters<typeof db.ledger.accounts.create>[0]);
 
 beforeEach(() => {
-  db = createDatabase(":memory:");
+  db = createTestDatabase();
   steylor = db.ledger.people.list()[0]!.id;
 });
 
@@ -179,7 +179,7 @@ describe("dupla contagem (R-07)", () => {
     });
     expect(buildNetWorth(db).doubleCounting.active).toBe(false);
 
-    const other = createDatabase(":memory:");
+    const other = createTestDatabase();
     other.ledger.accounts.create({
       name: "Nubank",
       kind: "checking",

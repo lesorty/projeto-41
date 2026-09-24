@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { createDatabase } from "../index.js";
+import { createTestDatabase } from "../index.js";
 import type { LedgerRepositories } from "./index.js";
 import { today } from "./shared.js";
 
 function setup() {
-  return createDatabase(":memory:").ledger;
+  return createTestDatabase().ledger;
 }
 
 const YESTERDAY = "2020-01-01";
@@ -112,11 +112,11 @@ describe("saldos (plano mestre 6.1)", () => {
     expect(ledger.balances.forAccount(checking)?.currentBalanceCents).toBe(100_00);
   });
 
-  it("ignora pendente no atual e soma no previsto", () => {
+  it("ignora pendente no saldo e nao inventa saldo previsto", () => {
     expense({ status: "pending" });
-    const account = ledger.balances.forAccount(checking, { until: FUTURE })!;
+    const account = ledger.balances.forAccount(checking)!;
     expect(account.currentBalanceCents).toBe(100_00);
-    expect(account.projectedBalanceCents).toBe(50_00);
+    expect(account).not.toHaveProperty("projectedBalanceCents");
   });
 
   it("soma lancamento liquidado ao saldo atual", () => {

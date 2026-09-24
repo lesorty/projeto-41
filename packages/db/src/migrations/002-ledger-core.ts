@@ -139,12 +139,6 @@ const SCHEMA = `
   CREATE INDEX IF NOT EXISTS attachments_hash ON attachments(content_hash);
 `;
 
-const SEED_PEOPLE: [string, "individual" | "joint", string][] = [
-  ["Steylor", "individual", "#4f9cf9"],
-  ["Bianca", "individual", "#f97ab0"],
-  ["Conjunto", "joint", "#7c5cff"]
-];
-
 const SEED_EXPENSE_CATEGORIES: [string, string][] = [
   ["Mercado", "#3fb950"],
   ["Restaurante", "#f0883e"],
@@ -174,16 +168,10 @@ export const migration002LedgerCore: Migration = {
     db.exec(SCHEMA);
     const now = new Date().toISOString();
 
-    // A semeadura só roda em tabela vazia: um banco que já tem cadastros do
-    // usuário não deve ganhar duplicatas ao migrar.
-    const peopleCount = (db.prepare("SELECT COUNT(*) AS n FROM people").get() as { n: number }).n;
-    if (peopleCount === 0) {
-      const insert = db.prepare(
-        "INSERT INTO people(name, kind, color, active, created_at) VALUES (?,?,?,1,?)"
-      );
-      for (const [name, kind, color] of SEED_PEOPLE) insert.run(name, kind, color, now);
-    }
-
+    // Pessoas não são semeadas: o módulo começa sem ninguém e o usuário cria
+    // quem usa o sistema antes de criar as contas (a migração 008 limpa as
+    // pessoas que versões antigas semeavam e nunca foram usadas). A semeadura
+    // de categorias só roda em tabela vazia, para não duplicar cadastro.
     const categoryCount = (
       db.prepare("SELECT COUNT(*) AS n FROM categories").get() as { n: number }
     ).n;

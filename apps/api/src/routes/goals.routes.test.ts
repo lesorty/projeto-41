@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createDatabase, type AppDatabase } from "@projeto41/db";
+import { createTestDatabase, type AppDatabase } from "@projeto41/db";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../app.js";
 import { createCdiService } from "../cdi/cdi-service.js";
@@ -24,7 +24,7 @@ async function post(url: string, payload: Record<string, unknown> = {}) {
 }
 
 beforeEach(async () => {
-  db = createDatabase(":memory:");
+  db = createTestDatabase();
   dir = mkdtempSync(join(tmpdir(), "projeto41-goals-"));
   const cdiService = createCdiService(db, dir, offlineFetcher as unknown as typeof fetch, [0, 0, 0]);
   app = buildApp({ db, priceService, cdiService });

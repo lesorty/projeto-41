@@ -102,16 +102,32 @@ export const accountSchema = z
     }
   });
 
-export const categorySchema = z.object({
-  id: idSchema.optional(),
-  name: z.string().trim().min(1).max(60),
-  kind: categoryKindSchema,
-  color: colorSchema,
-  icon: optionalText,
-  monthlyBudgetCents: centsSchema.nonnegative().nullable().optional(),
-  archived: z.boolean().default(false),
-  sortOrder: z.number().int().default(0)
-});
+export const categorySchema = z
+  .object({
+    id: idSchema.optional(),
+    name: z.string().trim().min(1).max(60),
+    kind: categoryKindSchema,
+    color: colorSchema,
+    icon: optionalText,
+    /** Objetivo em valor: quanto a categoria pode gastar por mes. */
+    monthlyBudgetCents: centsSchema.nonnegative().nullable().optional(),
+    /**
+     * Objetivo em percentual, em milesimos do total de saidas do periodo:
+     * `250` e "Mercado deve ser 25% dos gastos". Exclusivo com o de valor.
+     */
+    budgetSharePerMille: z.number().int().min(0).max(1000).nullable().optional(),
+    archived: z.boolean().default(false),
+    sortOrder: z.number().int().default(0)
+  })
+  .superRefine((value, ctx) => {
+    if (value.monthlyBudgetCents != null && value.budgetSharePerMille != null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["budgetSharePerMille"],
+        message: "O objetivo e em valor ou em percentual, nao os dois"
+      });
+    }
+  });
 
 export const tagSchema = z.object({
   id: idSchema.optional(),
@@ -294,7 +310,6 @@ export type AccountRecord = Account & {
   id: number;
   personName: string | null;
   currentBalanceCents: number;
-  projectedBalanceCents: number;
   /** So cartao: fatura do mes corrente e total devido (plano mestre 6.1). */
   currentStatementCents?: number;
   totalDueCents?: number;
@@ -365,6 +380,7 @@ export type EntryListResult = {
 export type BalancesResult = {
   accounts: AccountRecord[];
   consolidatedCents: number;
-  projectedConsolidatedCents: number;
+  /** Soma das faturas correntes dos cartoes, cada uma no ciclo do proprio cartao. */
+  creditCardStatementCents: number;
   creditCardDueCents: number;
 };

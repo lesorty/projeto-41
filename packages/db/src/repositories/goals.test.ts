@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { createDatabase } from "../index.js";
+import { createTestDatabase } from "../index.js";
 import type { LedgerRepositories } from "./index.js";
 
 const TODAY = "2026-09-18";
@@ -9,7 +9,7 @@ let steylor: number;
 let checking: number;
 
 beforeEach(() => {
-  ledger = createDatabase(":memory:").ledger;
+  ledger = createTestDatabase().ledger;
   steylor = ledger.people.list()[0]!.id;
   checking = ledger.accounts.create({
     name: "Nubank",

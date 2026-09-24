@@ -14,6 +14,7 @@ export type CategoryTotalRow = {
   name: string;
   color: string | null;
   monthlyBudgetCents: number | null;
+  budgetSharePerMille: number | null;
   totalCents: number;
 };
 
@@ -40,6 +41,7 @@ export function createReportsRepository(db: Db) {
              COALESCE(c.name, 'Sem categoria') AS name,
              c.color,
              c.monthly_budget_cents AS monthlyBudgetCents,
+             c.budget_share_per_mille AS budgetSharePerMille,
              -SUM(e.amount_cents) AS totalCents
            FROM entries e
            LEFT JOIN categories c ON c.id = e.category_id

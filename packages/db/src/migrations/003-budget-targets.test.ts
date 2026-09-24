@@ -4,12 +4,15 @@ import { migration001Baseline } from "./001-baseline.js";
 import { migration002LedgerCore } from "./002-ledger-core.js";
 import { migration003BudgetTargets } from "./003-budget-targets.js";
 import { runMigrations, type MigrationDatabase } from "./runner.js";
+import { seedTestPeople } from "../testing.js";
 
 const ALL = [migration001Baseline, migration002LedgerCore, migration003BudgetTargets];
 
 function migratedDb() {
   const db = new Database(":memory:");
   db.pragma("foreign_keys = ON");
+  runMigrations(db, [migration001Baseline, migration002LedgerCore]);
+  seedTestPeople(db);
   runMigrations(db, ALL);
   return db;
 }
@@ -19,6 +22,7 @@ function ledgerBeforeBackfill() {
   const db = new Database(":memory:");
   db.pragma("foreign_keys = ON");
   runMigrations(db, [migration001Baseline, migration002LedgerCore]);
+  seedTestPeople(db);
   db.exec(`
     INSERT INTO accounts(id, person_id, name, kind, color, created_at)
       VALUES (1, 1, 'Nubank', 'checking', '#fff', 'x'),

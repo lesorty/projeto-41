@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { categoryTotals, topSlices } from "@projeto41/finance";
-import { createDatabase } from "../index.js";
+import { createTestDatabase } from "../index.js";
 import type { LedgerRepositories } from "./index.js";
 
 const MAY = { from: "2026-05-01", to: "2026-05-31" };
@@ -17,7 +17,7 @@ beforeEach(() => {
   // `createDatabase` é o caminho real: roda o `migrate()` legado e, em seguida,
   // o runner versionado. Montar só o runner produz um banco que não existe em
   // produção — sem `operations`, por exemplo.
-  ledger = createDatabase(":memory:").ledger;
+  ledger = createTestDatabase().ledger;
 
   steylor = ledger.people.list()[0]!.id;
   checking = ledger.accounts.create({

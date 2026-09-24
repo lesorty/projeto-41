@@ -1,4 +1,4 @@
-import { createDatabase, type AppDatabase } from "@projeto41/db";
+import { createTestDatabase, type AppDatabase } from "@projeto41/db";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../app.js";
 
@@ -27,7 +27,7 @@ function seedExpense(amountCents: number, categoryId: number | null, extra: obje
 }
 
 beforeEach(async () => {
-  db = createDatabase(":memory:");
+  db = createTestDatabase();
   app = buildApp({ db, priceService });
   await app.ready();
 
@@ -76,7 +76,8 @@ describe("GET /api/ledger/summary", () => {
     ).toHaveLength(2);
     // Os dois numeros sao distintos por construcao (6.1).
     expect(summary.consolidated).toHaveProperty("currentCents");
-    expect(summary.consolidated).toHaveProperty("projectedCents");
+    expect(summary.consolidated).toHaveProperty("cardStatementCents");
+    expect(summary.consolidated).not.toHaveProperty("projectedCents");
   });
 
   it("recusa periodo malformado", async () => {

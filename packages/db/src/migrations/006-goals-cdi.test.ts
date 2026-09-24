@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { createDatabase, type AppDatabase } from "../index.js";
+import { createTestDatabase, type AppDatabase } from "../index.js";
 
 let db: AppDatabase;
 
 beforeEach(() => {
-  db = createDatabase(":memory:");
+  db = createTestDatabase();
 });
 
 const tables = () =>

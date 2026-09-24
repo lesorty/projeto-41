@@ -28,6 +28,8 @@ export type CategoryRow = {
   /** Ja positivo: o repositorio entrega `-SUM(amount_cents)`. */
   totalCents: number;
   monthlyBudgetCents?: number | null;
+  /** Objetivo em milesimos do total de saidas do periodo (exclusivo com o de valor). */
+  budgetSharePerMille?: number | null;
 };
 
 /**
@@ -73,6 +75,8 @@ export type CategoryTotal = {
   color: string | null;
   spentCents: number;
   budgetCents: number | null;
+  budgetMode: "absolute" | "share" | null;
+  budgetSharePerMille: number | null;
   overBudget: boolean;
 };
 
@@ -91,14 +95,38 @@ export function wholeMonthsIn(range: Range): number | null {
   return (to.year - from.year) * 12 + (to.month - from.month) + 1;
 }
 
+/**
+ * Objetivo percentual convertido em centavos: a fracao pedida do total de
+ * saidas do periodo. Arredonda meio-para-cima, como `toCents`.
+ *
+ * Diferente do objetivo em valor, o percentual vale para **qualquer** recorte:
+ * "25% do que gastei" faz sentido em dez dias ou em um ano, entao nao ha a
+ * regra de meses inteiros aqui.
+ */
+export function shareBudgetCents(totalExpenseCents: number, sharePerMille: number): number {
+  return Math.round((Math.max(totalExpenseCents, 0) * sharePerMille) / 1000);
+}
+
 export function categoryTotals(
   rows: CategoryRow[],
   options: { range: Range }
 ): CategoryTotal[] {
   const months = wholeMonthsIn(options.range);
+  // A base do percentual e o que efetivamente saiu: categoria negativa (estorno
+  // maior que a compra) nao aumenta o total de ninguem.
+  const totalExpense = rows.reduce((total, row) => total + Math.max(row.totalCents, 0), 0);
   return rows.map((row) => {
     const monthly = row.monthlyBudgetCents ?? null;
-    const budgetCents = monthly != null && months != null ? monthly * months : null;
+    const share = row.budgetSharePerMille ?? null;
+    let budgetCents: number | null = null;
+    let budgetMode: CategoryTotal["budgetMode"] = null;
+    if (share != null) {
+      budgetCents = shareBudgetCents(totalExpense, share);
+      budgetMode = "share";
+    } else if (monthly != null) {
+      budgetMode = "absolute";
+      budgetCents = months != null ? monthly * months : null;
+    }
     return {
       categoryId: row.categoryId,
       name: row.name,
@@ -108,6 +136,8 @@ export function categoryTotals(
       // como esta, nunca zerado nem descartado (6.6).
       spentCents: row.totalCents,
       budgetCents,
+      budgetMode: budgetCents == null ? null : budgetMode,
+      budgetSharePerMille: budgetMode === "share" ? share : null,
       // Igualdade nao estoura.
       overBudget: budgetCents != null && row.totalCents > budgetCents
     };
