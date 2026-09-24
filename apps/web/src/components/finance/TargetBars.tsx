@@ -8,7 +8,14 @@ import { moneyFromCents } from "../../lib/format.js";
  * O percentual continua visível no modo privacidade: a máscara esconde o
  * dinheiro, não a proporção (R-04). Ele vem pronto do servidor, em milésimos.
  */
-export function TargetBars({ report }: { report: TargetReport }) {
+export function TargetBars({
+  report,
+  onSelect
+}: {
+  report: TargetReport;
+  /** Com ele, cada barra vira um botao que leva aos gastos daquela pessoa. */
+  onSelect?: (bar: TargetReport["bars"][number]) => void;
+}) {
   return (
     <div className="fin-targets">
       {report.warnings.map((warning) => (
@@ -21,8 +28,8 @@ export function TargetBars({ report }: { report: TargetReport }) {
       {report.bars.map((bar) => {
         const hasTarget = bar.targetCents != null;
         const percent = bar.ratioPerMille != null ? bar.ratioPerMille / 10 : null;
-        return (
-          <div key={`${bar.personId ?? "total"}-${bar.name}`} className="fin-target">
+        const body = (
+          <>
             <div className="fin-target-head">
               <span className="fin-inline">
                 <span className="fin-dot" style={{ background: bar.color }} aria-hidden />
@@ -61,6 +68,22 @@ export function TargetBars({ report }: { report: TargetReport }) {
                 <span className="fin-muted">sem alvo definido</span>
               )}
             </small>
+          </>
+        );
+        const key = `${bar.personId ?? "total"}-${bar.name}`;
+        return onSelect ? (
+          <button
+            key={key}
+            type="button"
+            className="fin-target fin-target-link"
+            onClick={() => onSelect(bar)}
+            aria-label={`Ver os gastos de ${bar.name}`}
+          >
+            {body}
+          </button>
+        ) : (
+          <div key={key} className="fin-target">
+            {body}
           </div>
         );
       })}

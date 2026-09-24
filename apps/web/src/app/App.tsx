@@ -18,6 +18,7 @@ import {
   PiggyBank,
   ReceiptText,
   Scale,
+  SlidersHorizontal,
   RefreshCw,
   ShieldCheck,
   Tags,
@@ -42,6 +43,7 @@ import { InvoicePage } from "../pages/finance/Invoice.js";
 import { GoalsPage } from "../pages/finance/Goals.js";
 import { NetWorthPage } from "../pages/finance/NetWorth.js";
 import { ReportsPage } from "../pages/finance/Reports.js";
+import { SpendingAllocationPage } from "../pages/finance/SpendingAllocation.js";
 import {
   ExpensesPage,
   IncomePage,
@@ -56,6 +58,7 @@ import { portfolioIconUrl } from "../lib/icons.js";
 import { usePrivacy } from "../lib/privacy.js";
 import { useTheme } from "../lib/theme.js";
 import { useToast } from "../lib/toast.js";
+import type { LedgerPreset } from "../lib/navigation.js";
 import type { Dashboard } from "@projeto41/contracts";
 
 type Page =
@@ -76,7 +79,8 @@ type Page =
   | "expenses"
   | "income"
   | "accounts"
-  | "categories";
+  | "categories"
+  | "spending-allocation";
 
 type NavItem = { id: Page; label: string; icon: ComponentType<{ size?: number | string }> };
 
@@ -103,6 +107,7 @@ const nav: { group: string; items: NavItem[] }[] = [
       { id: "accounts", label: "Contas", icon: Landmark },
       { id: "invoice", label: "Fatura", icon: CreditCard },
       { id: "categories", label: "Categorias", icon: Tags },
+      { id: "spending-allocation", label: "Alocação de gastos", icon: SlidersHorizontal },
       { id: "reports", label: "Relatórios", icon: ChartPie },
       { id: "goals", label: "Caixinhas", icon: PiggyBank },
       { id: "networth", label: "Patrimônio", icon: Scale }
@@ -141,6 +146,17 @@ export function App() {
     (import.meta as ImportMeta & { env?: Record<string, string> }).env?.VITE_DEMO_MODE === "true";
 
   const [page, setPage] = useState<Page>("dashboard");
+  // Recorte levado de uma tela para outra (periodo, pessoa). A chave remonta a
+  // tela de destino para que ela nasca com o filtro, em vez de herdar o antigo.
+  const [preset, setPreset] = useState<{ key: number; value: LedgerPreset }>({
+    key: 0,
+    value: {}
+  });
+  const navigate = useCallback((next: Page, value: LedgerPreset = {}) => {
+    setPage(next);
+    setPreset((current) => ({ key: current.key + 1, value }));
+    window.scrollTo({ top: 0 });
+  }, []);
   const [dashboard, setDashboard] = useState<Dashboard | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -277,7 +293,7 @@ export function App() {
                     key={item.id}
                     className={page === item.id ? "nav-active" : ""}
                     onClick={() => {
-                      setPage(item.id);
+                      navigate(item.id);
                       setMobileOpen(false);
                     }}
                   >
@@ -376,18 +392,19 @@ export function App() {
                 cashControlStartedOn={dashboard?.cashControlStartedOn ?? null}
               />
             )}
-            {page === "finance" && <FinanceDashboardPage onOpenReports={() => setPage("reports")} />}
+            {page === "finance" && <FinanceDashboardPage onNavigate={navigate} />}
             {page === "reports" && <ReportsPage />}
             {page === "invoice" && <InvoicePage />}
             {page === "goals" && <GoalsPage />}
             {page === "networth" && (
               <NetWorthPage dashboard={dashboard} onChanged={loadDashboard} />
             )}
-            {page === "transactions" && <TransactionsPage />}
-            {page === "expenses" && <ExpensesPage />}
-            {page === "income" && <IncomePage />}
+            {page === "transactions" && <TransactionsPage key={preset.key} preset={preset.value} />}
+            {page === "expenses" && <ExpensesPage key={preset.key} preset={preset.value} />}
+            {page === "income" && <IncomePage key={preset.key} preset={preset.value} />}
             {page === "accounts" && <AccountsPage />}
             {page === "categories" && <CategoriesPage />}
+            {page === "spending-allocation" && <SpendingAllocationPage />}
           </div>
         )}
       </main>

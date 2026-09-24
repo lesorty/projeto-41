@@ -1,12 +1,14 @@
 import { Download, HardDriveDownload, Plus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { EntryRecord } from "@projeto41/contracts";
+import { CategoryGoals } from "../../components/finance/CategoryGoals.js";
 import { EntryDrawer } from "../../components/finance/EntryDrawer.js";
 import { EntryFilters, type LedgerFilter } from "../../components/finance/EntryFilters.js";
 import { EntryTable } from "../../components/finance/EntryTable.js";
 import { Button, Loading, Panel, SectionHeading } from "../../components/ui.js";
 import { moneyFromCents, signedMoneyFromCents } from "../../lib/format.js";
 import { filterToQuery, ledgerApi, useLedgerReference } from "../../lib/ledger.js";
+import type { LedgerPreset } from "../../lib/navigation.js";
 import { useToast } from "../../lib/toast.js";
 
 /**
@@ -32,18 +34,22 @@ function lastDayOfMonth() {
 export function LedgerPage({
   title,
   subtitle,
-  fixedKind
+  fixedKind,
+  preset = {}
 }: {
   title: string;
   subtitle: string;
   /** Ausente em Transações: a tela mostra tudo, inclusive transferências. */
   fixedKind?: LedgerKind;
+  /** Recorte trazido de outra tela, como o card do Painel. */
+  preset?: LedgerPreset;
 }) {
   const toast = useToast();
   const reference = useLedgerReference();
   const [filter, setFilter] = useState<LedgerFilter>(() => ({
-    from: firstDayOfMonth(),
-    to: lastDayOfMonth(),
+    from: preset.from ?? firstDayOfMonth(),
+    to: preset.to ?? lastDayOfMonth(),
+    ...(preset.personId != null ? { personId: preset.personId } : {}),
     page: 1,
     pageSize: 50
   }));
@@ -120,6 +126,19 @@ export function LedgerPage({
         </Panel>
       </div>
 
+      {fixedKind === "expense" && filter.from && filter.to && (
+        <Panel
+          title="Objetivos por categoria"
+          subtitle={
+            filter.personId != null
+              ? "Da casa toda: o objetivo é da categoria, não de uma pessoa"
+              : "Quanto cada categoria gastou contra o objetivo, em valor ou em percentual"
+          }
+        >
+          <CategoryGoals from={filter.from} to={filter.to} />
+        </Panel>
+      )}
+
       <Panel
         title={`${result?.total ?? 0} lançamento${(result?.total ?? 0) === 1 ? "" : "s"}`}
         subtitle="Os totais acima consideram o filtro inteiro, não só esta página"
@@ -175,17 +194,30 @@ export function LedgerPage({
   );
 }
 
-export const TransactionsPage = () => (
+type PresetProps = { preset?: LedgerPreset };
+
+export const TransactionsPage = ({ preset }: PresetProps) => (
   <LedgerPage
     title="Transações"
     subtitle="Tudo que entrou, saiu e foi transferido"
+    preset={preset}
   />
 );
 
-export const ExpensesPage = () => (
-  <LedgerPage title="Gastos" subtitle="Só as saídas, pelo mesmo livro" fixedKind="expense" />
+export const ExpensesPage = ({ preset }: PresetProps) => (
+  <LedgerPage
+    title="Gastos"
+    subtitle="Só as saídas, pelo mesmo livro"
+    fixedKind="expense"
+    preset={preset}
+  />
 );
 
-export const IncomePage = () => (
-  <LedgerPage title="Entradas" subtitle="Só as receitas, pelo mesmo livro" fixedKind="income" />
+export const IncomePage = ({ preset }: PresetProps) => (
+  <LedgerPage
+    title="Entradas"
+    subtitle="Só as receitas, pelo mesmo livro"
+    fixedKind="income"
+    preset={preset}
+  />
 );

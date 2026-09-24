@@ -28,6 +28,16 @@ function reportQuery(period: SelectedPeriod, compare: boolean) {
   return `?${params.toString()}`;
 }
 
+/** O total da rosca logo abaixo dela: as fatias mostram a parte, aqui fica o todo. */
+function DonutTotal({ cents }: { cents: number }) {
+  return (
+    <p className="fin-donut-total">
+      <span>Total</span>
+      <strong>{moneyFromCents(cents)}</strong>
+    </p>
+  );
+}
+
 export function ReportsPage() {
   const toast = useToast();
   const [period, setPeriod] = useState<SelectedPeriod>(() => monthPeriod(0));
@@ -150,19 +160,25 @@ export function ReportsPage() {
               {report.slices.length === 0 ? (
                 <Empty icon={Receipt} text="Nenhum gasto no período." />
               ) : (
-                <Donut data={toSlices(report)} showValue formatValue={moneyFromCents} height={320} />
+                <>
+                  <Donut data={toSlices(report)} showValue formatValue={moneyFromCents} height={320} />
+                  <DonutTotal cents={report.totalCents} />
+                </>
               )}
             </Panel>
             <Panel title="Composição do ano" subtitle={String(period.year ?? period.from.slice(0, 4))}>
               {(yearReport?.slices.length ?? 0) === 0 ? (
                 <Empty icon={Receipt} text="Nenhum gasto no ano." />
               ) : (
-                <Donut
-                  data={toSlices(yearReport)}
-                  showValue
-                  formatValue={moneyFromCents}
-                  height={320}
-                />
+                <>
+                  <Donut
+                    data={toSlices(yearReport)}
+                    showValue
+                    formatValue={moneyFromCents}
+                    height={320}
+                  />
+                  <DonutTotal cents={yearReport?.totalCents ?? 0} />
+                </>
               )}
             </Panel>
           </div>

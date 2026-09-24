@@ -1,6 +1,12 @@
-import { Archive, Plus, Save, Wallet } from "lucide-react";
+import { Archive, Plus, Save, UserPlus, Users, Wallet } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { AccountKind, AccountRecord, BalancesResult, PersonRecord } from "@projeto41/contracts";
+import type {
+  AccountKind,
+  AccountRecord,
+  BalancesResult,
+  PersonKind,
+  PersonRecord
+} from "@projeto41/contracts";
 import { ColorDot, ColorPicker } from "../../components/ColorPicker.js";
 import { DateField } from "../../components/datepicker.js";
 import { InvestmentCashPanel } from "../../components/finance/InvestmentCashPanel.js";
@@ -13,7 +19,9 @@ import {
   IconButton,
   Loading,
   Panel,
-  SectionHeading
+  SectionHeading,
+  Segmented,
+  Tag
 } from "../../components/ui.js";
 import { api } from "../../lib/api.js";
 import { centsToInput, debtFromCents, moneyFromCents } from "../../lib/format.js";
@@ -22,8 +30,16 @@ import { parseCurrencyInput } from "@projeto41/finance";
 import { useToast } from "../../lib/toast.js";
 
 /**
- * Contas agrupadas por pessoa, cada uma com saldo atual e previsto vindos do
- * servidor (D24 — a tela nunca soma lancamento).
+ * Pessoas e contas.
+ *
+ * O modulo comeca sem ninguem: o usuario cria as pessoas que usam o sistema e
+ * so entao as contas de cada uma. Uma pessoa do tipo "conjunta" e a dona da
+ * conta conjunta — transferencia para ela e movimentacao interna e nao entra
+ * em gastos nem em entradas.
+ *
+ * Contas agrupadas por pessoa, com o saldo vindo do servidor (D24 — a tela
+ * nunca soma lancamento). Nao existe "saldo previsto": ele ignorava a fatura
+ * que ia sair da conta e prometia um numero que nao ia acontecer.
  *
  * Cartao de credito aparece com os campos de ciclo (fechamento, vencimento,
  * limite e conta de pagamento) e, na lista, com os **dois numeros** — fatura
@@ -40,6 +56,7 @@ export function AccountsPage() {
   const [balances, setBalances] = useState<BalancesResult | null>(null);
   const [people, setPeople] = useState<PersonRecord[]>([]);
   const [editing, setEditing] = useState<Draft | null>(null);
+  const [editingPerson, setEditingPerson] = useState<Partial<PersonRecord> | null>(null);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
@@ -85,34 +102,108 @@ export function AccountsPage() {
     await load();
   }
 
+  async function removePerson(person: PersonRecord) {
+    const ok = await confirm({
+      title: "Remover pessoa",
+      message: `Se "${person.name}" já tiver conta ou lançamento, ela é arquivada e o histórico fica intacto; senão, é apagada.`,
+      confirmLabel: "Remover"
+    });
+    if (!ok) return;
+    const result = await api<{ archived: boolean }>(`/ledger/people/${person.id}`, {
+      method: "DELETE"
+    });
+    toast.notify(result.archived ? "Pessoa arquivada" : "Pessoa removida");
+    await load();
+  }
+
   if (loading) return <Loading />;
+
+  const activePeople = people.filter((person) => person.active);
+  const hasPeople = activePeople.length > 0;
 
   return (
     <>
-      <SectionHeading title="Contas" subtitle="Onde o dinheiro está, por pessoa">
-        <Button icon={Plus} onClick={() => setEditing({ color: "#4f8ff7", kind: "checking" })}>
+      <SectionHeading title="Contas" subtitle="Quem usa o sistema e onde o dinheiro está">
+        <Button
+          variant="ghost"
+          icon={UserPlus}
+          onClick={() => setEditingPerson({ kind: "individual", color: "#4f9cf9" })}
+        >
+          Nova pessoa
+        </Button>
+        <Button
+          icon={Plus}
+          disabled={!hasPeople}
+          title={hasPeople ? undefined : "Crie uma pessoa antes da primeira conta"}
+          onClick={() => setEditing({ color: "#4f8ff7", kind: "checking" })}
+        >
           Nova conta
         </Button>
       </SectionHeading>
 
+      <Panel
+        title={
+          <span className="fin-inline">
+            <Users size={15} aria-hidden />
+            Pessoas
+          </span>
+        }
+        subtitle="Donas das contas. Use o tipo conjunta para a conta do casal"
+      >
+        {!hasPeople ? (
+          <div className="fin-onboarding">
+            <Empty icon={Users} text="Ninguém cadastrado ainda. Comece criando quem usa o sistema." />
+            <Button
+              icon={UserPlus}
+              onClick={() => setEditingPerson({ kind: "individual", color: "#4f9cf9" })}
+            >
+              Criar a primeira pessoa
+            </Button>
+          </div>
+        ) : (
+          <ul className="fin-people">
+            {activePeople.map((person) => (
+              <li key={person.id}>
+                <button className="fin-link" onClick={() => setEditingPerson(person)}>
+                  <ColorDot color={person.color} />
+                  {person.name}
+                </button>
+                {person.kind === "joint" && <Tag tone="info">Conjunta</Tag>}
+                <IconButton
+                  icon={Archive}
+                  label={`Remover ${person.name}`}
+                  onClick={() => void removePerson(person)}
+                />
+              </li>
+            ))}
+          </ul>
+        )}
+      </Panel>
+
       <div className="fin-summary">
-        <Panel title="Saldo consolidado" subtitle="Contas no patrimônio, sem cartão">
-          <AnimatedNumber value={(balances?.consolidatedCents ?? 0) / 100} format={(v) => moneyFromCents(v * 100)} />
+        <Panel title="Saldo" subtitle="Contas no patrimônio, sem cartão">
+          <strong>
+            <AnimatedNumber
+              value={(balances?.consolidatedCents ?? 0) / 100}
+              format={(v) => moneyFromCents(v * 100)}
+            />
+          </strong>
         </Panel>
-        <Panel title="Saldo previsto" subtitle="Incluindo o que está pendente no mês">
-          <AnimatedNumber
-            value={(balances?.projectedConsolidatedCents ?? 0) / 100}
-            format={(v) => moneyFromCents(v * 100)}
-          />
+        <Panel title="Fatura" subtitle="Faturas correntes dos cartões">
+          <strong className={(balances?.creditCardStatementCents ?? 0) > 0 ? "fin-negative" : ""}>
+            {debtFromCents(balances?.creditCardStatementCents ?? 0)}
+          </strong>
         </Panel>
         {(balances?.creditCardDueCents ?? 0) !== 0 && (
-          <Panel title="Cartões" subtitle="Total devido">
+          <Panel title="Cartões" subtitle="Total devido, com parcelas futuras">
             <strong className="fin-negative">{debtFromCents(balances?.creditCardDueCents ?? 0)}</strong>
           </Panel>
         )}
       </div>
 
-      {groups.length === 0 && <Empty icon={Wallet} text="Nenhuma conta cadastrada ainda." />}
+      {groups.length === 0 && hasPeople && (
+        <Empty icon={Wallet} text="Nenhuma conta cadastrada ainda." />
+      )}
 
       {groups.map((group) => (
         <Panel
@@ -130,8 +221,8 @@ export function AccountsPage() {
                 <tr>
                   <th>Conta</th>
                   <th>Tipo</th>
-                  <th className="num">Saldo atual</th>
-                  <th className="num">Previsto</th>
+                  <th className="num">Saldo</th>
+                  <th className="num">Detalhe</th>
                   <th />
                 </tr>
               </thead>
@@ -171,7 +262,7 @@ export function AccountsPage() {
                           {moneyFromCents(account.currentBalanceCents)}
                         </td>
                         <td className="num fin-muted">
-                          {moneyFromCents(account.projectedBalanceCents)}
+                          {account.includeInNetWorth ? "no patrimônio" : "fora do patrimônio"}
                         </td>
                       </>
                     )}
@@ -192,10 +283,21 @@ export function AccountsPage() {
 
       <InvestmentCashPanel accounts={balances?.accounts ?? []} />
 
+      {editingPerson && (
+        <PersonDrawer
+          initial={editingPerson}
+          onClose={() => setEditingPerson(null)}
+          onSaved={async () => {
+            setEditingPerson(null);
+            await load();
+          }}
+        />
+      )}
+
       {editing && (
         <AccountDrawer
           initial={editing}
-          people={people}
+          people={people.filter((person) => person.active || person.id === editing.personId)}
           payableAccounts={(balances?.accounts ?? []).filter(
             (account) => account.kind !== "credit_card"
           )}
@@ -207,6 +309,88 @@ export function AccountsPage() {
         />
       )}
     </>
+  );
+}
+
+const PERSON_KIND_OPTIONS: { value: PersonKind; label: string }[] = [
+  { value: "individual", label: "Individual" },
+  { value: "joint", label: "Conjunta" }
+];
+
+function PersonDrawer({
+  initial,
+  onClose,
+  onSaved
+}: {
+  initial: Partial<PersonRecord>;
+  onClose: () => void;
+  onSaved: () => Promise<void>;
+}) {
+  const toast = useToast();
+  const [name, setName] = useState(initial.name ?? "");
+  const [kind, setKind] = useState<PersonKind>(initial.kind ?? "individual");
+  const [color, setColor] = useState(initial.color ?? "#4f9cf9");
+  const [saving, setSaving] = useState(false);
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    try {
+      const body = { name, kind, color, active: true };
+      if (initial.id) {
+        await api(`/ledger/people/${initial.id}`, { method: "PUT", body: JSON.stringify(body) });
+      } else {
+        await api("/ledger/people", { method: "POST", body: JSON.stringify(body) });
+      }
+      toast.notify("Pessoa salva");
+      await onSaved();
+    } catch (error) {
+      toast.notify(error instanceof Error ? error.message : "Falha ao salvar", "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Drawer
+      title={initial.id ? "Editar pessoa" : "Nova pessoa"}
+      subtitle="Quem é dono das contas e dos gastos"
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>
+            Cancelar
+          </Button>
+          <Button icon={Save} type="submit" form="person-form" disabled={saving}>
+            {saving ? "Salvando…" : "Salvar"}
+          </Button>
+        </>
+      }
+    >
+      <form id="person-form" className="stack" onSubmit={submit}>
+        <Field label="Nome">
+          <input
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            autoFocus
+            required
+            maxLength={60}
+            placeholder="Ex.: Ana"
+          />
+        </Field>
+        <Field
+          label="Tipo"
+          hint={
+            kind === "joint"
+              ? "Dona da conta conjunta: transferir para ela é movimentação interna, não gasto."
+              : "Uma pessoa que tem as próprias contas e gastos."
+          }
+        >
+          <Segmented<PersonKind> value={kind} onChange={setKind} options={PERSON_KIND_OPTIONS} />
+        </Field>
+        <ColorPicker value={color} onChange={setColor} />
+      </form>
+    </Drawer>
   );
 }
 

@@ -65,9 +65,17 @@ export function AnimatedNumber({
       if (progress < 1) frameRef.current = requestAnimationFrame(step);
     };
     frameRef.current = requestAnimationFrame(step);
+    // O navegador pausa `requestAnimationFrame` em janela encoberta ou aba em
+    // segundo plano. Sem esta garantia o número ficaria parado no valor antigo
+    // — e um saldo errado na tela é pior que uma animação perdida.
+    const settle = setTimeout(() => {
+      displayRef.current = to;
+      setDisplay(to);
+    }, duration + 50);
     mounted.current = true;
     return () => {
       if (frameRef.current) cancelAnimationFrame(frameRef.current);
+      clearTimeout(settle);
     };
   }, [value, animate, duration]);
 

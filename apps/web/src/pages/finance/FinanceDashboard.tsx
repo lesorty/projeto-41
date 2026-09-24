@@ -1,4 +1,12 @@
-import { ArrowDownCircle, ArrowUpCircle, PiggyBank, Receipt, Settings2, Wallet } from "lucide-react";
+import {
+  ArrowDownCircle,
+  ArrowUpCircle,
+  CreditCard,
+  PiggyBank,
+  Receipt,
+  Settings2,
+  Wallet
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CategoryReport, LedgerSummary, TargetReport } from "@projeto41/contracts";
 import { Donut } from "../../components/charts.js";
@@ -24,6 +32,7 @@ import {
 import { api } from "../../lib/api.js";
 import { moneyFromCents } from "../../lib/format.js";
 import { filterToQuery } from "../../lib/ledger.js";
+import type { FinanceDestination, FinanceNavigate } from "../../lib/navigation.js";
 import { useToast } from "../../lib/toast.js";
 
 /**
@@ -32,7 +41,7 @@ import { useToast } from "../../lib/toast.js";
  * Nenhuma soma acontece aqui: saldo, resumo, alvo e rosca chegam prontos das
  * rotas da fase 2.
  */
-export function FinanceDashboardPage({ onOpenReports }: { onOpenReports: () => void }) {
+export function FinanceDashboardPage({ onNavigate }: { onNavigate: FinanceNavigate }) {
   const toast = useToast();
   const [period, setPeriod] = useState<SelectedPeriod>(() => monthPeriod(0));
   const [summary, setSummary] = useState<LedgerSummary | null>(null);
@@ -88,6 +97,14 @@ export function FinanceDashboardPage({ onOpenReports }: { onOpenReports: () => v
     [report]
   );
 
+  /** Leva o recorte do Painel junto: chegar em Gastos em outro mes seria refazer o filtro. */
+  const open = (page: FinanceDestination, personId?: number | null) =>
+    onNavigate(page, {
+      from: period.from,
+      to: period.to,
+      ...(personId != null ? { personId } : {})
+    });
+
   const hasMovement =
     (summary?.month.incomeCents ?? 0) !== 0 || (summary?.month.expenseCents ?? 0) !== 0;
 
@@ -108,51 +125,89 @@ export function FinanceDashboardPage({ onOpenReports }: { onOpenReports: () => v
       {!loading && summary && (
         <>
           <div className="fin-summary">
-            {/* Atual e previsto são números diferentes e ficam lado a lado,
-                rotulados: trocá-los é o erro mais caro desta tela (6.1). */}
-            <Panel title="Saldo consolidado" subtitle="Hoje, sem cartão">
-              <AnimatedNumber
-                value={summary.consolidated.currentCents / 100}
-                format={(value) => moneyFromCents(value * 100)}
-              />
+            {/* Saldo e fatura lado a lado, nunca somados: um é dinheiro que
+                existe, o outro é dívida que vai sair dele. O sistema não
+                projeta entradas e saídas futuras. */}
+            <Panel title="Saldo" subtitle="Hoje, nas contas do patrimônio">
+              <strong className={summary.consolidated.currentCents < 0 ? "fin-negative" : ""}>
+                <AnimatedNumber
+                  value={summary.consolidated.currentCents / 100}
+                  format={(value) => moneyFromCents(value * 100)}
+                />
+              </strong>
             </Panel>
-            <Panel title="Saldo previsto" subtitle="Incluindo o que está pendente">
-              <AnimatedNumber
-                value={summary.consolidated.projectedCents / 100}
-                format={(value) => moneyFromCents(value * 100)}
-              />
+            <Panel
+              title={
+                <span className="fin-inline">
+                  <CreditCard size={15} aria-hidden />
+                  Fatura
+                </span>
+              }
+              subtitle="Faturas correntes dos cartões"
+            >
+              <strong className={summary.consolidated.cardStatementCents > 0 ? "fin-negative" : ""}>
+                <AnimatedNumber
+                  value={summary.consolidated.cardStatementCents / 100}
+                  format={(value) => moneyFromCents(value * 100)}
+                />
+              </strong>
             </Panel>
           </div>
 
           <div className="fin-summary">
-            <Stat
-              icon={ArrowUpCircle}
-              label="Entradas"
-              value={moneyFromCents(summary.month.incomeCents)}
-              detail={<Delta value={ratio(summary.month.incomeCents, summary.previousMonth.incomeCents)} />}
-            />
-            <Stat
-              icon={ArrowDownCircle}
-              label="Saídas"
-              value={moneyFromCents(summary.month.expenseCents)}
-              detail={
-                <Delta value={ratio(summary.month.expenseCents, summary.previousMonth.expenseCents)} />
-              }
-            />
-            <Stat
-              icon={PiggyBank}
-              label="Líquido"
-              value={moneyFromCents(summary.month.netCents)}
-              detail={<Delta value={ratio(summary.month.netCents, summary.previousMonth.netCents)} />}
-            />
+            <button
+              type="button"
+              className="fin-card-link"
+              onClick={() => open("income")}
+              aria-label="Ver as entradas do período"
+            >
+              <Stat
+                icon={ArrowUpCircle}
+                label="Entradas"
+                value={moneyFromCents(summary.month.incomeCents)}
+                detail={
+                  <Delta value={ratio(summary.month.incomeCents, summary.previousMonth.incomeCents)} />
+                }
+              />
+            </button>
+            <button
+              type="button"
+              className="fin-card-link"
+              onClick={() => open("expenses")}
+              aria-label="Ver os gastos do período"
+            >
+              <Stat
+                icon={ArrowDownCircle}
+                label="Saídas"
+                value={moneyFromCents(summary.month.expenseCents)}
+                detail={
+                  <Delta
+                    value={ratio(summary.month.expenseCents, summary.previousMonth.expenseCents)}
+                  />
+                }
+              />
+            </button>
+            <button
+              type="button"
+              className="fin-card-link"
+              onClick={() => open("transactions")}
+              aria-label="Ver todas as transações do período"
+            >
+              <Stat
+                icon={PiggyBank}
+                label="Líquido"
+                value={moneyFromCents(summary.month.netCents)}
+                detail={<Delta value={ratio(summary.month.netCents, summary.previousMonth.netCents)} />}
+              />
+            </button>
           </div>
 
           {targets && (
             <Panel
               title="Alvo × realizado"
-              subtitle="Quanto cada um deveria gastar, contra o que gastou"
+              subtitle="Clique numa barra para ver os gastos da pessoa contra os objetivos"
             >
-              <TargetBars report={targets} />
+              <TargetBars report={targets} onSelect={(bar) => open("expenses", bar.personId)} />
             </Panel>
           )}
 
@@ -171,16 +226,9 @@ export function FinanceDashboardPage({ onOpenReports }: { onOpenReports: () => v
                           <ColorDot color={account.color} />
                           {account.name}
                         </span>
-                        <span className="fin-list-meta">
-                          <strong
-                            className={account.currentBalanceCents < 0 ? "fin-negative" : ""}
-                          >
-                            {moneyFromCents(account.currentBalanceCents)}
-                          </strong>
-                          <small className="fin-muted">
-                            prev. {moneyFromCents(account.projectedBalanceCents)}
-                          </small>
-                        </span>
+                        <strong className={account.currentBalanceCents < 0 ? "fin-negative" : ""}>
+                          {moneyFromCents(account.currentBalanceCents)}
+                        </strong>
                       </li>
                     ))}
                   </ul>
@@ -192,7 +240,7 @@ export function FinanceDashboardPage({ onOpenReports }: { onOpenReports: () => v
               title="Gasto por categoria"
               subtitle={periodLabel(period)}
               action={
-                <Button variant="ghost" onClick={onOpenReports}>
+                <Button variant="ghost" onClick={() => open("reports")}>
                   Ver relatórios
                 </Button>
               }

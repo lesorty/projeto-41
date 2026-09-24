@@ -137,7 +137,9 @@ export function InvoicePage() {
     const ids = new Set<number>();
     if (!card || !detail) return ids;
     for (const entry of detail.purchases) {
-      if (entry.statementMonth == null) continue;
+      // Desconto de antecipacao e estorno nao sao parcela: nao se restauram
+      // sozinhos, saem junto com a parcela a que pertencem.
+      if (entry.statementMonth == null || entry.refundOfEntryId != null) continue;
       const natural = statementMonthFor(entry.date, card.closingDay, card.dueDay);
       if (natural !== entry.statementMonth) ids.add(entry.id);
     }
@@ -358,6 +360,7 @@ export function InvoicePage() {
           cardId={card.id}
           installments={futureInstallments}
           statements={statements}
+          defaultMonth={card.currentStatementMonth}
           onClose={() => setAnticipating(false)}
           onDone={async () => {
             setAnticipating(false);

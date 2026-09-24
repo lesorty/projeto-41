@@ -11,7 +11,8 @@ import {
   IconButton,
   Loading,
   Panel,
-  SectionHeading
+  SectionHeading,
+  Segmented
 } from "../../components/ui.js";
 import { api } from "../../lib/api.js";
 import { centsToInput, moneyFromCents } from "../../lib/format.js";
@@ -26,6 +27,20 @@ import { useToast } from "../../lib/toast.js";
  */
 
 type Draft = Partial<CategoryRecord>;
+
+type GoalMode = "none" | "absolute" | "share";
+
+/** `250` -> `"25%"`, `125` -> `"12,5%"`. */
+function shareLabel(perMille: number) {
+  return `${(perMille / 10).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;
+}
+
+/** O objetivo como o usuario o definiu, para a lista. Sem objetivo, nada (6.5). */
+function goalLabel(category: CategoryRecord): string | null {
+  if (category.budgetSharePerMille != null) return `${shareLabel(category.budgetSharePerMille)} dos gastos`;
+  if (category.monthlyBudgetCents != null) return `${moneyFromCents(category.monthlyBudgetCents)}/mês`;
+  return null;
+}
 
 export function CategoriesPage() {
   const toast = useToast();
@@ -99,29 +114,32 @@ export function CategoriesPage() {
           return (
             <Panel key={column.kind} title={column.title} subtitle={column.subtitle}>
               {items.length === 0 && <Empty icon={Tags} text="Nenhuma categoria." />}
-              <ul className="fin-list">
-                {items.map((category) => (
-                  <li key={category.id}>
-                    <button className="fin-link" onClick={() => setEditing(category)}>
-                      <ColorDot color={category.color} />
-                      {category.name}
-                    </button>
-                    <span className="fin-list-meta">
-                      {/* Sem orçamento não mostra placeholder nenhum (6.5). */}
-                      {category.monthlyBudgetCents != null && (
-                        <small className="fin-budget">
-                          {moneyFromCents(category.monthlyBudgetCents)}/mês
-                        </small>
-                      )}
-                      <IconButton
-                        icon={Archive}
-                        label="Arquivar"
-                        onClick={() => void archive(category)}
-                      />
-                    </span>
-                  </li>
-                ))}
-              </ul>
+              {/* Altura limitada: com dezenas de categorias a tela não cresce
+                  sem fim, a lista rola dentro do painel. */}
+              <div className="fin-scroll">
+                <ul className="fin-list">
+                  {items.map((category) => {
+                    const goal = goalLabel(category);
+                    return (
+                      <li key={category.id}>
+                        <button className="fin-link" onClick={() => setEditing(category)}>
+                          <ColorDot color={category.color} />
+                          {category.name}
+                        </button>
+                        <span className="fin-list-meta">
+                          {/* Sem objetivo não mostra placeholder nenhum (6.5). */}
+                          {goal && <small className="fin-budget">{goal}</small>}
+                          <IconButton
+                            icon={Archive}
+                            label="Arquivar"
+                            onClick={() => void archive(category)}
+                          />
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
             </Panel>
           );
         })}
@@ -136,17 +154,19 @@ export function CategoriesPage() {
           }
         >
           {tags.length === 0 && <Empty icon={Tags} text="Nenhuma etiqueta." />}
-          <ul className="fin-list">
-            {tags.map((tag) => (
-              <li key={tag.id}>
-                <button className="fin-link" onClick={() => setEditingTag(tag)}>
-                  <ColorDot color={tag.color} />
-                  {tag.name}
-                </button>
-                <IconButton icon={Archive} label="Excluir" onClick={() => void removeTag(tag)} />
-              </li>
-            ))}
-          </ul>
+          <div className="fin-scroll">
+            <ul className="fin-list">
+              {tags.map((tag) => (
+                <li key={tag.id}>
+                  <button className="fin-link" onClick={() => setEditingTag(tag)}>
+                    <ColorDot color={tag.color} />
+                    {tag.name}
+                  </button>
+                  <IconButton icon={Archive} label="Excluir" onClick={() => void removeTag(tag)} />
+                </li>
+              ))}
+            </ul>
+          </div>
         </Panel>
       </div>
 
@@ -188,22 +208,47 @@ function CategoryDrawer({
   const [name, setName] = useState(initial.name ?? "");
   const [kind, setKind] = useState<CategoryKind>(initial.kind ?? "expense");
   const [color, setColor] = useState(initial.color ?? "#4f8ff7");
+  const [mode, setMode] = useState<GoalMode>(
+    initial.budgetSharePerMille != null
+      ? "share"
+      : initial.monthlyBudgetCents != null
+        ? "absolute"
+        : "none"
+  );
   const [budget, setBudget] = useState(
     initial.monthlyBudgetCents != null ? centsToInput(initial.monthlyBudgetCents) : ""
+  );
+  const [share, setShare] = useState(
+    initial.budgetSharePerMille != null
+      ? (initial.budgetSharePerMille / 10).toLocaleString("pt-BR", { maximumFractionDigits: 1 })
+      : ""
   );
   const [saving, setSaving] = useState(false);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    // Campo vazio significa "sem orçamento", não zero.
-    const budgetCents = budget.trim() === "" ? null : parseCurrencyInput(budget);
-    if (budget.trim() !== "" && budgetCents == null) {
-      toast.notify("Orçamento inválido", "error");
-      return;
+    let monthlyBudgetCents: number | null = null;
+    let budgetSharePerMille: number | null = null;
+    if (mode === "absolute") {
+      monthlyBudgetCents = parseCurrencyInput(budget);
+      if (monthlyBudgetCents == null || monthlyBudgetCents < 0) {
+        toast.notify("Objetivo em valor inválido", "error");
+        return;
+      }
+    }
+    if (mode === "share") {
+      // `parseCurrencyInput` lê "12,5" como 1250 centésimos: dividido por 10
+      // vira 125 milésimos, que é 12,5%. Reaproveita o parser pt-BR do app.
+      const hundredths = parseCurrencyInput(share);
+      if (hundredths == null || hundredths < 0 || hundredths > 10000) {
+        toast.notify("O percentual precisa estar entre 0 e 100", "error");
+        return;
+      }
+      budgetSharePerMille = Math.round(hundredths / 10);
     }
     setSaving(true);
     try {
-      const body = { name, kind, color, monthlyBudgetCents: budgetCents };
+      const body = { name, kind, color, monthlyBudgetCents, budgetSharePerMille };
       if (initial.id) {
         await api(`/ledger/categories/${initial.id}`, {
           method: "PUT",
@@ -256,14 +301,51 @@ function CategoryDrawer({
             <option value="income">Entrada</option>
           </select>
         </Field>
-        <Field label="Orçamento mensal" hint="Opcional. Vazio significa sem orçamento.">
-          <input
-            value={budget}
-            onChange={(event) => setBudget(event.target.value)}
-            inputMode="decimal"
-            placeholder="Sem orçamento"
+        <Field
+          label="Objetivo de gasto"
+          hint={
+            mode === "share"
+              ? "Fração do total de saídas do período. Acompanha qualquer recorte de datas."
+              : mode === "absolute"
+                ? "Quanto a categoria pode gastar por mês."
+                : "Sem objetivo, a categoria só aparece nos totais."
+          }
+        >
+          <Segmented<GoalMode>
+            value={mode}
+            onChange={setMode}
+            options={[
+              { value: "none", label: "Sem objetivo" },
+              { value: "absolute", label: "Valor" },
+              { value: "share", label: "% dos gastos" }
+            ]}
           />
         </Field>
+        {mode === "absolute" && (
+          <Field label="Valor por mês">
+            <input
+              value={budget}
+              onChange={(event) => setBudget(event.target.value)}
+              inputMode="decimal"
+              placeholder="0,00"
+              required
+            />
+          </Field>
+        )}
+        {mode === "share" && (
+          <Field label="Percentual dos gastos">
+            <div className="input-suffix">
+              <input
+                value={share}
+                onChange={(event) => setShare(event.target.value)}
+                inputMode="decimal"
+                placeholder="25"
+                required
+              />
+              <span>%</span>
+            </div>
+          </Field>
+        )}
         <ColorPicker value={color} onChange={setColor} />
       </form>
     </Drawer>

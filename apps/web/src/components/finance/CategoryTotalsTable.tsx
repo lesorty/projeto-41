@@ -35,8 +35,10 @@ export function CategoryTotalsTable({
     (report.comparison?.rows ?? []).map((row) => [row.categoryId, row])
   );
 
+  // Altura limitada com cabecalho e total fixos: com muitas categorias a tabela
+  // rola por dentro em vez de empurrar a rosca e o comparativo para longe.
   return (
-    <div className="table-scroll">
+    <div className="table-scroll fin-table-bounded">
       <table className="data-table">
         <thead>
           <tr>
