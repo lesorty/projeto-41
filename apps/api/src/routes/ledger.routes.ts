@@ -23,6 +23,14 @@ const idParam = z.object({ id: z.coerce.number().int().positive() });
  * erro em portugues sem acento; `LedgerError` carrega `statusCode` e o error
  * handler global de `app.ts` ja o traduz.
  */
+/**
+ * Booleano de query string. `z.coerce.boolean()` le "false" como true (string
+ * nao vazia), e `?includeArchived=false` traria justamente os arquivados.
+ */
+const queryBoolean = z
+  .enum(["true", "false", "1", "0"])
+  .transform((value) => value === "true" || value === "1");
+
 export const registerLedgerRoutes: RoutePlugin = (app, { db }) => {
   const ledger = db.ledger;
   const balances = () => ledger.balances.consolidated();
@@ -47,7 +55,7 @@ export const registerLedgerRoutes: RoutePlugin = (app, { db }) => {
   // Contas ------------------------------------------------------------------
   app.get("/api/ledger/accounts", async (request) => {
     const query = z
-      .object({ includeArchived: z.coerce.boolean().optional() })
+      .object({ includeArchived: queryBoolean.optional() })
       .parse(request.query);
     return ledger.accounts.list({ includeArchived: query.includeArchived });
   });
@@ -71,7 +79,7 @@ export const registerLedgerRoutes: RoutePlugin = (app, { db }) => {
     const query = z
       .object({
         kind: z.enum(["income", "expense"]).optional(),
-        includeArchived: z.coerce.boolean().optional()
+        includeArchived: queryBoolean.optional()
       })
       .parse(request.query);
     return ledger.categories.list(query);
@@ -257,7 +265,7 @@ export const registerLedgerRoutes: RoutePlugin = (app, { db }) => {
     const query = z
       .object({
         asOf: z.string().date().optional(),
-        includeArchived: z.coerce.boolean().optional()
+        includeArchived: queryBoolean.optional()
       })
       .parse(request.query);
     return ledger.balances.consolidated(query);

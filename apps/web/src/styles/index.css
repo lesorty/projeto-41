@@ -3967,6 +3967,187 @@ main {
   padding-bottom: 8px;
 }
 
+/* --- Contas e pessoas: um cartão por pessoa ---------------------------- */
+
+.fin-owners-bar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 2px 12px;
+  font-size: 0.85rem;
+}
+
+.fin-owners {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+.fin-owner.archived {
+  opacity: 0.7;
+}
+
+.fin-owner-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.fin-owner-avatar {
+  --owner-color: var(--text-faint);
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  color: var(--owner-color);
+  background: color-mix(in srgb, var(--owner-color) 18%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--owner-color) 35%, transparent);
+}
+
+.fin-owner-name {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.fin-owner-name strong {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 1rem;
+}
+
+.fin-owner-name small {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.fin-owner-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.fin-owner-empty {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.88rem;
+  transition: var(--transition);
+}
+
+.fin-owner-empty:hover {
+  color: var(--accent-text);
+  border-color: var(--accent);
+}
+
+.fin-owner-accounts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.fin-owner-accounts li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-top: 1px solid var(--border);
+}
+
+.fin-owner-accounts li.archived {
+  opacity: 0.6;
+}
+
+.fin-owner-account {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 4px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fin-owner-account:hover .fin-owner-account-name strong {
+  color: var(--accent-text);
+}
+
+.fin-owner-account-name {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.fin-owner-account-name strong {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: var(--transition);
+}
+
+.fin-owner-account-name small,
+.fin-account-figure small {
+  color: var(--text-muted);
+  font-size: 0.76rem;
+}
+
+.fin-account-figure {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  text-align: right;
+  flex: 0 0 auto;
+  max-width: 55%;
+}
+
+.fin-account-figure strong {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Quanto do limite o cartão já usa, com o total devido (parcelas inclusas). */
+.fin-limit-bar {
+  width: 120px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+
+.fin-limit-bar span {
+  display: block;
+  height: 100%;
+  background: var(--warning);
+}
+
 /* Seletor solto, fora de `.field`: mesmo visual dos campos do app. */
 .fin-select {
   padding: 9px 34px 9px 12px;

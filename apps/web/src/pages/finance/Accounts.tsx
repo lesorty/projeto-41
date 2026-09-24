@@ -1,4 +1,13 @@
-import { Archive, Plus, Save, UserPlus, Users, Wallet } from "lucide-react";
+import {
+  Archive,
+  ArchiveRestore,
+  Pencil,
+  Plus,
+  Save,
+  UserPlus,
+  Users,
+  Wallet
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   AccountKind,
@@ -58,10 +67,13 @@ export function AccountsPage() {
   const [editing, setEditing] = useState<Draft | null>(null);
   const [editingPerson, setEditingPerson] = useState<Partial<PersonRecord> | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showArchived, setShowArchived] = useState(false);
 
+  // Arquivadas vêm sempre: o total da tela ignora as duas coisas do mesmo
+  // jeito, e o interruptor só decide o que se mostra.
   const load = useCallback(async () => {
     const [nextBalances, nextPeople] = await Promise.all([
-      api<BalancesResult>("/ledger/balances"),
+      api<BalancesResult>("/ledger/balances?includeArchived=true"),
       api<PersonRecord[]>("/ledger/people")
     ]);
     setBalances(nextBalances);
@@ -76,19 +88,59 @@ export function AccountsPage() {
     });
   }, [load, toast]);
 
+  /**
+   * Um cartão por pessoa, inclusive quem ainda não tem conta: a tela é de
+   * contas *e* pessoas, e esconder quem está sem conta escondia justamente
+   * quem falta configurar. Contas sem dona ficam num grupo no fim.
+   */
   const groups = useMemo(() => {
-    if (!balances) return [];
-    const byPerson = new Map<number | null, AccountRecord[]>();
-    for (const account of balances.accounts) {
-      const key = account.personId ?? null;
-      byPerson.set(key, [...(byPerson.get(key) ?? []), account]);
+    const accounts = (balances?.accounts ?? []).filter(
+      (account) => showArchived || !account.archived
+    );
+    const visiblePeople = people.filter((person) => showArchived || person.active);
+    const byPerson: { key: string; person: PersonRecord | null; accounts: AccountRecord[] }[] =
+      visiblePeople.map((person) => ({
+        key: String(person.id),
+        person,
+        accounts: accounts.filter((account) => account.personId === person.id)
+      }));
+    const known = new Set(visiblePeople.map((person) => person.id));
+    const orphans = accounts.filter(
+      (account) => account.personId == null || !known.has(account.personId)
+    );
+    if (orphans.length > 0) byPerson.push({ key: "sem-pessoa", person: null, accounts: orphans });
+    return byPerson;
+  }, [balances, people, showArchived]);
+
+  const archivedCount =
+    (balances?.accounts ?? []).filter((account) => account.archived).length +
+    people.filter((person) => !person.active).length;
+
+  async function restoreAccount(account: AccountRecord) {
+    try {
+      await api(`/ledger/accounts/${account.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ ...account, archived: false })
+      });
+      toast.notify("Conta desarquivada");
+      await load();
+    } catch (error) {
+      toast.notify(error instanceof Error ? error.message : "Falha ao desarquivar", "error");
     }
-    return [...byPerson.entries()].map(([personId, accounts]) => ({
-      personId,
-      person: people.find((entry) => entry.id === personId) ?? null,
-      accounts
-    }));
-  }, [balances, people]);
+  }
+
+  async function restorePerson(person: PersonRecord) {
+    try {
+      await api(`/ledger/people/${person.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ name: person.name, kind: person.kind, color: person.color, active: true })
+      });
+      toast.notify("Pessoa reativada");
+      await load();
+    } catch (error) {
+      toast.notify(error instanceof Error ? error.message : "Falha ao reativar", "error");
+    }
+  }
 
   async function archive(account: AccountRecord) {
     const ok = await confirm({
@@ -134,7 +186,10 @@ export function AccountsPage() {
 
   return (
     <>
-      <SectionHeading title="Contas" subtitle="Quem usa o sistema e onde o dinheiro está">
+      <SectionHeading
+        title="Contas e pessoas"
+        subtitle="Quem usa o sistema, que contas tem e quanto há em cada uma"
+      >
         <Button
           variant="ghost"
           icon={UserPlus}
@@ -151,45 +206,6 @@ export function AccountsPage() {
           Nova conta
         </Button>
       </SectionHeading>
-
-      <Panel
-        title={
-          <span className="fin-inline">
-            <Users size={15} aria-hidden />
-            Pessoas
-          </span>
-        }
-        subtitle="Donas das contas. Use o tipo conjunta para a conta do casal"
-      >
-        {!hasPeople ? (
-          <div className="fin-onboarding">
-            <Empty icon={Users} text="Ninguém cadastrado ainda. Comece criando quem usa o sistema." />
-            <Button
-              icon={UserPlus}
-              onClick={() => setEditingPerson({ kind: "individual", color: "#4f9cf9" })}
-            >
-              Criar a primeira pessoa
-            </Button>
-          </div>
-        ) : (
-          <ul className="fin-people">
-            {activePeople.map((person) => (
-              <li key={person.id}>
-                <button className="fin-link" onClick={() => setEditingPerson(person)}>
-                  <ColorDot color={person.color} />
-                  {person.name}
-                </button>
-                {person.kind === "joint" && <Tag tone="info">Conjunta</Tag>}
-                <IconButton
-                  icon={Archive}
-                  label={`Remover ${person.name}`}
-                  onClick={() => void removePerson(person)}
-                />
-              </li>
-            ))}
-          </ul>
-        )}
-      </Panel>
 
       <div className="fin-summary">
         <Panel title="Saldo" subtitle="Contas no patrimônio, sem cartão">
@@ -212,85 +228,57 @@ export function AccountsPage() {
         )}
       </div>
 
-      {groups.length === 0 && hasPeople && (
-        <Empty icon={Wallet} text="Nenhuma conta cadastrada ainda." />
-      )}
-
-      {groups.map((group) => (
-        <Panel
-          key={group.personId ?? "sem-pessoa"}
-          title={
-            <span className="fin-inline">
-              {group.person && <ColorDot color={group.person.color} />}
-              {group.person?.name ?? "Sem pessoa"}
-            </span>
-          }
-        >
-          <div className="table-scroll">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Conta</th>
-                  <th>Tipo</th>
-                  <th className="num">Saldo</th>
-                  <th className="num">Detalhe</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {group.accounts.map((account) => (
-                  <tr key={account.id}>
-                    <td>
-                      <button className="fin-link" onClick={() => setEditing(account)}>
-                        <ColorDot color={account.color} />
-                        {account.name}
-                      </button>
-                      {account.institution && <small className="fin-sub">{account.institution}</small>}
-                    </td>
-                    <td>{ACCOUNT_KIND_LABEL[account.kind] ?? account.kind}</td>
-                    {account.kind === "credit_card" ? (
-                      <>
-                        {/* Cartão nunca mostra "saldo": mostra os dois números
-                            da regra 6.1, que são coisas diferentes. */}
-                        <td className="num">
-                          {debtFromCents(account.currentStatementCents ?? 0)}
-                          <small className="fin-sub">fatura atual</small>
-                        </td>
-                        <td className="num fin-muted">
-                          {debtFromCents(account.totalDueCents ?? 0)}
-                          <small className="fin-sub">
-                            {account.availableLimitCents == null
-                              ? "total devido"
-                              : `${moneyFromCents(account.availableLimitCents)} livres`}
-                          </small>
-                        </td>
-                      </>
-                    ) : (
-                      <>
-                        <td
-                          className={`num ${account.currentBalanceCents < 0 ? "fin-negative" : ""}`}
-                        >
-                          {moneyFromCents(account.currentBalanceCents)}
-                        </td>
-                        <td className="num fin-muted">
-                          {account.includeInNetWorth ? "no patrimônio" : "fora do patrimônio"}
-                        </td>
-                      </>
-                    )}
-                    <td className="num">
-                      <IconButton
-                        icon={Archive}
-                        label="Arquivar"
-                        onClick={() => void archive(account)}
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      {!hasPeople && !showArchived ? (
+        <Panel>
+          <div className="fin-onboarding">
+            <Empty icon={Users} text="Ninguém cadastrado ainda. Comece criando quem usa o sistema." />
+            <Button
+              icon={UserPlus}
+              onClick={() => setEditingPerson({ kind: "individual", color: "#4f9cf9" })}
+            >
+              Criar a primeira pessoa
+            </Button>
           </div>
         </Panel>
-      ))}
+      ) : (
+        <>
+          <div className="fin-owners-bar">
+            <span className="fin-muted">
+              {activePeople.length} pessoa{activePeople.length === 1 ? "" : "s"} ·{" "}
+              {(balances?.accounts ?? []).filter((account) => !account.archived).length} contas ativas
+            </span>
+            {archivedCount > 0 && (
+              <label className="fin-check">
+                <input
+                  type="checkbox"
+                  checked={showArchived}
+                  onChange={(event) => setShowArchived(event.target.checked)}
+                />
+                <span>Mostrar arquivadas ({archivedCount})</span>
+              </label>
+            )}
+          </div>
+
+          <div className="fin-owners">
+            {groups.map((group) => (
+              <OwnerCard
+                key={group.key}
+                person={group.person}
+                accounts={group.accounts}
+                onEditPerson={setEditingPerson}
+                onRemovePerson={(person) => void removePerson(person)}
+                onRestorePerson={(person) => void restorePerson(person)}
+                onAddAccount={(personId) =>
+                  setEditing({ color: "#4f8ff7", kind: "checking", personId })
+                }
+                onEditAccount={setEditing}
+                onArchiveAccount={(account) => void archive(account)}
+                onRestoreAccount={(account) => void restoreAccount(account)}
+              />
+            ))}
+          </div>
+        </>
+      )}
 
       <InvestmentCashPanel accounts={balances?.accounts ?? []} />
 
@@ -320,6 +308,147 @@ export function AccountsPage() {
         />
       )}
     </>
+  );
+}
+
+/** O número que resume uma conta na lista: cartão mostra a dívida, não "saldo". */
+function AccountFigure({ account }: { account: AccountRecord }) {
+  if (account.kind === "credit_card") {
+    const limit = account.creditLimitCents ?? null;
+    const used = account.totalDueCents ?? 0;
+    return (
+      <span className="fin-account-figure">
+        <strong className={(account.currentStatementCents ?? 0) > 0 ? "fin-negative" : ""}>
+          {debtFromCents(account.currentStatementCents ?? 0)}
+        </strong>
+        <small>
+          fatura atual · {debtFromCents(used)} devido
+          {account.availableLimitCents != null &&
+            ` · ${moneyFromCents(account.availableLimitCents)} livres`}
+        </small>
+        {limit != null && limit > 0 && (
+          <span className="fin-limit-bar" aria-hidden>
+            <span style={{ width: `${Math.min(100, (used / limit) * 100)}%` }} />
+          </span>
+        )}
+      </span>
+    );
+  }
+  return (
+    <span className="fin-account-figure">
+      <strong className={account.currentBalanceCents < 0 ? "fin-negative" : ""}>
+        {moneyFromCents(account.currentBalanceCents)}
+      </strong>
+      <small>
+        {account.kind === "investment"
+          ? "caixa para investir"
+          : account.includeInNetWorth
+            ? "no patrimônio"
+            : "fora do patrimônio"}
+      </small>
+    </span>
+  );
+}
+
+function OwnerCard({
+  person,
+  accounts,
+  onEditPerson,
+  onRemovePerson,
+  onRestorePerson,
+  onAddAccount,
+  onEditAccount,
+  onArchiveAccount,
+  onRestoreAccount
+}: {
+  person: PersonRecord | null;
+  accounts: AccountRecord[];
+  onEditPerson: (person: PersonRecord) => void;
+  onRemovePerson: (person: PersonRecord) => void;
+  onRestorePerson: (person: PersonRecord) => void;
+  onAddAccount: (personId: number) => void;
+  onEditAccount: (account: AccountRecord) => void;
+  onArchiveAccount: (account: AccountRecord) => void;
+  onRestoreAccount: (account: AccountRecord) => void;
+}) {
+  const archivedPerson = person != null && !person.active;
+  // Soma de dinheiro, não de dívida: cartão e conta arquivada ficam de fora.
+  const balance = accounts
+    .filter((account) => !account.archived && account.kind !== "credit_card" && account.includeInNetWorth)
+    .reduce((total, account) => total + account.currentBalanceCents, 0);
+
+  return (
+    <Panel className={`fin-owner ${archivedPerson ? "archived" : ""}`}>
+      <header className="fin-owner-head">
+        <span
+          className="fin-owner-avatar"
+          style={{ "--owner-color": person?.color ?? "#8b949e" } as React.CSSProperties}
+          aria-hidden
+        >
+          {person ? person.name.charAt(0).toUpperCase() : "?"}
+        </span>
+        <div className="fin-owner-name">
+          <strong>
+            {person?.name ?? "Sem pessoa"}
+            {person?.kind === "joint" && <Tag tone="info">Conjunta</Tag>}
+            {archivedPerson && <Tag tone="warning">Arquivada</Tag>}
+          </strong>
+          <small>
+            {accounts.length === 0
+              ? "Nenhuma conta"
+              : `${accounts.length} conta${accounts.length === 1 ? "" : "s"} · ${moneyFromCents(balance)} em saldo`}
+          </small>
+        </div>
+        {person && (
+          <div className="fin-owner-actions">
+            {archivedPerson ? (
+              <Button variant="ghost" icon={ArchiveRestore} onClick={() => onRestorePerson(person)}>
+                Reativar
+              </Button>
+            ) : (
+              <>
+                <IconButton icon={Plus} label={`Nova conta de ${person.name}`} onClick={() => onAddAccount(person.id)} />
+                <IconButton icon={Pencil} label={`Editar ${person.name}`} onClick={() => onEditPerson(person)} />
+                <IconButton icon={Archive} label={`Remover ${person.name}`} onClick={() => onRemovePerson(person)} />
+              </>
+            )}
+          </div>
+        )}
+      </header>
+
+      {accounts.length === 0 ? (
+        person && !archivedPerson ? (
+          <button type="button" className="fin-owner-empty" onClick={() => onAddAccount(person.id)}>
+            <Wallet size={16} aria-hidden />
+            Adicionar a primeira conta de {person.name}
+          </button>
+        ) : null
+      ) : (
+        <ul className="fin-owner-accounts">
+          {accounts.map((account) => (
+            <li key={account.id} className={account.archived ? "archived" : ""}>
+              <button type="button" className="fin-owner-account" onClick={() => onEditAccount(account)}>
+                <ColorDot color={account.color} />
+                <span className="fin-owner-account-name">
+                  <strong>{account.name}</strong>
+                  <small>
+                    {ACCOUNT_KIND_LABEL[account.kind] ?? account.kind}
+                    {account.institution && ` · ${account.institution}`}
+                    {account.archived && " · arquivada"}
+                  </small>
+                </span>
+                <AccountFigure account={account} />
+              </button>
+              {account.archived ? (
+                <IconButton icon={ArchiveRestore} label="Desarquivar" onClick={() => onRestoreAccount(account)} />
+              ) : (
+                <IconButton icon={Archive} label="Arquivar" onClick={() => onArchiveAccount(account)} />
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Panel>
   );
 }
 
