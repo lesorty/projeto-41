@@ -2902,6 +2902,277 @@ main {
   border-style: dashed;
 }
 
+/* --- Busca e filtros recolhidos ----------------------------------------- */
+
+.fin-filter-search {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex: 1 1 260px;
+  justify-content: flex-end;
+}
+
+.fin-filter-search .search-input {
+  flex: 1 1 auto;
+  max-width: 340px;
+}
+
+.fin-filter-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: var(--transition);
+}
+
+.fin-filter-toggle:hover,
+.fin-filter-toggle.active {
+  color: var(--accent-text);
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+.fin-filter-count {
+  min-width: 18px;
+  height: 18px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  color: var(--bg);
+  background: var(--accent);
+}
+
+/* --- Resumo do filtro ---------------------------------------------------- */
+
+.fin-flow-panel {
+  margin-bottom: 16px;
+}
+
+.fin-flow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px 20px;
+}
+
+.fin-flow > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.fin-flow span {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.fin-flow strong {
+  font-size: 1.3rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.fin-flow-bar-wrap {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* A barra inteira são as entradas; a parte preenchida é o que saiu delas. */
+.fin-flow-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--positive-soft);
+  overflow: hidden;
+}
+
+.fin-flow-bar .expense {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--negative);
+}
+
+/* --- Livro agrupado por dia ---------------------------------------------- */
+
+.fin-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.fin-day-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 0 4px 6px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.8rem;
+}
+
+.fin-day-head strong {
+  color: var(--text-muted);
+  font-weight: 650;
+}
+
+.fin-day-head span {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.fin-day ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.fin-entry {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 4px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}
+
+.fin-entry:last-child {
+  border-bottom: 0;
+}
+
+.fin-entry.pending {
+  opacity: 0.75;
+}
+
+.fin-entry-icon {
+  --entry-color: var(--text-faint);
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  color: var(--entry-color);
+  background: color-mix(in srgb, var(--entry-color) 16%, transparent);
+}
+
+.fin-entry-icon.transfer {
+  --entry-color: var(--accent-text);
+}
+
+.fin-entry-icon.income {
+  --entry-color: var(--positive);
+}
+
+.fin-entry-icon.letter {
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.fin-entry-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.fin-entry-main:hover .fin-entry-name {
+  color: var(--accent-text);
+}
+
+.fin-entry-main:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.fin-entry-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.fin-entry-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+  transition: var(--transition);
+}
+
+.fin-entry-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.fin-entry-meta > span + span::before {
+  content: "·";
+  margin: 0 6px;
+  color: var(--text-faint);
+}
+
+.fin-tag-chip {
+  font-style: normal;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+.fin-entry-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.fin-entry-side .fin-amount {
+  font-size: 0.98rem;
+}
+
+.fin-status-pill,
+.fin-status-ok {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-style: normal;
+  font-size: 0.7rem;
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+.fin-status-pill {
+  color: var(--warning);
+  background: var(--warning-soft);
+}
+
+.fin-status-ok {
+  color: var(--positive);
+  background: var(--positive-soft);
+}
+
 /* --- Tabela do livro ----------------------------------------------------- */
 
 .fin-entries td {

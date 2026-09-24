@@ -7,6 +7,7 @@ import { EntryFilters, type LedgerFilter } from "../../components/finance/EntryF
 import { EntryTable } from "../../components/finance/EntryTable.js";
 import { Button, Loading, Panel, SectionHeading } from "../../components/ui.js";
 import { moneyFromCents, signedMoneyFromCents } from "../../lib/format.js";
+import { daysBetween } from "@projeto41/finance";
 import { filterToQuery, ledgerApi, useLedgerReference } from "../../lib/ledger.js";
 import type { LedgerPreset } from "../../lib/navigation.js";
 import { useToast } from "../../lib/toast.js";
@@ -114,17 +115,13 @@ export function LedgerPage({
         />
       </Panel>
 
-      <div className="fin-summary">
-        <Panel title="Entradas">
-          <strong className="fin-positive">{moneyFromCents(totals?.incomeCents ?? 0)}</strong>
-        </Panel>
-        <Panel title="Saídas">
-          <strong className="fin-negative">{moneyFromCents(totals?.expenseCents ?? 0)}</strong>
-        </Panel>
-        <Panel title="Líquido">
-          <strong>{signedMoneyFromCents(totals?.netCents ?? 0)}</strong>
-        </Panel>
-      </div>
+      <FlowSummary
+        totals={totals}
+        count={result?.total ?? 0}
+        fixedKind={fixedKind}
+        from={filter.from}
+        to={filter.to}
+      />
 
       {fixedKind === "expense" && filter.from && filter.to && (
         <Panel
@@ -141,7 +138,11 @@ export function LedgerPage({
 
       <Panel
         title={`${result?.total ?? 0} lançamento${(result?.total ?? 0) === 1 ? "" : "s"}`}
-        subtitle="Os totais acima consideram o filtro inteiro, não só esta página"
+        subtitle={
+          pageCount > 1
+            ? `Página ${filter.page ?? 1} de ${pageCount} · os totais acima são do filtro inteiro`
+            : "Do mais recente para o mais antigo"
+        }
       >
         {loading ? (
           <Loading />
@@ -191,6 +192,87 @@ export function LedgerPage({
         />
       )}
     </>
+  );
+}
+
+/**
+ * O resumo do filtro, não da página. Em Transações, a barra mostra quanto das
+ * entradas as saídas consumiram; em Gastos, a média por dia diz mais que o
+ * total sozinho.
+ */
+function FlowSummary({
+  totals,
+  count,
+  fixedKind,
+  from,
+  to
+}: {
+  totals: { incomeCents: number; expenseCents: number; netCents: number } | undefined;
+  count: number;
+  fixedKind?: LedgerKind;
+  from?: string;
+  to?: string;
+}) {
+  const income = totals?.incomeCents ?? 0;
+  const expense = Math.abs(totals?.expenseCents ?? 0);
+  const days = from && to ? daysBetween(from, to) + 1 : null;
+  const consumed = income > 0 ? expense / income : null;
+
+  const metrics: { label: string; value: string; tone?: string }[] = [];
+  if (fixedKind !== "expense") {
+    metrics.push({ label: "Entradas", value: moneyFromCents(income), tone: "fin-positive" });
+  }
+  if (fixedKind !== "income") {
+    metrics.push({ label: "Saídas", value: moneyFromCents(-expense), tone: "fin-negative" });
+  }
+  if (!fixedKind) {
+    metrics.push({
+      label: "Líquido",
+      value: signedMoneyFromCents(totals?.netCents ?? 0),
+      tone: (totals?.netCents ?? 0) < 0 ? "fin-negative" : ""
+    });
+  }
+  if (fixedKind === "expense" && days) {
+    metrics.push({ label: "Média por dia", value: moneyFromCents(-Math.round(expense / days)) });
+  }
+  metrics.push({ label: "Lançamentos", value: String(count) });
+
+  return (
+    <Panel className="fin-flow-panel">
+      <div className="fin-flow">
+        {metrics.map((metric) => (
+          <div key={metric.label}>
+            <span>{metric.label}</span>
+            <strong className={metric.tone}>{metric.value}</strong>
+          </div>
+        ))}
+      </div>
+      {!fixedKind && (income > 0 || expense > 0) && (
+        <div className="fin-flow-bar-wrap">
+          <div
+            className="fin-flow-bar"
+            role="img"
+            aria-label={
+              consumed == null
+                ? "Sem entradas no período"
+                : `Saídas consumiram ${Math.round(consumed * 100)}% das entradas`
+            }
+          >
+            <span
+              className="expense"
+              style={{ width: `${Math.min(100, consumed == null ? 100 : consumed * 100)}%` }}
+            />
+          </div>
+          <small className="fin-muted">
+            {consumed == null
+              ? "Sem entradas no período"
+              : consumed > 1
+                ? `Saídas passaram as entradas em ${moneyFromCents(expense - income)}`
+                : `Saídas consumiram ${Math.round(consumed * 100)}% das entradas`}
+          </small>
+        </div>
+      )}
+    </Panel>
   );
 }
 

@@ -1,12 +1,15 @@
-import { Filter, X } from "lucide-react";
+import { Filter, SlidersHorizontal, X } from "lucide-react";
+import { useState } from "react";
 import type { EntryFilter } from "@projeto41/contracts";
 import { DateField } from "../datepicker.js";
-import { Field, SearchInput } from "../ui.js";
+import { Field, SearchInput, Segmented } from "../ui.js";
 import type { LedgerReference } from "../../lib/ledger.js";
 import { STATUS_LABEL } from "../../lib/ledger.js";
 import { monthNames } from "../../lib/format.js";
 
 export type LedgerFilter = Partial<EntryFilter>;
+
+type KindOption = "all" | "expense" | "income" | "transfer";
 
 /** Atalhos de período: cobre 95% dos cliques sem abrir o seletor de data. */
 function periodShortcuts(today = new Date()) {
@@ -53,6 +56,15 @@ export function EntryFilters({
 
   const shortcuts = periodShortcuts();
   const chips = buildChips(filter, reference);
+  // Os filtros finos ficam recolhidos: período, tipo e busca resolvem quase
+  // tudo, e nove selects abertos empurravam a lista para fora da tela.
+  const refined = chips.filter((chip) => chip.key !== "search").length;
+  // Um intervalo que não é atalho (vindo do Painel, por exemplo) só se vê nas
+  // datas: nesse caso os filtros já abrem.
+  const customPeriod = !shortcuts.some(
+    (shortcut) => shortcut.from === filter.from && shortcut.to === filter.to
+  );
+  const [open, setOpen] = useState(customPeriod);
 
   return (
     <div className="fin-filters">
@@ -71,126 +83,139 @@ export function EntryFilters({
             </button>
           ))}
         </div>
-        <SearchInput
-          value={filter.search ?? ""}
-          onChange={(value) => patch({ search: value || undefined })}
-          placeholder="Buscar descrição ou local"
-        />
+        {!lockedKind && (
+          <Segmented<KindOption>
+            value={filter.kind && filter.kind !== "adjustment" ? filter.kind : "all"}
+            onChange={(value) =>
+              patch({ kind: value === "all" ? undefined : (value as EntryFilter["kind"]) })
+            }
+            options={[
+              { value: "all", label: "Tudo" },
+              { value: "expense", label: "Saídas" },
+              { value: "income", label: "Entradas" },
+              { value: "transfer", label: "Transferências" }
+            ]}
+          />
+        )}
+        <div className="fin-filter-search">
+          <SearchInput
+            value={filter.search ?? ""}
+            onChange={(value) => patch({ search: value || undefined })}
+            placeholder="Buscar descrição ou local"
+          />
+          <button
+            type="button"
+            className={`fin-filter-toggle ${open ? "active" : ""}`}
+            onClick={() => setOpen((current) => !current)}
+            aria-expanded={open}
+          >
+            <SlidersHorizontal size={15} aria-hidden />
+            Filtros
+            {refined > 0 && <span className="fin-filter-count">{refined}</span>}
+          </button>
+        </div>
       </div>
 
-      <div className="fin-filter-grid">
-        <Field label="De">
-          <DateField value={filter.from ?? ""} onChange={(value) => patch({ from: value || undefined })} />
-        </Field>
-        <Field label="Até">
-          <DateField value={filter.to ?? ""} onChange={(value) => patch({ to: value || undefined })} />
-        </Field>
-        <Field label="Conta">
-          <select
-            value={filter.accountId ?? ""}
-            onChange={(event) =>
-              patch({ accountId: event.target.value ? Number(event.target.value) : undefined })
-            }
-          >
-            <option value="">Todas</option>
-            {reference.accounts.map((account) => (
-              <option key={account.id} value={account.id}>
-                {account.name}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Pessoa">
-          <select
-            value={filter.personId ?? ""}
-            onChange={(event) =>
-              patch({ personId: event.target.value ? Number(event.target.value) : undefined })
-            }
-          >
-            <option value="">Todas</option>
-            {reference.people.map((person) => (
-              <option key={person.id} value={person.id}>
-                {person.name}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Categoria">
-          <select
-            value={filter.categoryId?.[0] ?? ""}
-            onChange={(event) =>
-              patch({ categoryId: event.target.value ? [Number(event.target.value)] : undefined })
-            }
-          >
-            <option value="">Todas</option>
-            {reference.categories.map((category) => (
-              <option key={category.id} value={category.id}>
-                {category.name}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Etiqueta">
-          <select
-            value={filter.tagId?.[0] ?? ""}
-            onChange={(event) =>
-              patch({ tagId: event.target.value ? [Number(event.target.value)] : undefined })
-            }
-          >
-            <option value="">Todas</option>
-            {reference.tags.map((tag) => (
-              <option key={tag.id} value={tag.id}>
-                {tag.name}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Caixinha">
-          <select
-            value={filter.goalId ?? ""}
-            onChange={(event) =>
-              patch({ goalId: event.target.value ? Number(event.target.value) : undefined })
-            }
-          >
-            <option value="">Todas</option>
-            {reference.goals.map((goal) => (
-              <option key={goal.id} value={goal.id}>
-                {goal.name}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Status">
-          <select
-            value={filter.status ?? ""}
-            onChange={(event) =>
-              patch({ status: (event.target.value || undefined) as EntryFilter["status"] })
-            }
-          >
-            <option value="">Todos</option>
-            {Object.entries(STATUS_LABEL).map(([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </Field>
-        {!lockedKind && (
-          <Field label="Tipo">
+      {open && (
+        <div className="fin-filter-grid">
+          <Field label="De">
+            <DateField value={filter.from ?? ""} onChange={(value) => patch({ from: value || undefined })} />
+          </Field>
+          <Field label="Até">
+            <DateField value={filter.to ?? ""} onChange={(value) => patch({ to: value || undefined })} />
+          </Field>
+          <Field label="Conta">
             <select
-              value={filter.kind ?? ""}
+              value={filter.accountId ?? ""}
               onChange={(event) =>
-                patch({ kind: (event.target.value || undefined) as EntryFilter["kind"] })
+                patch({ accountId: event.target.value ? Number(event.target.value) : undefined })
+              }
+            >
+              <option value="">Todas</option>
+              {reference.accounts.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {account.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Pessoa">
+            <select
+              value={filter.personId ?? ""}
+              onChange={(event) =>
+                patch({ personId: event.target.value ? Number(event.target.value) : undefined })
+              }
+            >
+              <option value="">Todas</option>
+              {reference.people.map((person) => (
+                <option key={person.id} value={person.id}>
+                  {person.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Categoria">
+            <select
+              value={filter.categoryId?.[0] ?? ""}
+              onChange={(event) =>
+                patch({ categoryId: event.target.value ? [Number(event.target.value)] : undefined })
+              }
+            >
+              <option value="">Todas</option>
+              {reference.categories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Etiqueta">
+            <select
+              value={filter.tagId?.[0] ?? ""}
+              onChange={(event) =>
+                patch({ tagId: event.target.value ? [Number(event.target.value)] : undefined })
+              }
+            >
+              <option value="">Todas</option>
+              {reference.tags.map((tag) => (
+                <option key={tag.id} value={tag.id}>
+                  {tag.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Caixinha">
+            <select
+              value={filter.goalId ?? ""}
+              onChange={(event) =>
+                patch({ goalId: event.target.value ? Number(event.target.value) : undefined })
+              }
+            >
+              <option value="">Todas</option>
+              {reference.goals.map((goal) => (
+                <option key={goal.id} value={goal.id}>
+                  {goal.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Status">
+            <select
+              value={filter.status ?? ""}
+              onChange={(event) =>
+                patch({ status: (event.target.value || undefined) as EntryFilter["status"] })
               }
             >
               <option value="">Todos</option>
-              <option value="expense">Saídas</option>
-              <option value="income">Entradas</option>
-              <option value="transfer">Transferências</option>
+              {Object.entries(STATUS_LABEL).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
             </select>
           </Field>
-        )}
-      </div>
+        </div>
+      )}
 
       {chips.length > 0 && (
         <div className="fin-chips">
