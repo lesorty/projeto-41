@@ -5,6 +5,7 @@ import type {
   SeriesScope,
   EntryRecord,
   EntryStatus,
+  ManualPositionRecord,
   PlaceRecord
 } from "@projeto41/contracts";
 import { parseCurrencyInput } from "@projeto41/finance";
@@ -26,10 +27,15 @@ import {
 } from "../../lib/ledger.js";
 import type { LedgerReference } from "../../lib/ledger.js";
 import { api } from "../../lib/api.js";
+import { POSITION_CATEGORY_LABEL } from "../../lib/cash.js";
 import { useToast } from "../../lib/toast.js";
 
-/** Tipos oferecidos no formulário. `adjustment` é interno, não se cria à mão. */
-type FormKind = "expense" | "income" | "transfer";
+/**
+ * Tipos oferecidos no formulário. `adjustment` é interno, não se cria à mão.
+ * Aporte é uma transferência da conta para uma posição de investimento: o
+ * saldo cai, mas não é gasto.
+ */
+type FormKind = "expense" | "income" | "transfer" | "investment";
 
 /** À vista sai de uma conta; crédito vai para a fatura de um cartão. */
 type PayWith = "money" | "credit";
@@ -57,6 +63,9 @@ export function EntryDrawer({
   const confirm = useConfirm();
   const editing = entry != null;
   const isTransfer = entry?.kind === "transfer";
+  // Aporte e resgate mexem na posição junto com o banco: quem desfaz é a tela
+  // de Investimentos, que devolve as duas pontas.
+  const isInvestmentLeg = isTransfer && entry?.transferPurpose === "investment";
   // Estorno é um lançamento de sinal oposto ligado ao original (6.6): o tipo e
   // o sinal são do original, não do formulário.
   const isRefund = entry?.refundOfEntryId != null;
@@ -105,6 +114,29 @@ export function EntryDrawer({
   const [amountBasis, setAmountBasis] = useState<AmountBasis>("total");
   const [refunding, setRefunding] = useState(false);
   const [scopeAsk, setScopeAsk] = useState(false);
+  const [positions, setPositions] = useState<ManualPositionRecord[] | null>(null);
+  const [positionId, setPositionId] = useState<number | null>(null);
+
+  // As posições só são buscadas quando o aporte é escolhido.
+  useEffect(() => {
+    if (kind !== "investment" || positions != null) return;
+    api<ManualPositionRecord[]>("/positions")
+      .then((list) => {
+        setPositions(list);
+        setPositionId((current) => current ?? list[0]?.id ?? null);
+      })
+      .catch(() => setPositions([]));
+  }, [kind, positions]);
+
+  const positionOptions = useMemo<DropdownOption<number>[]>(
+    () =>
+      (positions ?? []).map((position) => ({
+        value: position.id,
+        label: position.name,
+        hint: POSITION_CATEGORY_LABEL[position.category] ?? position.category
+      })),
+    [positions]
+  );
 
   // Cadastros arquivados saem das listas, mas o lançamento antigo continua
   // apontando para eles. Sem a opção atual, o select mostraria outra coisa — e
@@ -242,7 +274,24 @@ export function EntryDrawer({
 
     setSaving(true);
     try {
-      if (kind === "transfer") {
+      if (kind === "investment") {
+        if (positionId == null) {
+          toast.notify("Escolha a posição que recebe o aporte", "error");
+          return;
+        }
+        // Uma saída que era aporte é substituída no mesmo passo, no servidor:
+        // o dinheiro nunca sai da conta duas vezes.
+        await api("/investments/deposit", {
+          method: "POST",
+          body: JSON.stringify({
+            positionId,
+            fromAccountId: accountId,
+            amountCents: Math.abs(cents),
+            date,
+            replacesEntryId: editing && entry ? entry.id : null
+          })
+        });
+      } else if (kind === "transfer") {
         if (toAccountId == null || toAccountId === accountId) {
           toast.notify("Escolha contas de origem e destino diferentes", "error");
           return;
@@ -378,12 +427,12 @@ export function EntryDrawer({
       onClose={onClose}
       footer={
         <>
-          {editing && entry && entry.kind !== "transfer" && entry.refundOfEntryId == null && (
+          {editing && entry && entry.kind !== "transfer" && entry.refundOfEntryId == null && kind !== "investment" && (
             <Button variant="ghost" icon={Undo2} onClick={() => setRefunding(true)}>
               Estornar
             </Button>
           )}
-          {editing && (
+          {editing && !isInvestmentLeg && (
             <Button variant="danger" icon={Trash2} onClick={() => void remove()}>
               Excluir
             </Button>
@@ -391,9 +440,11 @@ export function EntryDrawer({
           <Button variant="ghost" onClick={onClose}>
             Cancelar
           </Button>
-          <Button icon={Save} type="submit" form="entry-form" disabled={saving || uploading}>
-            {saving ? "Salvando…" : "Salvar"}
-          </Button>
+          {!isInvestmentLeg && (
+            <Button icon={Save} type="submit" form="entry-form" disabled={saving || uploading}>
+              {saving ? "Salvando…" : kind === "investment" ? "Aportar" : "Salvar"}
+            </Button>
+          )}
         </>
       }
     >
@@ -401,6 +452,11 @@ export function EntryDrawer({
         {isRefund ? (
           <p className="fin-muted">
             Estorno de um lançamento: o valor abate o original, e o tipo não muda.
+          </p>
+        ) : isInvestmentLeg ? (
+          <p className="fin-callout">
+            Movimento de investimento: saiu da conta e foi para uma posição, sem contar como gasto.
+            Para desfazer ou corrigir, use Investimentos › Em caixa, que ajusta a posição junto.
           </p>
         ) : isTransfer ? (
           <p className="fin-muted">
@@ -413,9 +469,17 @@ export function EntryDrawer({
             options={[
               { value: "expense", label: "Saída" },
               { value: "income", label: "Entrada" },
-              { value: "transfer", label: "Transferência" }
+              { value: "transfer", label: "Transferência" },
+              { value: "investment", label: "Aporte" }
             ]}
           />
+        )}
+
+        {kind === "investment" && editing && (
+          <p className="fin-muted">
+            Salvar troca esta saída por um aporte: ela deixa de contar como gasto e o valor entra na
+            posição escolhida.
+          </p>
         )}
 
         <div className="field-row entry-amount-row">
@@ -480,10 +544,16 @@ export function EntryDrawer({
             </>
           )
         ) : (
-          <div className={kind === "transfer" ? "field-row" : ""}>
+          <div className={kind === "transfer" || kind === "investment" ? "field-row" : ""}>
             <Field
               label={
-                kind !== "transfer" ? "Conta" : incomingLeg ? "Conta de destino" : "Conta de origem"
+                kind === "investment"
+                  ? "Sai da conta"
+                  : kind !== "transfer"
+                    ? "Conta"
+                    : incomingLeg
+                      ? "Conta de destino"
+                      : "Conta de origem"
               }
             >
               <Dropdown<number>
@@ -512,11 +582,27 @@ export function EntryDrawer({
                 />
               </Field>
             )}
+            {kind === "investment" && (
+              <Field label="Vai para">
+                <Dropdown<number>
+                  value={positionId}
+                  onChange={setPositionId}
+                  options={positionOptions}
+                  placeholder={positions == null ? "Carregando…" : "Escolher posição"}
+                  aria-label="Posição que recebe o aporte"
+                />
+              </Field>
+            )}
           </div>
         )}
+        {kind === "investment" && positions != null && positions.length === 0 && (
+          <p className="fin-callout">
+            Nenhuma posição cadastrada. Crie uma em Investimentos › Caixa e renda fixa.
+          </p>
+        )}
 
-        {/* Transferência nunca tem categoria (D21). */}
-        {kind !== "transfer" && (
+        {/* Transferência nunca tem categoria (D21); aporte é transferência. */}
+        {kind !== "transfer" && kind !== "investment" && (
           <Field label="Categoria">
             <Dropdown<number>
               value={categoryId}
@@ -532,6 +618,9 @@ export function EntryDrawer({
           </Field>
         )}
 
+        {/* O aporte se descreve sozinho ("Aporte · posição"): o resto é do gasto. */}
+        {kind !== "investment" && (
+        <>
         <Field label="Descrição" hint="Opcional">
           <input
             value={description}
@@ -610,6 +699,8 @@ export function EntryDrawer({
             setAttachments((current) => current.filter((item) => item.id !== id));
           }}
         />
+        </>
+        )}
       </form>
 
       <SeriesScopeDialog

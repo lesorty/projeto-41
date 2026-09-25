@@ -66,7 +66,13 @@ export const registerInvestmentCashRoutes: RoutePlugin = (app, { db }) => {
 
   app.post("/api/investments/deposit", async (request, reply) => {
     const input = z
-      .object({ positionId: id, fromAccountId: id, amountCents: cents, date })
+      .object({
+        positionId: id,
+        fromAccountId: id,
+        amountCents: cents,
+        date,
+        replacesEntryId: id.nullable().optional()
+      })
       .parse(request.body);
     const result = depositToPosition(db, input);
     return reply.status(201).send({ ...result, ...snapshot() });

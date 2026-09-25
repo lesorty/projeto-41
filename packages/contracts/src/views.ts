@@ -85,7 +85,18 @@ export type Dashboard = {
  */
 export type OperationRecord = Operation & { id: number };
 export type ManualPositionRecord = ManualPosition & { id: number };
-export type ContributionRecord = Contribution & { id: number };
+/**
+ * Aporte no acompanhamento anual. `manual` é o digitado na tela de Aportes;
+ * `ledger` vem do livro: dinheiro que saiu de uma conta para os investimentos
+ * (positivo) ou voltou deles (resgate, negativo). O do livro não se apaga aqui
+ * — quem desfaz é Investimentos › Em caixa, que devolve a posição junto.
+ */
+export type ContributionRecord = Contribution & {
+  id: number;
+  source?: "manual" | "ledger";
+  transferId?: number | null;
+  accountName?: string | null;
+};
 
 export type CryptoSearchResult = {
   id: string;

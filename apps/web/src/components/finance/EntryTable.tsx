@@ -5,6 +5,7 @@ import {
   Paperclip,
   PiggyBank,
   Receipt,
+  TrendingUp,
   Undo2
 } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -90,9 +91,11 @@ function CategoryPill({ entry }: { entry: EntryRecord }) {
       ? { icon: Undo2, label: "Estorno" }
       : entry.goalId != null
         ? { icon: PiggyBank, label: "Caixinha" }
-        : entry.kind === "transfer"
-          ? { icon: ArrowLeftRight, label: "Transferência" }
-          : null;
+        : entry.transferPurpose === "investment"
+          ? { icon: TrendingUp, label: entry.amountCents < 0 ? "Aporte" : "Resgate" }
+          : entry.kind === "transfer"
+            ? { icon: ArrowLeftRight, label: "Transferência" }
+            : null;
   if (special && !entry.categoryName) {
     const Icon = special.icon;
     return (

@@ -3605,15 +3605,29 @@ main {
 
 /* Rosca com legenda ao lado: a rosca não carrega rótulo nenhum, então não há
    o que se atropelar, por mais categorias que existam. */
+/* Lado a lado quando cabe; senão a legenda desce para baixo da rosca em vez
+   de espremer os nomes. */
 .donut-split {
-  container-type: inline-size;
-  display: grid;
-  grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
+  display: flex;
+  flex-wrap: wrap;
   gap: 18px;
   align-items: center;
+  justify-content: center;
 }
 .donut-split .donut {
+  flex: 0 0 200px;
   margin-bottom: 0;
+}
+/* O total no furo vem depois do gráfico no DOM e cobria o tooltip da fatia. */
+.donut .donut-center {
+  z-index: 1;
+}
+.donut .recharts-tooltip-wrapper {
+  z-index: 2;
+}
+.donut .chart-tooltip {
+  background: var(--surface);
+  opacity: 1;
 }
 .donut-split .donut-center strong {
   font-size: 14px;
@@ -3625,6 +3639,7 @@ main {
   padding: 0;
   display: flex;
   flex-direction: column;
+  flex: 1 1 260px;
   min-width: 0;
 }
 .donut-legend li {
@@ -3662,16 +3677,6 @@ main {
   min-width: 84px;
 }
 
-@media (max-width: 520px) {
-  .donut-split {
-    grid-template-columns: 1fr;
-  }
-  .donut-split .donut {
-    max-width: 220px;
-    margin: 0 auto;
-    width: 100%;
-  }
-}
 
 /* --- Fase 3: cartão, fatura e parcelamento -------------------------------- */
 

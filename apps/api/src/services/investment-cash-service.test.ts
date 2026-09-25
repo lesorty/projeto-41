@@ -89,6 +89,73 @@ describe("aporte, resgate e movimento", () => {
     expect(month.expenseCents).toBe(0);
   });
 
+  it("gasto lançado por engano vira aporte: sai do livro e o saldo não cai duas vezes", () => {
+    const spent = db.ledger.entries.create({
+      accountId: checking,
+      date: "2026-05-01",
+      amountCents: -250_00,
+      kind: "expense",
+      status: "cleared",
+      tagIds: []
+    });
+    depositToPosition(db, {
+      positionId: cdb,
+      fromAccountId: checking,
+      amountCents: 250_00,
+      date: "2026-05-01",
+      replacesEntryId: spent
+    });
+    expect(db.ledger.entries.get(spent)).toBeUndefined();
+    expect(balanceOf(checking)).toBe(1_000_00 - 250_00);
+    expect(valueOf(cdb)).toBe(250);
+    const month = db.ledger.reports.monthSummary({ from: "2026-05-01", to: "2026-05-31" });
+    expect(month.expenseCents).toBe(0);
+  });
+
+  it("só uma saída da mesma conta pode virar aporte, e nada muda se recusar", () => {
+    const other = db.ledger.accounts.create({
+      name: "Outra",
+      kind: "checking",
+      color: "#111111",
+      openingBalanceCents: 0
+    });
+    const spent = db.ledger.entries.create({
+      accountId: other,
+      date: "2026-05-01",
+      amountCents: -100_00,
+      kind: "expense",
+      status: "cleared",
+      tagIds: []
+    });
+    const before = counts();
+    expect(() =>
+      depositToPosition(db, {
+        positionId: cdb,
+        fromAccountId: checking,
+        amountCents: 100_00,
+        date: "2026-05-01",
+        replacesEntryId: spent
+      })
+    ).toThrow(/mesma conta/);
+    expect(counts()).toEqual(before);
+    expect(valueOf(cdb)).toBe(0);
+  });
+
+  it("aporte e resgate pelo livro aparecem nos aportes do ano; movimento entre posições não", () => {
+    db.contributions.create({ date: "2026-01-10", amount: 100 });
+    depositToPosition(db, { positionId: caixa, fromAccountId: checking, amountCents: 400_00, date: "2026-05-01" });
+    moveBetweenPositions(db, { fromPositionId: caixa, toPositionId: cdb, amount: 100, date: "2026-05-02" });
+    withdrawFromPosition(db, { positionId: caixa, toAccountId: checking, amountCents: 50_00, date: "2026-05-03" });
+
+    const all = db.contributions.all();
+    expect(all.map((item) => [item.date, item.amount, item.source])).toEqual([
+      ["2026-01-10", 100, "manual"],
+      ["2026-05-01", 400, "ledger"],
+      ["2026-05-03", -50, "ledger"]
+    ]);
+    expect(all[1]!.accountName).toBe("Nubank");
+  });
+
   it("aporte direto na renda fixa soma ao investido", () => {
     depositToPosition(db, { positionId: cdb, fromAccountId: checking, amountCents: 300_00, date: "2026-05-01" });
     expect(valueOf(cdb)).toBe(300);

@@ -211,10 +211,32 @@ export type DepositInput = {
   /** Sempre em reais: é o que sai da conta bancária. */
   amountCents: number;
   date: string;
+  /**
+   * Saída lançada como gasto que na verdade foi aporte: sai do livro no mesmo
+   * passo em que o aporte entra, para o dinheiro não sair da conta duas vezes.
+   */
+  replacesEntryId?: number | null;
 };
+
+/** O gasto que vira aporte precisa ser uma saída comum da mesma conta. */
+function assertReplaceable(db: AppDatabase, entryId: number, fromAccountId: number) {
+  const entry = db.ledger.entries.get(entryId);
+  if (!entry) throw fail("Lancamento a substituir nao encontrado", 404);
+  if (entry.kind !== "expense") throw fail("So uma saida pode virar aporte");
+  if (entry.accountId !== fromAccountId) {
+    throw fail("O aporte precisa sair da mesma conta do lancamento que ele substitui");
+  }
+  if (entry.installmentPlanId != null || entry.refundOfEntryId != null) {
+    throw fail("Parcela ou estorno nao vira aporte");
+  }
+}
 
 export function depositToPosition(db: AppDatabase, input: DepositInput) {
   return db.transaction(() => {
+    if (input.replacesEntryId != null) {
+      assertReplaceable(db, input.replacesEntryId, input.fromAccountId);
+      db.ledger.entries.remove(input.replacesEntryId);
+    }
     const position = positionOrFail(db, input.positionId);
     const amount = convert(db, input.amountCents / 100, "BRL", position.currency);
     const { fromEntryId } = db.ledger.entries.createTransfer({

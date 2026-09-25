@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDatabase, type AppDatabase } from "@projeto41/db";
-import { buildDashboard } from "./portfolio-service.js";
+import { buildDashboard, buildPortfolios } from "./portfolio-service.js";
 
 let db: AppDatabase | undefined;
 afterEach(() => db?.close());
@@ -94,5 +94,34 @@ describe("buildDashboard", () => {
 
     const dashboard = buildDashboard(db, new Date("2026-06-14T12:00:00-03:00"));
     expect(dashboard.annualReturn).toBeNull();
+  });
+
+  it("operação cripto em reais entra no custo convertida, não como dólar", () => {
+    db = createTestDatabase();
+    const price = (symbol: string, value: number, currency: "USD" | "BRL") =>
+      db!.prices.upsert({
+        symbol,
+        price: value,
+        currency,
+        provider: "test",
+        marketTime: null,
+        fetchedAt: "2026-06-09T00:00:00Z",
+        error: null
+      });
+    price("BTC", 60_000, "USD");
+    price("USDBRL", 5, "BRL");
+    db.operations.create({
+      portfolio: "crypto",
+      type: "buy",
+      asset: "BTC",
+      date: "2026-01-01",
+      quantity: 0.01,
+      total: 2_500,
+      currency: "BRL"
+    });
+
+    const [btc] = buildPortfolios(db).crypto;
+    expect(btc!.investedBrl).toBeCloseTo(2_500);
+    expect(btc!.marketValueBrl).toBeCloseTo(3_000);
   });
 });

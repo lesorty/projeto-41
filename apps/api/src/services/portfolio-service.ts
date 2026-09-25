@@ -17,7 +17,13 @@ export function buildPortfolios(db: AppDatabase) {
         const position = calculatePosition(
           operations
             .filter((operation) => operation.asset === asset)
-            .map(({ type, quantity, total }) => ({ type, quantity, total })),
+            // Cripto é cotada em dólar: uma operação registrada em reais entra
+            // no custo convertida, senão R$ 400 viravam US$ 400.
+            .map(({ type, quantity, total, currency }) => ({
+              type,
+              quantity,
+              total: portfolio === "crypto" && currency === "BRL" && usdBrl > 0 ? total / usdBrl : total
+            })),
           price?.price ?? 0,
           portfolio === "b3" ? dividends.get(asset) ?? 0 : 0
         );
@@ -53,7 +59,9 @@ export function buildDashboard(db: AppDatabase, now = new Date()) {
   const netWorth = buildNetWorth(db, now);
   const categories = netWorth.classes;
   const totalBrl = netWorth.totalBrl;
-  const contributions = db.contributions.list();
+  // Aporte pelo livro conta junto: sem ele, o rendimento do ano trataria
+  // dinheiro novo como ganho.
+  const contributions = db.contributions.all();
   const currentYear = now.getFullYear();
   const annualContributions = contributions
     .filter((item) => Number(item.date.slice(0, 4)) === currentYear)

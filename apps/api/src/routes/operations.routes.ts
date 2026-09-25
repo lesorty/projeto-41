@@ -125,7 +125,8 @@ export const registerOperationsRoutes: RoutePlugin = (app, { db, priceService })
     return { ok: true };
   });
 
-  app.get("/api/contributions", async () => db.contributions.list());
+  // Os digitados e os que passaram pelo livro (aporte e resgate pela conta).
+  app.get("/api/contributions", async () => db.contributions.all());
   app.post("/api/contributions", async (request, reply) => {
     const id = db.contributions.create(contributionSchema.parse(request.body));
     return reply.status(201).send({ id });

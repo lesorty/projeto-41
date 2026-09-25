@@ -107,27 +107,35 @@ export function ContributionsPage() {
         </div>
       </Panel>
 
-      <Panel title="Lançamentos" subtitle="Mais recentes primeiro">
+      <Panel
+        title="Lançamentos"
+        subtitle="Mais recentes primeiro · os aportes feitos pelo livro entram sozinhos"
+      >
         <div className="table-scroll compact">
           <table className="data-table">
             <thead>
               <tr>
                 <th>Data</th>
                 <th className="right">Valor</th>
+                <th>Origem</th>
                 <th>Observação</th>
                 <th className="right">Ações</th>
               </tr>
             </thead>
             <tbody>
               {[...items].reverse().map((item) => (
-                <tr key={item.id}>
+                <tr key={`${item.source ?? "manual"}-${item.id}`}>
                   <td>{longDate(item.date)}</td>
                   <td className="right num">
-                    <strong>{money(item.amount)}</strong>
+                    <strong className={item.amount < 0 ? "fin-negative" : ""}>{money(item.amount)}</strong>
                   </td>
+                  <td>{item.source === "ledger" ? (item.accountName ?? "Livro") : "Manual"}</td>
                   <td className="muted">{item.notes || "—"}</td>
                   <td className="right">
-                    <IconButton icon={Trash2} label="Excluir" tone="danger" onClick={() => remove(item)} />
+                    {/* O do livro se desfaz em Em caixa, que devolve a posição junto. */}
+                    {item.source !== "ledger" && (
+                      <IconButton icon={Trash2} label="Excluir" tone="danger" onClick={() => remove(item)} />
+                    )}
                   </td>
                 </tr>
               ))}

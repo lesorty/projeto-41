@@ -96,6 +96,46 @@ export type PositionMovement = PositionMovementRow & {
   transferStatus: string | null;
 };
 
+/**
+ * Aportes e resgates que passaram pelo livro: transferência de investimento
+ * entre uma conta e a conta-ponte, em reais. Movimento entre posições não
+ * passa pela ponte e fica de fora.
+ */
+function ledgerContributions(raw: Database.Database) {
+  const rows = raw
+    .prepare(
+      `SELECT t.id AS transferId, fe.date,
+              CASE WHEN ta.kind = 'investment' THEN te.amount_cents
+                   ELSE -te.amount_cents END AS cents,
+              COALESCE(fe.description, te.description) AS notes,
+              CASE WHEN ta.kind = 'investment' THEN fa.name ELSE ta.name END AS accountName
+       FROM transfers t
+       JOIN entries fe ON fe.id = t.from_entry_id
+       JOIN entries te ON te.id = t.to_entry_id
+       JOIN accounts fa ON fa.id = fe.account_id
+       JOIN accounts ta ON ta.id = te.account_id
+       WHERE t.purpose = 'investment'
+         AND (fa.kind = 'investment') <> (ta.kind = 'investment')
+       ORDER BY fe.date, t.id`
+    )
+    .all() as {
+    transferId: number;
+    date: string;
+    cents: number;
+    notes: string | null;
+    accountName: string;
+  }[];
+  return rows.map((row) => ({
+    id: row.transferId,
+    date: row.date,
+    amount: row.cents / 100,
+    notes: row.notes ?? undefined,
+    source: "ledger" as const,
+    transferId: row.transferId,
+    accountName: row.accountName
+  }));
+}
+
 export function createDatabase(path: string) {
   const raw = new Database(path);
   raw.pragma("journal_mode = WAL");
@@ -327,7 +367,23 @@ export function createDatabase(path: string) {
             "UPDATE contributions SET date=@date, amount=@amount, notes=@notes WHERE id=@id"
           )
           .run({ notes: null, ...entry, id }).changes,
-      remove: (id: number) => raw.prepare("DELETE FROM contributions WHERE id=?").run(id).changes
+      remove: (id: number) => raw.prepare("DELETE FROM contributions WHERE id=?").run(id).changes,
+      fromLedger: () => ledgerContributions(raw),
+      /** Os digitados e os do livro, em ordem de data: é o que a tela e o rendimento usam. */
+      all: () =>
+        [
+          ...(
+            raw.prepare("SELECT id, date, amount, notes FROM contributions").all() as (Contribution & {
+              id: number;
+            })[]
+          ).map((row) => ({
+            ...row,
+            source: "manual" as const,
+            transferId: null,
+            accountName: null
+          })),
+          ...ledgerContributions(raw)
+        ].sort((a, b) => a.date.localeCompare(b.date))
     },
     prices: {
       list: () =>

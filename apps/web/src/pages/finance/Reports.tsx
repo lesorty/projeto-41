@@ -212,7 +212,7 @@ export function ReportsPage() {
                   legend
                   showValue
                   formatValue={moneyFromCents}
-                  height={220}
+                  height={200}
                   center={{ label: "Total", value: moneyFromCents(report.totalCents) }}
                 />
               )}
@@ -226,7 +226,7 @@ export function ReportsPage() {
                   legend
                   showValue
                   formatValue={moneyFromCents}
-                  height={220}
+                  height={200}
                   center={{ label: "Total", value: moneyFromCents(yearReport?.totalCents ?? 0) }}
                 />
               )}
