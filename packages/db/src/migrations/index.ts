@@ -8,6 +8,7 @@ import { migration007ImportRules } from "./007-import-rules.js";
 import { migration008BudgetShareDiscounts } from "./008-budget-share-discounts.js";
 import { migration009BrokerCash } from "./009-broker-cash.js";
 import { migration010PositionCash } from "./010-position-cash.js";
+import { migration011SimplerKinds } from "./011-simpler-kinds.js";
 import type { Migration } from "./runner.js";
 
 /**
@@ -24,7 +25,8 @@ export const migrations: Migration[] = [
   migration007ImportRules,
   migration008BudgetShareDiscounts,
   migration009BrokerCash,
-  migration010PositionCash
+  migration010PositionCash,
+  migration011SimplerKinds
 ];
 
 export * from "./runner.js";

@@ -14,7 +14,9 @@ import { Button } from "./ui.js";
 function useEscape(onClose: () => void) {
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      // Uma lista aberta dentro do drawer consome o Esc (e marca o evento):
+      // fechar a lista não pode fechar o formulário junto.
+      if (event.key === "Escape" && !event.defaultPrevented) onClose();
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);

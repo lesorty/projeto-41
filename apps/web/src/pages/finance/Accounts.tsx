@@ -3,6 +3,7 @@ import {
   ArchiveRestore,
   ArrowRight,
   Banknote,
+  CreditCard,
   Pencil,
   Plus,
   Save,
@@ -20,6 +21,7 @@ import type {
 } from "@projeto41/contracts";
 import { ColorDot, ColorPicker } from "../../components/ColorPicker.js";
 import { DateField } from "../../components/datepicker.js";
+import { Dropdown, MoneyInput, Toggle, formatMoneyInput } from "../../components/forms.js";
 import { Drawer, useConfirm } from "../../components/dialog.js";
 import {
   AnimatedNumber,
@@ -35,7 +37,7 @@ import {
 } from "../../components/ui.js";
 import { api } from "../../lib/api.js";
 import { centsToInput, debtFromCents, moneyFromCents } from "../../lib/format.js";
-import { ACCOUNT_KIND_LABEL } from "../../lib/ledger.js";
+import { ACCOUNT_KIND_LABEL, isCard } from "../../lib/ledger.js";
 import { parseCurrencyInput } from "@projeto41/finance";
 import { useToast } from "../../lib/toast.js";
 
@@ -51,12 +53,16 @@ import { useToast } from "../../lib/toast.js";
  * nunca soma lancamento). Nao existe "saldo previsto": ele ignorava a fatura
  * que ia sair da conta e prometia um numero que nao ia acontecer.
  *
- * Cartao de credito aparece com os campos de ciclo (fechamento, vencimento,
- * limite e conta de pagamento) e, na lista, com os **dois numeros** — fatura
- * atual e total devido — em vez do "saldo" de conta comum (6.1).
+ * Cartao de credito nao e uma conta: e o credito de uma conta do banco. Ele
+ * aparece dentro dela, com os **dois numeros** — fatura atual e total devido —
+ * em vez de saldo (6.1), e nasce pelo botao da propria conta. No livro ele
+ * continua sendo o lugar das compras no credito, porque cada fatura precisa
+ * do proprio ciclo.
+ *
+ * Caixinhas tem tela propria e nao aparecem aqui.
  */
 
-const KINDS: AccountKind[] = ["checking", "savings", "cash", "meal_voucher", "credit_card"];
+const KINDS: AccountKind[] = ["checking", "cash", "meal_voucher"];
 
 type Draft = Partial<AccountRecord> & { openingBalanceText?: string };
 
@@ -96,7 +102,7 @@ export function AccountsPage({ onOpenCash }: { onOpenCash?: () => void }) {
    */
   const groups = useMemo(() => {
     const accounts = (balances?.accounts ?? []).filter(
-      (account) => showArchived || !account.archived
+      (account) => account.kind !== "goal" && (showArchived || !account.archived)
     );
     const visiblePeople = people.filter((person) => showArchived || person.active);
     const byPerson: { key: string; person: PersonRecord | null; accounts: AccountRecord[] }[] =
@@ -114,7 +120,8 @@ export function AccountsPage({ onOpenCash }: { onOpenCash?: () => void }) {
   }, [balances, people, showArchived]);
 
   const archivedCount =
-    (balances?.accounts ?? []).filter((account) => account.archived).length +
+    (balances?.accounts ?? []).filter((account) => account.archived && account.kind !== "goal")
+      .length +
     people.filter((person) => !person.active).length;
 
   async function restoreAccount(account: AccountRecord) {
@@ -246,7 +253,12 @@ export function AccountsPage({ onOpenCash }: { onOpenCash?: () => void }) {
           <div className="fin-owners-bar">
             <span className="fin-muted">
               {activePeople.length} pessoa{activePeople.length === 1 ? "" : "s"} ·{" "}
-              {(balances?.accounts ?? []).filter((account) => !account.archived).length} contas ativas
+              {
+                (balances?.accounts ?? []).filter(
+                  (account) => !account.archived && account.kind !== "goal" && !isCard(account)
+                ).length
+              }{" "}
+              contas ativas
             </span>
             {archivedCount > 0 && (
               <label className="fin-check">
@@ -271,6 +283,17 @@ export function AccountsPage({ onOpenCash }: { onOpenCash?: () => void }) {
                 onRestorePerson={(person) => void restorePerson(person)}
                 onAddAccount={(personId) =>
                   setEditing({ color: "#4f8ff7", kind: "checking", personId })
+                }
+                onAddCard={(bank) =>
+                  setEditing({
+                    color: bank.color,
+                    kind: "credit_card",
+                    personId: bank.personId,
+                    paymentAccountId: bank.id,
+                    name: `${bank.name} Cartão`,
+                    closingDay: 1,
+                    dueDay: 10
+                  })
                 }
                 onEditAccount={setEditing}
                 onArchiveAccount={(account) => void archive(account)}
@@ -315,7 +338,11 @@ export function AccountsPage({ onOpenCash }: { onOpenCash?: () => void }) {
           initial={editing}
           people={people.filter((person) => person.active || person.id === editing.personId)}
           payableAccounts={(balances?.accounts ?? []).filter(
-            (account) => account.kind !== "credit_card"
+            (account) =>
+              !isCard(account) &&
+              account.kind !== "goal" &&
+              account.kind !== "investment" &&
+              (!account.archived || account.id === editing.paymentAccountId)
           )}
           onClose={() => setEditing(null)}
           onSaved={async () => {
@@ -374,6 +401,7 @@ function OwnerCard({
   onRemovePerson,
   onRestorePerson,
   onAddAccount,
+  onAddCard,
   onEditAccount,
   onArchiveAccount,
   onRestoreAccount
@@ -384,6 +412,7 @@ function OwnerCard({
   onRemovePerson: (person: PersonRecord) => void;
   onRestorePerson: (person: PersonRecord) => void;
   onAddAccount: (personId: number) => void;
+  onAddCard: (bank: AccountRecord) => void;
   onEditAccount: (account: AccountRecord) => void;
   onArchiveAccount: (account: AccountRecord) => void;
   onRestoreAccount: (account: AccountRecord) => void;
@@ -397,6 +426,23 @@ function OwnerCard({
         !account.archived && account.kind !== "credit_card" && account.includeInNetWorth
     )
     .reduce((total, account) => total + account.currentBalanceCents, 0);
+
+  // Cartão mora dentro da conta que paga a fatura. O que não tem conta (ou
+  // cuja conta é de outra pessoa) fica numa lista própria, para ser ligado.
+  const banks = accounts.filter((account) => !isCard(account));
+  const bankIds = new Set(banks.map((account) => account.id));
+  const cardsOf = (bank: AccountRecord) =>
+    accounts.filter((account) => isCard(account) && account.paymentAccountId === bank.id);
+  const looseCards = accounts.filter(
+    (account) => isCard(account) && (account.paymentAccountId == null || !bankIds.has(account.paymentAccountId))
+  );
+
+  const accountActions = (account: AccountRecord) =>
+    account.archived ? (
+      <IconButton icon={ArchiveRestore} label="Desarquivar" onClick={() => onRestoreAccount(account)} />
+    ) : (
+      <IconButton icon={Archive} label="Arquivar" onClick={() => onArchiveAccount(account)} />
+    );
 
   return (
     <Panel className={`fin-owner ${archivedPerson ? "archived" : ""}`}>
@@ -415,9 +461,9 @@ function OwnerCard({
             {archivedPerson && <Tag tone="warning">Arquivada</Tag>}
           </strong>
           <small>
-            {accounts.length === 0
+            {banks.length === 0
               ? "Nenhuma conta"
-              : `${accounts.length} conta${accounts.length === 1 ? "" : "s"} · ${moneyFromCents(balance)} em saldo`}
+              : `${banks.length} conta${banks.length === 1 ? "" : "s"} · ${moneyFromCents(balance)} em saldo`}
           </small>
         </div>
         {person && (
@@ -446,30 +492,97 @@ function OwnerCard({
         ) : null
       ) : (
         <ul className="fin-owner-accounts">
-          {accounts.map((account) => (
-            <li key={account.id} className={account.archived ? "archived" : ""}>
-              <button type="button" className="fin-owner-account" onClick={() => onEditAccount(account)}>
-                <ColorDot color={account.color} />
-                <span className="fin-owner-account-name">
-                  <strong>{account.name}</strong>
-                  <small>
-                    {ACCOUNT_KIND_LABEL[account.kind] ?? account.kind}
-                    {account.institution && ` · ${account.institution}`}
-                    {account.archived && " · arquivada"}
-                  </small>
-                </span>
-                <AccountFigure account={account} />
-              </button>
-              {account.archived ? (
-                <IconButton icon={ArchiveRestore} label="Desarquivar" onClick={() => onRestoreAccount(account)} />
-              ) : (
-                <IconButton icon={Archive} label="Arquivar" onClick={() => onArchiveAccount(account)} />
-              )}
+          {banks.map((account) => {
+            const cards = cardsOf(account);
+            return (
+              <li key={account.id} className={`fin-bank ${account.archived ? "archived" : ""}`}>
+                <div className="fin-bank-row">
+                  <button type="button" className="fin-owner-account" onClick={() => onEditAccount(account)}>
+                    <ColorDot color={account.color} />
+                    <span className="fin-owner-account-name">
+                      <strong>{account.name}</strong>
+                      <small>
+                        {ACCOUNT_KIND_LABEL[account.kind] ?? account.kind}
+                        {account.institution && ` · ${account.institution}`}
+                        {account.archived && " · arquivada"}
+                      </small>
+                    </span>
+                    <AccountFigure account={account} />
+                  </button>
+                  {!account.archived && account.kind !== "investment" && (
+                    <IconButton
+                      icon={CreditCard}
+                      label={`Novo cartão em ${account.name}`}
+                      onClick={() => onAddCard(account)}
+                    />
+                  )}
+                  {accountActions(account)}
+                </div>
+                {cards.length > 0 && (
+                  <ul className="fin-bank-cards">
+                    {cards.map((card) => (
+                      <CardRow
+                        key={card.id}
+                        card={card}
+                        onEdit={() => onEditAccount(card)}
+                        actions={accountActions(card)}
+                      />
+                    ))}
+                  </ul>
+                )}
+              </li>
+            );
+          })}
+          {looseCards.length > 0 && (
+            <li className="fin-bank">
+              <small className="fin-muted fin-loose-title">
+                Cartões sem conta ligada — edite para escolher a conta que paga a fatura
+              </small>
+              <ul className="fin-bank-cards">
+                {looseCards.map((card) => (
+                  <CardRow
+                    key={card.id}
+                    card={card}
+                    onEdit={() => onEditAccount(card)}
+                    actions={accountActions(card)}
+                  />
+                ))}
+              </ul>
             </li>
-          ))}
+          )}
         </ul>
       )}
     </Panel>
+  );
+}
+
+/** Um cartão dentro da conta: nome, ciclo e quanto do limite já foi usado. */
+function CardRow({
+  card,
+  onEdit,
+  actions
+}: {
+  card: AccountRecord;
+  onEdit: () => void;
+  actions: React.ReactNode;
+}) {
+  return (
+    <li className={card.archived ? "archived" : ""}>
+      <button type="button" className="fin-owner-account fin-card-row" onClick={onEdit}>
+        <span className="fin-card-icon" style={{ color: card.color }} aria-hidden>
+          <CreditCard size={16} />
+        </span>
+        <span className="fin-owner-account-name">
+          <strong>{card.name}</strong>
+          <small>
+            fecha dia {card.closingDay} · vence dia {card.dueDay}
+            {card.archived && " · arquivado"}
+          </small>
+        </span>
+        <AccountFigure account={card} />
+      </button>
+      {actions}
+    </li>
   );
 }
 
@@ -576,8 +689,9 @@ function AccountDrawer({
   const [personId, setPersonId] = useState<number | null>(initial.personId ?? people[0]?.id ?? null);
   const [institution, setInstitution] = useState(initial.institution ?? "");
   const [color, setColor] = useState(initial.color ?? "#4f8ff7");
+  // Com sinal: saldo inicial de conta no vermelho é negativo mesmo.
   const [openingBalance, setOpeningBalance] = useState(
-    centsToInput(initial.openingBalanceCents ?? 0)
+    initial.openingBalanceCents ? formatMoneyInput(initial.openingBalanceCents) : ""
   );
   const [openingDate, setOpeningDate] = useState(initial.openingDate ?? "");
   const [includeInNetWorth, setIncludeInNetWorth] = useState(initial.includeInNetWorth ?? true);
@@ -588,7 +702,7 @@ function AccountDrawer({
     initial.paymentAccountId ?? null
   );
   const [saving, setSaving] = useState(false);
-  const isCard = kind === "credit_card";
+  const cardMode = kind === "credit_card";
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -600,14 +714,20 @@ function AccountDrawer({
     setSaving(true);
     try {
       const limitCents = creditLimit.trim() === "" ? null : parseCurrencyInput(creditLimit);
-      if (isCard && creditLimit.trim() !== "" && limitCents == null) {
+      if (cardMode && creditLimit.trim() !== "" && limitCents == null) {
         toast.notify("Limite inválido", "error");
         return;
       }
+      if (cardMode && paymentAccountId == null) {
+        toast.notify("Escolha a conta que paga a fatura", "error");
+        return;
+      }
+      const bank = payableAccounts.find((account) => account.id === paymentAccountId);
       const body = {
         name,
         kind,
-        personId,
+        // O cartão é da mesma pessoa da conta que paga a fatura.
+        personId: cardMode ? (bank?.personId ?? personId) : personId,
         institution: institution || null,
         color,
         openingBalanceCents: cents,
@@ -615,10 +735,10 @@ function AccountDrawer({
         includeInNetWorth,
         // Sem ciclo não existe fatura, então o contrato exige os dois dias em
         // cartão; o resto das contas manda nulo.
-        closingDay: isCard ? Number(closingDay) || null : null,
-        dueDay: isCard ? Number(dueDay) || null : null,
-        creditLimitCents: isCard ? limitCents : null,
-        paymentAccountId: isCard ? paymentAccountId : null,
+        closingDay: cardMode ? Number(closingDay) || null : null,
+        dueDay: cardMode ? Number(dueDay) || null : null,
+        creditLimitCents: cardMode ? limitCents : null,
+        paymentAccountId: cardMode ? paymentAccountId : null,
         // O que o formulário não mostra vai como estava: o contrato completa
         // o ausente com o padrão, e o padrão apagaria ordem, ícone e arquivo.
         icon: initial.icon ?? null,
@@ -641,8 +761,12 @@ function AccountDrawer({
 
   return (
     <Drawer
-      title={initial.id ? "Editar conta" : "Nova conta"}
-      subtitle="Vale-refeição fica fora do saldo bancário (D11)"
+      title={cardMode ? (initial.id ? "Editar cartão" : "Novo cartão") : initial.id ? "Editar conta" : "Nova conta"}
+      subtitle={
+        cardMode
+          ? "O cartão é o crédito de uma conta: a fatura sai dela"
+          : "Vale-refeição fica fora do saldo bancário (D11)"
+      }
       onClose={onClose}
       footer={
         <>
@@ -662,55 +786,26 @@ function AccountDrawer({
             onChange={(event) => setName(event.target.value)}
             autoFocus
             required
-            placeholder="Ex.: Nubank"
+            placeholder={cardMode ? "Ex.: Nubank Roxinho" : "Ex.: Nubank"}
           />
         </Field>
-        <div className="field-row">
-          <Field label="Pessoa">
-            <select
-              value={personId ?? ""}
-              onChange={(event) => setPersonId(event.target.value ? Number(event.target.value) : null)}
-            >
-              <option value="">Sem pessoa</option>
-              {people.map((person) => (
-                <option key={person.id} value={person.id}>
-                  {person.name}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Tipo">
-            <select value={kind} onChange={(event) => setKind(event.target.value as AccountKind)}>
-              {KINDS.map((option) => (
-                <option key={option} value={option}>
-                  {ACCOUNT_KIND_LABEL[option]}
-                </option>
-              ))}
-            </select>
-          </Field>
-        </div>
-        <Field label="Instituição" hint="Opcional">
-          <input
-            value={institution}
-            onChange={(event) => setInstitution(event.target.value)}
-            placeholder="Ex.: Nu Pagamentos"
-          />
-        </Field>
-        <div className="field-row">
-          <Field label="Saldo inicial" hint="O ponto de partida do histórico (D18)">
-            <input
-              value={openingBalance}
-              onChange={(event) => setOpeningBalance(event.target.value)}
-              inputMode="decimal"
-              placeholder="0,00"
-            />
-          </Field>
-          <Field label="Data inicial">
-            <DateField value={openingDate} onChange={setOpeningDate} />
-          </Field>
-        </div>
-        {isCard && (
+
+        {cardMode ? (
           <>
+            <Field label="Conta que paga a fatura">
+              <Dropdown<number>
+                value={paymentAccountId}
+                onChange={setPaymentAccountId}
+                options={payableAccounts.map((account) => ({
+                  value: account.id,
+                  label: account.name,
+                  color: account.color,
+                  hint: account.personName ?? undefined
+                }))}
+                placeholder="Escolher conta"
+                aria-label="Conta que paga a fatura"
+              />
+            </Field>
             <div className="field-row">
               <Field label="Dia do fechamento" hint="1 a 31">
                 <input
@@ -733,43 +828,69 @@ function AccountDrawer({
                 />
               </Field>
             </div>
+            <Field label="Limite" hint="Opcional">
+              <MoneyInput value={creditLimit} onChange={setCreditLimit} placeholder="Sem limite" />
+            </Field>
+          </>
+        ) : (
+          <>
             <div className="field-row">
-              <Field label="Limite" hint="Opcional">
-                <input
-                  value={creditLimit}
-                  onChange={(event) => setCreditLimit(event.target.value)}
-                  inputMode="decimal"
-                  placeholder="Sem limite"
+              <Field label="Pessoa">
+                <Dropdown<number>
+                  value={personId}
+                  onChange={setPersonId}
+                  emptyLabel="Sem pessoa"
+                  options={people.map((person) => ({
+                    value: person.id,
+                    label: person.name,
+                    color: person.color
+                  }))}
+                  aria-label="Pessoa"
                 />
               </Field>
-              <Field label="Conta de pagamento" hint="Pré-selecionada ao pagar a fatura">
-                <select
-                  value={paymentAccountId ?? ""}
-                  onChange={(event) =>
-                    setPaymentAccountId(event.target.value ? Number(event.target.value) : null)
-                  }
-                >
-                  <option value="">Escolher na hora</option>
-                  {payableAccounts.map((account) => (
-                    <option key={account.id} value={account.id}>
-                      {account.name}
-                    </option>
-                  ))}
-                </select>
+              <Field label="Tipo">
+                <Dropdown<AccountKind>
+                  value={kind}
+                  onChange={(next) => next && setKind(next)}
+                  options={(KINDS.includes(kind) ? KINDS : [kind, ...KINDS]).map((option) => ({
+                    value: option,
+                    label: ACCOUNT_KIND_LABEL[option] ?? option
+                  }))}
+                  aria-label="Tipo"
+                />
+              </Field>
+            </div>
+            <Field label="Instituição" hint="Opcional">
+              <input
+                value={institution}
+                onChange={(event) => setInstitution(event.target.value)}
+                placeholder="Ex.: Nu Pagamentos"
+              />
+            </Field>
+            <div className="field-row">
+              <Field label="Saldo inicial" hint="O ponto de partida do histórico (D18)">
+                <MoneyInput value={openingBalance} onChange={setOpeningBalance} allowNegative />
+              </Field>
+              <Field label="Data inicial">
+                <DateField value={openingDate} onChange={setOpeningDate} />
               </Field>
             </div>
           </>
         )}
 
         <ColorPicker value={color} onChange={setColor} />
-        <label className="fin-check">
-          <input
-            type="checkbox"
+        {!cardMode && (
+          <Toggle
             checked={includeInNetWorth}
-            onChange={(event) => setIncludeInNetWorth(event.target.checked)}
+            onChange={setIncludeInNetWorth}
+            label="Somar ao patrimônio"
+            hint={
+              includeInNetWorth
+                ? "O saldo desta conta entra no patrimônio e no saldo do painel."
+                : "A conta aparece aqui, mas o saldo fica fora do patrimônio."
+            }
           />
-          <span>Somar ao patrimônio</span>
-        </label>
+        )}
       </form>
     </Drawer>
   );

@@ -180,6 +180,15 @@ describe("fatura derivada", () => {
       ?.isFuture).toBe(true);
   });
 
+  it("não pula meses sem compra entre a primeira e a última fatura", () => {
+    // Uma compra antiga e a fatura corrente: os meses do meio aparecem zerados,
+    // para as setas da tela andarem mês a mês.
+    cardExpense("2026-02-10", 5000);
+    const statements = ledger.statements.list(card, { asOf: TODAY });
+    expect(statements.map((s) => s.month)).toEqual(["2026-02", "2026-03", "2026-04", "2026-05"]);
+    expect(statements.find((s) => s.month === "2026-03")?.totalCents).toBe(0);
+  });
+
   it("a fatura corrente aparece mesmo vazia", () => {
     expect(ledger.statements.list(card, { asOf: TODAY }).map((s) => s.month)).toEqual(["2026-05"]);
   });

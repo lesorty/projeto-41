@@ -159,7 +159,8 @@ export const attachmentThumbUrl = (id: number) => `/api/attachments/${id}/thumb`
 
 export const ACCOUNT_KIND_LABEL: Record<string, string> = {
   checking: "Conta corrente",
-  savings: "Poupança",
+  // Só para contas antigas que ainda não passaram pela migração 011.
+  savings: "Conta corrente",
   cash: "Dinheiro",
   meal_voucher: "Vale-refeição",
   credit_card: "Cartão de crédito",
@@ -173,11 +174,21 @@ export const STATUS_LABEL: Record<string, string> = {
   reconciled: "Conciliado"
 };
 
+/** Pix e débito viraram dinheiro (migração 011): à vista ou crédito. */
 export const PAYMENT_METHOD_LABEL: Record<string, string> = {
   cash: "Dinheiro",
-  debit: "Débito",
-  pix: "Pix",
   credit: "Crédito",
   voucher: "Vale",
   other: "Outro"
 };
+
+/**
+ * Onde o dinheiro de fato mora: conta corrente, dinheiro vivo e vale. Cartão
+ * não é conta (é crédito de uma conta), caixinha tem tela própria e a ponte
+ * dos investimentos só se move por aporte.
+ */
+export function isMoneyAccount(account: Pick<AccountRecord, "kind">): boolean {
+  return account.kind !== "credit_card" && account.kind !== "goal" && account.kind !== "investment";
+}
+
+export const isCard = (account: Pick<AccountRecord, "kind">) => account.kind === "credit_card";

@@ -1,24 +1,29 @@
-import { Save, Trash2, Undo2 } from "lucide-react";
+import { CreditCard, Save, Trash2, Undo2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   AttachmentRecord,
   SeriesScope,
   EntryRecord,
   EntryStatus,
-  PaymentMethod,
   PlaceRecord
 } from "@projeto41/contracts";
 import { parseCurrencyInput } from "@projeto41/finance";
 import { DateField } from "../datepicker.js";
 import { Drawer, useConfirm } from "../dialog.js";
 import { Button, Field, Segmented } from "../ui.js";
-import { ColorDot } from "../ColorPicker.js";
-import { InstallmentFields } from "./InstallmentFields.js";
+import { Dropdown, MoneyInput, type DropdownOption } from "../forms.js";
+import { InstallmentFields, purchaseTotal, type AmountBasis } from "./InstallmentFields.js";
 import { PhotoField } from "./PhotoField.js";
 import { RefundDrawer } from "./RefundDrawer.js";
 import { SeriesScopeDialog } from "./SeriesScopeDialog.js";
 import { centsToInput, todayIso } from "../../lib/format.js";
-import { PAYMENT_METHOD_LABEL, STATUS_LABEL, ledgerApi } from "../../lib/ledger.js";
+import {
+  ACCOUNT_KIND_LABEL,
+  STATUS_LABEL,
+  isCard as isCardAccount,
+  isMoneyAccount,
+  ledgerApi
+} from "../../lib/ledger.js";
 import type { LedgerReference } from "../../lib/ledger.js";
 import { api } from "../../lib/api.js";
 import { useToast } from "../../lib/toast.js";
@@ -26,10 +31,12 @@ import { useToast } from "../../lib/toast.js";
 /** Tipos oferecidos no formulário. `adjustment` é interno, não se cria à mão. */
 type FormKind = "expense" | "income" | "transfer";
 
+/** À vista sai de uma conta; crédito vai para a fatura de um cartão. */
+type PayWith = "money" | "credit";
+
 /** Caixinha e investimento têm fluxo próprio: não são a conta padrão de um gasto. */
 const everydayAccount = (reference: LedgerReference) =>
-  reference.accounts.find((account) => account.kind !== "goal" && account.kind !== "investment") ??
-  reference.accounts[0];
+  reference.accounts.find(isMoneyAccount) ?? reference.accounts[0];
 
 export function EntryDrawer({
   entry,
@@ -61,11 +68,24 @@ export function EntryDrawer({
   );
   const [amount, setAmount] = useState(entry ? centsToInput(entry.amountCents) : "");
   const [date, setDate] = useState(entry?.date ?? todayIso());
-  const [accountId, setAccountId] = useState<number | null>(
-    entry?.accountId ?? everydayAccount(reference)?.id ?? null
+  const entryAccount = reference.accounts.find((item) => item.id === entry?.accountId);
+  const [payWith, setPayWith] = useState<PayWith>(
+    entryAccount && isCardAccount(entryAccount) ? "credit" : "money"
+  );
+  // Conta e cartão guardados à parte: trocar de Dinheiro para Crédito e voltar
+  // não perde nenhuma das duas escolhas.
+  const [moneyAccountId, setMoneyAccountId] = useState<number | null>(
+    entryAccount && isCardAccount(entryAccount)
+      ? (entryAccount.paymentAccountId ?? everydayAccount(reference)?.id ?? null)
+      : (entry?.accountId ?? everydayAccount(reference)?.id ?? null)
+  );
+  const [cardId, setCardId] = useState<number | null>(
+    entryAccount && isCardAccount(entryAccount)
+      ? entryAccount.id
+      : (reference.accounts.find(isCardAccount)?.id ?? null)
   );
   const [toAccountId, setToAccountId] = useState<number | null>(
-    entry?.counterpartAccountId ?? reference.accounts[1]?.id ?? null
+    entry?.counterpartAccountId ?? reference.accounts.filter(isMoneyAccount)[1]?.id ?? null
   );
   const [categoryId, setCategoryId] = useState<number | null>(entry?.categoryId ?? null);
   const [personId, setPersonId] = useState<number | null>(entry?.personId ?? null);
@@ -73,17 +93,16 @@ export function EntryDrawer({
   const [placeName, setPlaceName] = useState(entry?.placeName ?? "");
   const [placeId, setPlaceId] = useState<number | null>(entry?.placeId ?? null);
   const [status, setStatus] = useState<EntryStatus>(entry?.status ?? "cleared");
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | "">(
-    entry?.paymentMethod ?? ""
-  );
   const [tagIds, setTagIds] = useState<number[]>(entry?.tags.map((tag) => tag.id) ?? []);
-  const [notes, setNotes] = useState(entry?.notes ?? "");
+  // Observações saíram do formulário; as que já existem continuam gravadas.
+  const notes = entry?.notes ?? "";
   const [attachments, setAttachments] = useState<AttachmentRecord[]>(entry?.attachments ?? []);
   const [pendingPhoto, setPendingPhoto] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [installmentMode, setInstallmentMode] = useState<"single" | "installments">("single");
   const [installmentCount, setInstallmentCount] = useState(2);
+  const [amountBasis, setAmountBasis] = useState<AmountBasis>("total");
   const [refunding, setRefunding] = useState(false);
   const [scopeAsk, setScopeAsk] = useState(false);
 
@@ -91,7 +110,7 @@ export function EntryDrawer({
   // apontando para eles. Sem a opção atual, o select mostraria outra coisa — e
   // salvar trocaria a categoria (ou a conta) sem ninguém pedir.
   const categories = useMemo(() => {
-    const options: { id: number; name: string }[] = reference.categories.filter(
+    const options: { id: number; name: string; color?: string }[] = reference.categories.filter(
       (category) => category.kind === kind
     );
     if (
@@ -104,13 +123,57 @@ export function EntryDrawer({
     return options;
   }, [reference.categories, kind, entry]);
 
+  /** Contas de dinheiro (e, na transferência, caixinhas): nunca cartão. */
   const accountOptions = useMemo(() => {
-    const options: { id: number; name: string }[] = [...reference.accounts];
-    if (entry && !options.some((account) => account.id === entry.accountId)) {
-      options.push({ id: entry.accountId, name: `${entry.accountName ?? "Conta"} (arquivada)` });
+    const options: DropdownOption<number>[] = reference.accounts
+      .filter((account) => isMoneyAccount(account) || (kind === "transfer" && account.kind === "goal"))
+      .map((account) => ({
+        value: account.id,
+        label: account.name,
+        color: account.color,
+        hint: [account.personName, ACCOUNT_KIND_LABEL[account.kind]].filter(Boolean).join(" · ")
+      }));
+    const current = payWith === "money" || kind !== "expense" ? entry?.accountId : undefined;
+    if (current != null && !options.some((option) => option.value === current)) {
+      options.push({ value: current, label: `${entry?.accountName ?? "Conta"} (arquivada)` });
     }
     return options;
-  }, [reference.accounts, entry]);
+  }, [reference.accounts, entry, kind, payWith]);
+
+  const cardOptions = useMemo(() => {
+    const options: DropdownOption<number>[] = reference.accounts.filter(isCardAccount).map((card) => {
+      const bank = reference.accounts.find((account) => account.id === card.paymentAccountId);
+      return {
+        value: card.id,
+        label: card.name,
+        color: card.color,
+        icon: <CreditCard size={14} aria-hidden />,
+        hint: [bank?.name ?? card.personName, `fecha dia ${card.closingDay} · vence dia ${card.dueDay}`]
+          .filter(Boolean)
+          .join(" · ")
+      };
+    });
+    if (payWith === "credit" && entry && !options.some((option) => option.value === entry.accountId)) {
+      options.push({ value: entry.accountId, label: `${entry.accountName ?? "Cartão"} (arquivado)` });
+    }
+    return options;
+  }, [reference.accounts, entry, payWith]);
+
+  // O drawer pode abrir antes dos cadastros chegarem: quando chegam, conta e
+  // cartão ainda vazios ganham o padrão.
+  useEffect(() => {
+    if (moneyAccountId == null) {
+      const fallback = everydayAccount(reference);
+      if (fallback) setMoneyAccountId(fallback.id);
+    }
+    if (cardId == null) {
+      const firstCard = reference.accounts.find(isCardAccount);
+      if (firstCard) setCardId(firstCard.id);
+    }
+  }, [reference, moneyAccountId, cardId]);
+
+  // O que o lançamento usa de fato: a conta, ou o cartão quando é no crédito.
+  const accountId = kind === "expense" && payWith === "credit" ? cardId : moneyAccountId;
 
   const peopleOptions = useMemo(
     () => reference.people.filter((person) => person.active || person.id === entry?.personId),
@@ -128,6 +191,11 @@ export function EntryDrawer({
   const account = reference.accounts.find((item) => item.id === accountId);
   const effectivePersonId = personId ?? account?.personId ?? null;
   const isCard = account?.kind === "credit_card";
+  const typedCents = Math.abs(parseCurrencyInput(amount) ?? 0);
+  const totalCents =
+    installmentMode === "installments"
+      ? purchaseTotal(typedCents, amountBasis, installmentCount)
+      : typedCents;
   const inSeries = entry?.installmentPlanId != null;
   const seriesCount = entry?.installmentCount ?? 0;
   const seriesNumber = entry?.installmentNumber ?? 0;
@@ -165,7 +233,10 @@ export function EntryDrawer({
       return;
     }
     if (accountId == null) {
-      toast.notify("Escolha uma conta", "error");
+      toast.notify(
+        kind === "expense" && payWith === "credit" ? "Escolha o cartão" : "Escolha uma conta",
+        "error"
+      );
       return;
     }
 
@@ -216,7 +287,7 @@ export function EntryDrawer({
           body: JSON.stringify({
             accountId,
             purchaseDate: date,
-            totalCents: Math.abs(cents),
+            totalCents,
             installmentCount,
             categoryId,
             placeId: await resolvePlace(),
@@ -243,7 +314,14 @@ export function EntryDrawer({
           placeId: resolvedPlaceId,
           description: description || null,
           notes: notes || null,
-          paymentMethod: paymentMethod || null,
+          paymentMethod:
+            kind !== "expense"
+              ? (entry?.paymentMethod ?? null)
+              : isCard
+                ? "credit"
+                : account?.kind === "meal_voucher"
+                  ? "voucher"
+                  : "cash",
           tagIds
         };
         if (editing && entry) {
@@ -340,95 +418,118 @@ export function EntryDrawer({
           />
         )}
 
-        <div className="field-row">
-          <Field label="Valor">
-            <input
-              value={amount}
-              onChange={(event) => setAmount(event.target.value)}
-              inputMode="decimal"
-              autoFocus
-              required
-              placeholder="0,00"
-            />
+        <div className="field-row entry-amount-row">
+          <Field label={kind === "expense" && installmentMode === "installments" && amountBasis === "installment" ? "Valor da parcela" : "Valor"}>
+            <MoneyInput value={amount} onChange={setAmount} autoFocus required />
           </Field>
-          <Field label="Data">
+          <Field label={isCard && installmentMode === "installments" ? "Data da compra" : "Data"}>
             <DateField value={date} onChange={setDate} />
           </Field>
         </div>
 
-        <div className="field-row">
-          <Field
-            label={
-              kind !== "transfer" ? "Conta" : incomingLeg ? "Conta de destino" : "Conta de origem"
-            }
-          >
-            <select
-              value={accountId ?? ""}
-              onChange={(event) => setAccountId(Number(event.target.value))}
-              disabled={isTransfer}
-            >
-              {accountOptions.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
-                </option>
-              ))}
-            </select>
+        {kind === "expense" && !isRefund && (
+          <Field label="Forma de pagamento">
+            <Segmented<PayWith>
+              value={payWith}
+              onChange={(next) => {
+                if (inSeries) return;
+                setPayWith(next);
+                if (next === "money") setInstallmentMode("single");
+              }}
+              options={[
+                { value: "money", label: "Dinheiro" },
+                { value: "credit", label: "Crédito" }
+              ]}
+            />
           </Field>
+        )}
 
-          {kind === "transfer" ? (
-            <Field label={incomingLeg ? "Conta de origem" : "Conta de destino"}>
-              <select
-                value={toAccountId ?? ""}
-                onChange={(event) => setToAccountId(Number(event.target.value))}
-                disabled={editing}
-              >
-                {/* Origem e destino iguais não é transferência. */}
-                {(editing
-                  ? accountOptions
-                  : reference.accounts.filter((item) => item.id !== accountId)
-                ).map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name}
-                  </option>
-                ))}
-              </select>
-            </Field>
+        {kind === "expense" && payWith === "credit" && !isRefund ? (
+          cardOptions.length === 0 ? (
+            <p className="fin-callout">
+              Nenhum cartão cadastrado. Crie o cartão dentro da conta do banco, em Contas e pessoas.
+            </p>
           ) : (
-            /* Transferência nunca tem categoria (D21). */
-            <Field label="Categoria">
-              <select
-                value={categoryId ?? ""}
-                onChange={(event) =>
-                  setCategoryId(event.target.value ? Number(event.target.value) : null)
-                }
-              >
-                <option value="">Sem categoria</option>
-                {categories.map((category) => (
-                  <option key={category.id} value={category.id}>
-                    {category.name}
-                  </option>
-                ))}
-              </select>
+            <>
+              <Field label="Cartão">
+                <Dropdown<number>
+                  value={cardId}
+                  onChange={setCardId}
+                  options={cardOptions}
+                  placeholder="Escolher cartão"
+                  disabled={inSeries}
+                  aria-label="Cartão"
+                />
+              </Field>
+              {/* Parcelar é na criação; na edição só se vê o plano que já existe. */}
+              {(!editing || inSeries) && (
+              <InstallmentFields
+                mode={inSeries ? "installments" : installmentMode}
+                onModeChange={setInstallmentMode}
+                installmentCount={inSeries ? seriesCount : installmentCount}
+                onCountChange={setInstallmentCount}
+                basis={amountBasis}
+                onBasisChange={editing ? undefined : setAmountBasis}
+                totalCents={inSeries ? (entry?.amountCents ?? 0) * -seriesCount : totalCents}
+                purchaseDate={date}
+                closingDay={account?.closingDay ?? 1}
+                dueDay={account?.dueDay ?? 10}
+                readOnly={inSeries}
+              />
+              )}
+            </>
+          )
+        ) : (
+          <div className={kind === "transfer" ? "field-row" : ""}>
+            <Field
+              label={
+                kind !== "transfer" ? "Conta" : incomingLeg ? "Conta de destino" : "Conta de origem"
+              }
+            >
+              <Dropdown<number>
+                value={moneyAccountId}
+                onChange={setMoneyAccountId}
+                options={accountOptions}
+                placeholder="Escolher conta"
+                disabled={isTransfer}
+                aria-label="Conta"
+              />
             </Field>
-          )}
-        </div>
+            {kind === "transfer" && (
+              <Field label={incomingLeg ? "Conta de origem" : "Conta de destino"}>
+                <Dropdown<number>
+                  value={toAccountId}
+                  onChange={setToAccountId}
+                  // Origem e destino iguais não é transferência.
+                  options={
+                    editing
+                      ? accountOptions
+                      : accountOptions.filter((option) => option.value !== moneyAccountId)
+                  }
+                  placeholder="Escolher conta"
+                  disabled={editing}
+                  aria-label="Conta de destino"
+                />
+              </Field>
+            )}
+          </div>
+        )}
 
-        {isCard && kind === "expense" && !isRefund && (
-          <InstallmentFields
-            mode={inSeries ? "installments" : installmentMode}
-            onModeChange={setInstallmentMode}
-            installmentCount={inSeries ? seriesCount : installmentCount}
-            onCountChange={setInstallmentCount}
-            totalCents={
-              inSeries
-                ? (entry?.amountCents ?? 0) * -seriesCount
-                : Math.abs(parseCurrencyInput(amount) ?? 0)
-            }
-            purchaseDate={date}
-            closingDay={account?.closingDay ?? 1}
-            dueDay={account?.dueDay ?? 10}
-            readOnly={inSeries}
-          />
+        {/* Transferência nunca tem categoria (D21). */}
+        {kind !== "transfer" && (
+          <Field label="Categoria">
+            <Dropdown<number>
+              value={categoryId}
+              onChange={setCategoryId}
+              emptyLabel="Sem categoria"
+              options={categories.map((category) => ({
+                value: category.id,
+                label: category.name,
+                color: category.color ?? null
+              }))}
+              aria-label="Categoria"
+            />
+          </Field>
         )}
 
         <Field label="Descrição" hint="Opcional">
@@ -455,61 +556,48 @@ export function EntryDrawer({
         )}
 
         <div className="field-row">
-          <Field label="Pessoa" hint="Herdada da conta">
-            <select
-              value={effectivePersonId ?? ""}
-              onChange={(event) =>
-                setPersonId(event.target.value ? Number(event.target.value) : null)
-              }
-            >
-              <option value="">Sem pessoa</option>
-              {peopleOptions.map((person) => (
-                <option key={person.id} value={person.id}>
-                  {person.name}
-                </option>
-              ))}
-            </select>
+          <Field label="Quem pagou" hint="Herdado da conta">
+            <Dropdown<number>
+              value={effectivePersonId}
+              onChange={setPersonId}
+              emptyLabel="Sem pessoa"
+              options={peopleOptions.map((person) => ({
+                value: person.id,
+                label: person.name,
+                color: person.color
+              }))}
+              aria-label="Quem pagou"
+            />
           </Field>
           <Field label="Status">
-            <select
+            <Dropdown<EntryStatus>
               value={status}
-              onChange={(event) => setStatus(event.target.value as EntryStatus)}
-            >
-              {Object.entries(STATUS_LABEL).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
+              onChange={(next) => setStatus(next ?? "cleared")}
+              options={Object.entries(STATUS_LABEL).map(([value, label]) => ({
+                value: value as EntryStatus,
+                label
+              }))}
+              aria-label="Status"
+            />
           </Field>
         </div>
 
-        {kind !== "transfer" && (
-          <Field label="Forma de pagamento" hint="Opcional">
-            <select
-              value={paymentMethod}
-              onChange={(event) => setPaymentMethod(event.target.value as PaymentMethod | "")}
-            >
-              <option value="">Não informada</option>
-              {Object.entries(PAYMENT_METHOD_LABEL).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
+        {reference.tags.length > 0 && (
+          <Field label="Etiquetas" hint="Opcional">
+            <Dropdown<number>
+              multiple
+              value={tagIds}
+              onChange={setTagIds}
+              placeholder="Nenhuma etiqueta"
+              options={reference.tags.map((tag) => ({
+                value: tag.id,
+                label: tag.name,
+                color: tag.color
+              }))}
+              aria-label="Etiquetas"
+            />
           </Field>
         )}
-
-        <TagPicker reference={reference} value={tagIds} onChange={setTagIds} />
-
-        <Field label="Observações" hint="Opcional">
-          <textarea
-            value={notes}
-            rows={2}
-            onChange={(event) => setNotes(event.target.value)}
-            placeholder="Detalhes que não cabem na descrição"
-          />
-        </Field>
 
         <PhotoField
           attachments={attachments}
@@ -599,41 +687,5 @@ function PlaceAutocomplete({
         ))}
       </datalist>
     </Field>
-  );
-}
-
-function TagPicker({
-  reference,
-  value,
-  onChange
-}: {
-  reference: LedgerReference;
-  value: number[];
-  onChange: (next: number[]) => void;
-}) {
-  if (reference.tags.length === 0) return null;
-  return (
-    <div className="field">
-      <span className="field-label">Etiquetas</span>
-      <div className="fin-tag-picker">
-        {reference.tags.map((tag) => {
-          const active = value.includes(tag.id);
-          return (
-            <button
-              key={tag.id}
-              type="button"
-              className={active ? "active" : ""}
-              style={active ? { borderColor: tag.color } : undefined}
-              onClick={() =>
-                onChange(active ? value.filter((id) => id !== tag.id) : [...value, tag.id])
-              }
-            >
-              <ColorDot color={tag.color} size={8} />
-              {tag.name}
-            </button>
-          );
-        })}
-      </div>
-    </div>
   );
 }

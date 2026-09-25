@@ -37,7 +37,7 @@ beforeEach(async () => {
   savings = (
     await post("/api/ledger/accounts", {
       name: "Poupanca",
-      kind: "savings",
+      kind: "cash",
       color: "#00a86b",
       personId: steylor
     })

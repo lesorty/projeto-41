@@ -1,10 +1,21 @@
+import { Minus, Plus } from "lucide-react";
 import { useMemo } from "react";
 import { installmentDates, splitCents, statementMonthFor } from "@projeto41/finance";
-import { Field, Segmented } from "../ui.js";
+import { Segmented } from "../ui.js";
 import { ledgerDate, monthLabel, moneyFromCents } from "../../lib/format.js";
 
+const QUICK_COUNTS = [2, 3, 4, 6, 10, 12];
+
+/** O valor digitado no formulário é o total da compra ou o de cada parcela. */
+export type AmountBasis = "total" | "installment";
+
+/** Total da compra a partir do valor digitado e da base escolhida. */
+export function purchaseTotal(typedCents: number, basis: AmountBasis, count: number): number {
+  return basis === "installment" ? typedCents * count : typedCents;
+}
+
 /**
- * Campos de parcelamento, exibidos no drawer quando a conta é cartão.
+ * Parcelamento de uma compra no crédito.
  *
  * A prévia usa o **mesmo** `splitCents` de `packages/finance` que o servidor —
  * uma divisão escrita à mão aqui divergiria do que é gravado, e o usuário veria
@@ -15,6 +26,8 @@ export function InstallmentFields({
   onModeChange,
   installmentCount,
   onCountChange,
+  basis = "total",
+  onBasisChange,
   totalCents,
   purchaseDate,
   closingDay,
@@ -25,6 +38,9 @@ export function InstallmentFields({
   onModeChange: (mode: "single" | "installments") => void;
   installmentCount: number;
   onCountChange: (count: number) => void;
+  basis?: AmountBasis;
+  onBasisChange?: (basis: AmountBasis) => void;
+  /** Total da compra, já resolvido pela base. */
   totalCents: number | null;
   purchaseDate: string;
   closingDay: number;
@@ -33,9 +49,10 @@ export function InstallmentFields({
   readOnly?: boolean;
 }) {
   const preview = useMemo(() => {
-    if (mode !== "installments" || totalCents == null || totalCents <= 0) return [];
-    const amounts = splitCents(totalCents, installmentCount);
-    const dates = installmentDates(purchaseDate, installmentCount);
+    if (totalCents == null || totalCents <= 0) return [];
+    const count = mode === "installments" ? installmentCount : 1;
+    const amounts = splitCents(totalCents, count);
+    const dates = installmentDates(purchaseDate, count);
     return amounts.map((amountCents, index) => ({
       number: index + 1,
       amountCents,
@@ -62,8 +79,11 @@ export function InstallmentFields({
     );
   }
 
+  const first = preview[0];
+  const setCount = (next: number) => onCountChange(Math.min(120, Math.max(2, next)));
+
   return (
-    <div className="stack">
+    <div className="installment-box">
       <Segmented<"single" | "installments">
         value={mode}
         onChange={onModeChange}
@@ -75,38 +95,100 @@ export function InstallmentFields({
 
       {mode === "installments" && (
         <>
-          <Field label="Número de parcelas">
-            <input
-              type="number"
-              min={2}
-              max={120}
-              value={installmentCount}
-              onChange={(event) => onCountChange(Math.max(1, Number(event.target.value) || 1))}
-            />
-          </Field>
-
-          {preview.length > 0 && (
-            <div className="fin-installment-preview">
-              <span className="field-label">Prévia das parcelas</span>
-              <ul>
-                {preview.map((item) => (
-                  <li key={item.number}>
-                    <span>
-                      {item.number}/{installmentCount} · {ledgerDate(item.date)}
-                    </span>
-                    <span className="fin-list-meta">
-                      <small className="fin-muted">{monthLabel(item.statementMonth)}</small>
-                      <strong>{moneyFromCents(item.amountCents)}</strong>
-                    </span>
-                  </li>
+          <div className="installment-count">
+            <span className="field-label">Parcelas</span>
+            <div className="installment-count-row">
+              <div className="installment-stepper">
+                <button
+                  type="button"
+                  aria-label="Menos uma parcela"
+                  onClick={() => setCount(installmentCount - 1)}
+                >
+                  <Minus size={14} />
+                </button>
+                <input
+                  type="number"
+                  min={2}
+                  max={120}
+                  value={installmentCount}
+                  aria-label="Número de parcelas"
+                  onChange={(event) => setCount(Number(event.target.value) || 2)}
+                />
+                <button
+                  type="button"
+                  aria-label="Mais uma parcela"
+                  onClick={() => setCount(installmentCount + 1)}
+                >
+                  <Plus size={14} />
+                </button>
+              </div>
+              <div className="installment-quick">
+                {QUICK_COUNTS.map((count) => (
+                  <button
+                    key={count}
+                    type="button"
+                    className={count === installmentCount ? "active" : ""}
+                    onClick={() => setCount(count)}
+                  >
+                    {count}×
+                  </button>
                 ))}
-              </ul>
-              <small className="fin-muted">
-                O resto dos centavos vai todo para a primeira parcela.
-              </small>
+              </div>
+            </div>
+          </div>
+
+          {onBasisChange && (
+            <div className="installment-basis">
+              <span className="field-label">O valor digitado é</span>
+              <Segmented<AmountBasis>
+                value={basis}
+                onChange={onBasisChange}
+                options={[
+                  { value: "total", label: "O total da compra" },
+                  { value: "installment", label: "O de cada parcela" }
+                ]}
+              />
             </div>
           )}
         </>
+      )}
+
+      {first && (
+        <p className="installment-summary">
+          {mode === "installments" ? (
+            <>
+              <strong>
+                {installmentCount}× de {moneyFromCents(preview[preview.length - 1]!.amountCents)}
+              </strong>{" "}
+              · total {moneyFromCents(totalCents ?? 0)} · primeira parcela na fatura de{" "}
+              {monthLabel(first.statementMonth)}
+            </>
+          ) : (
+            <>
+              Entra na fatura de <strong>{monthLabel(first.statementMonth)}</strong>
+            </>
+          )}
+        </p>
+      )}
+
+      {mode === "installments" && preview.length > 1 && (
+        <div className="fin-installment-preview">
+          <span className="field-label">Prévia das parcelas</span>
+          <ul>
+            {preview.map((item) => (
+              <li key={item.number}>
+                <span>
+                  {item.number}/{installmentCount} · {ledgerDate(item.date)}
+                </span>
+                <span className="fin-list-meta">
+                  <small className="fin-muted">{monthLabel(item.statementMonth)}</small>
+                  <strong>{moneyFromCents(item.amountCents)}</strong>
+                </span>
+              </li>
+            ))}
+          </ul>
+          <small className="fin-muted">O resto dos centavos vai todo para a primeira parcela.</small>
+        </div>
       )}
     </div>
   );

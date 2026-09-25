@@ -5,37 +5,29 @@ import { DateField } from "../datepicker.js";
 import { Field, SearchInput, Segmented } from "../ui.js";
 import type { LedgerReference } from "../../lib/ledger.js";
 import { STATUS_LABEL } from "../../lib/ledger.js";
-import { monthNames } from "../../lib/format.js";
+import {
+  PeriodStepper,
+  monthPeriod,
+  periodLabel,
+  shiftPeriod,
+  yearPeriod,
+  type SelectedPeriod
+} from "./PeriodPicker.js";
 
 export type LedgerFilter = Partial<EntryFilter>;
 
 type KindOption = "all" | "expense" | "income" | "transfer";
 
-/** Atalhos de período: cobre 95% dos cliques sem abrir o seletor de data. */
-function periodShortcuts(today = new Date()) {
-  const year = today.getFullYear();
-  const month = today.getMonth();
-  const iso = (date: Date) =>
-    `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
-      date.getDate()
-    ).padStart(2, "0")}`;
-
-  return [
-    {
-      id: "current",
-      label: monthNames[month] ?? "Mês atual",
-      from: iso(new Date(year, month, 1)),
-      to: iso(new Date(year, month + 1, 0))
-    },
-    {
-      id: "previous",
-      label: monthNames[(month + 11) % 12] ?? "Mês passado",
-      from: iso(new Date(year, month - 1, 1)),
-      to: iso(new Date(year, month, 0))
-    },
-    { id: "year", label: String(year), from: `${year}-01-01`, to: `${year}-12-31` },
-    { id: "all", label: "Tudo", from: undefined, to: undefined }
-  ];
+/** O filtro de datas lido como período: um mês inteiro, um ano inteiro, tudo ou outro. */
+function periodOf(filter: LedgerFilter): SelectedPeriod | "all" | null {
+  if (!filter.from && !filter.to) return "all";
+  if (!filter.from || !filter.to) return null;
+  const anchor = new Date(`${filter.from}T12:00:00`);
+  const month = monthPeriod(0, anchor);
+  if (month.from === filter.from && month.to === filter.to) return month;
+  const year = yearPeriod(anchor);
+  if (year.from === filter.from && year.to === filter.to) return year;
+  return null;
 }
 
 export function EntryFilters({
@@ -54,34 +46,63 @@ export function EntryFilters({
   // aplicado mostra "nenhum resultado" numa busca que tem resultados.
   const patch = (next: LedgerFilter) => onChange({ ...filter, ...next, page: 1 });
 
-  const shortcuts = periodShortcuts();
+  const period = periodOf(filter);
   const chips = buildChips(filter, reference);
   // Os filtros finos ficam recolhidos: período, tipo e busca resolvem quase
   // tudo, e nove selects abertos empurravam a lista para fora da tela.
   const refined = chips.filter((chip) => chip.key !== "search").length;
   // Um intervalo que não é atalho (vindo do Painel, por exemplo) só se vê nas
   // datas: nesse caso os filtros já abrem.
-  const customPeriod = !shortcuts.some(
-    (shortcut) => shortcut.from === filter.from && shortcut.to === filter.to
-  );
-  const [open, setOpen] = useState(customPeriod);
+  const [open, setOpen] = useState(period == null);
+  const today = monthPeriod(0);
+  const mode = period === "all" ? "all" : period == null ? "custom" : period.mode;
+  const setPeriod = (next: SelectedPeriod | "all") =>
+    patch(next === "all" ? { from: undefined, to: undefined } : { from: next.from, to: next.to });
 
   return (
     <div className="fin-filters">
       <div className="fin-filter-row">
-        <div className="fin-shortcuts" role="group" aria-label="Período">
-          {shortcuts.map((shortcut) => (
-            <button
-              key={shortcut.id}
-              type="button"
-              className={
-                filter.from === shortcut.from && filter.to === shortcut.to ? "active" : ""
+        <div className="fin-period-row">
+          {period && period !== "all" ? (
+            <PeriodStepper
+              label={periodLabel(period)}
+              onPrevious={() => setPeriod(shiftPeriod(period, -1))}
+              onNext={() => setPeriod(shiftPeriod(period, 1))}
+              onToday={() => setPeriod(period.mode === "year" ? yearPeriod() : today)}
+              isToday={
+                period.mode === "year"
+                  ? period.year === new Date().getFullYear()
+                  : period.period === today.period
               }
-              onClick={() => patch({ from: shortcut.from, to: shortcut.to })}
-            >
-              {shortcut.label}
-            </button>
-          ))}
+            />
+          ) : (
+            <span className="period-custom-label">
+              {period === "all" ? "Todo o histórico" : `${filter.from ?? "…"} a ${filter.to ?? "…"}`}
+            </span>
+          )}
+          <div className="period-modes" role="group" aria-label="Tamanho do período">
+            {(
+              [
+                ["month", "Mês"],
+                ["year", "Ano"],
+                ["all", "Tudo"]
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                className={mode === value ? "active" : ""}
+                onClick={() => {
+                  const anchor = filter.from ? new Date(`${filter.from}T12:00:00`) : new Date();
+                  if (value === "month") setPeriod(monthPeriod(0, anchor));
+                  else if (value === "year") setPeriod(yearPeriod(anchor));
+                  else setPeriod("all");
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
         {!lockedKind && (
           <Segmented<KindOption>

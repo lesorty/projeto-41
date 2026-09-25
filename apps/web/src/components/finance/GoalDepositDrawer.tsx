@@ -9,6 +9,7 @@ import { AccountSelect } from "./AccountSelect.js";
 import { api } from "../../lib/api.js";
 import { moneyFromCents, todayIso } from "../../lib/format.js";
 import { useToast } from "../../lib/toast.js";
+import { MoneyInput } from "../forms.js";
 
 type Direction = "deposit" | "withdraw";
 
@@ -96,10 +97,9 @@ export function GoalDepositDrawer({
 
         <div className="field-row">
           <Field label="Valor">
-            <input
+            <MoneyInput
               value={amount}
-              onChange={(event) => setAmount(event.target.value)}
-              inputMode="decimal"
+              onChange={setAmount}
               autoFocus
               required
               placeholder="0,00"

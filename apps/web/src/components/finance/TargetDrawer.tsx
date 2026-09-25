@@ -7,6 +7,7 @@ import { Button, Field, Segmented } from "../ui.js";
 import { api } from "../../lib/api.js";
 import { centsToInput, moneyFromCents } from "../../lib/format.js";
 import { useToast } from "../../lib/toast.js";
+import { MoneyInput } from "../forms.js";
 
 /** Campo monetário opcional: vazio significa "não definido", não zero. */
 function optionalCents(text: string): number | null | "invalid" {
@@ -120,10 +121,9 @@ export function TargetDrawer({
             label="Teto de gasto do período"
             hint="Vazio usa a soma dos orçamentos de categoria."
           >
-            <input
+            <MoneyInput
               value={totalTarget}
-              onChange={(event) => setTotalTarget(event.target.value)}
-              inputMode="decimal"
+              onChange={setTotalTarget}
               placeholder="Soma dos orçamentos"
             />
           </Field>
@@ -132,18 +132,16 @@ export function TargetDrawer({
         {splitMode === "pooled" && (
           <div className="field-row">
             <Field label="Renda do bolo" hint="Vazio soma a renda de todos.">
-              <input
+              <MoneyInput
                 value={pooledIncome}
-                onChange={(event) => setPooledIncome(event.target.value)}
-                inputMode="decimal"
+                onChange={setPooledIncome}
                 placeholder="0,00"
               />
             </Field>
             <Field label="Teto dos gastos conjuntos">
-              <input
+              <MoneyInput
                 value={jointTarget}
-                onChange={(event) => setJointTarget(event.target.value)}
-                inputMode="decimal"
+                onChange={setJointTarget}
                 placeholder="0,00"
               />
             </Field>
@@ -152,10 +150,9 @@ export function TargetDrawer({
 
         {splitMode === "income_proportional" && (
           <Field label="Teto dos gastos conjuntos" hint="Reservado antes de repartir o restante.">
-            <input
+            <MoneyInput
               value={jointTarget}
-              onChange={(event) => setJointTarget(event.target.value)}
-              inputMode="decimal"
+              onChange={setJointTarget}
               placeholder="Sem teto conjunto"
             />
           </Field>

@@ -44,7 +44,7 @@ beforeEach(async () => {
   });
   savings = db.ledger.accounts.create({
     name: "Caixinha",
-    kind: "savings",
+    kind: "cash",
     color: "#00a86b",
     personId: steylor
   });

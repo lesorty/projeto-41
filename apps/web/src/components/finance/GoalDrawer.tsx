@@ -10,6 +10,7 @@ import { AccountSelect } from "./AccountSelect.js";
 import { api } from "../../lib/api.js";
 import { centsToInput } from "../../lib/format.js";
 import { useToast } from "../../lib/toast.js";
+import { MoneyInput } from "../forms.js";
 
 export function GoalDrawer({
   goal,
@@ -133,10 +134,9 @@ export function GoalDrawer({
 
         <div className="field-row">
           <Field label="Valor-alvo" hint="Opcional">
-            <input
+            <MoneyInput
               value={targetAmount}
-              onChange={(event) => setTargetAmount(event.target.value)}
-              inputMode="decimal"
+              onChange={setTargetAmount}
               placeholder="Sem alvo"
             />
           </Field>

@@ -124,6 +124,12 @@ export function createStatementsRepository(db: Db) {
     if (range?.from && range?.to) {
       for (const month of statementMonthsBetween(range.from, range.to)) months.add(month);
     }
+    // Sem buracos entre a primeira e a última: a navegação anda mês a mês, e
+    // um mês sem compra ainda é uma fatura (zerada) que se quer poder ver.
+    const sorted = [...months].sort();
+    for (const month of statementMonthsBetween(sorted[0]!, sorted[sorted.length - 1]!)) {
+      months.add(month);
+    }
     return { cycle, current, months: [...months].sort() };
   }
 

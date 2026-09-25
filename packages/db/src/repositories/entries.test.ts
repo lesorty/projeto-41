@@ -32,7 +32,7 @@ beforeEach(() => {
   });
   savings = ledger.accounts.create({
     name: "Poupanca",
-    kind: "savings",
+    kind: "cash",
     color: "#00a86b",
     personId: steylor,
     openingBalanceCents: 0,
@@ -362,7 +362,7 @@ describe("contas em uso e arquivadas", () => {
       })
     ).toThrow(/nao vira cartao/);
     // Mudar entre tipos que nao sao cartao continua livre.
-    expect(ledger.accounts.update(checking, { ...account, kind: "savings" })).toBe(1);
+    expect(ledger.accounts.update(checking, { ...account, kind: "cash" })).toBe(1);
   });
 });
 

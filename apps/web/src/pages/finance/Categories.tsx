@@ -17,6 +17,7 @@ import {
 import { api } from "../../lib/api.js";
 import { centsToInput, moneyFromCents } from "../../lib/format.js";
 import { useToast } from "../../lib/toast.js";
+import { MoneyInput } from "../../components/forms.js";
 
 /**
  * Categorias planas, saidas e entradas lado a lado (D05).
@@ -323,10 +324,9 @@ function CategoryDrawer({
         </Field>
         {mode === "absolute" && (
           <Field label="Valor por mês">
-            <input
+            <MoneyInput
               value={budget}
-              onChange={(event) => setBudget(event.target.value)}
-              inputMode="decimal"
+              onChange={setBudget}
               placeholder="0,00"
               required
             />

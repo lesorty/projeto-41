@@ -1,8 +1,7 @@
 import {
-  ArrowDownRight,
   ArrowLeftRight,
-  ArrowUpRight,
   CheckCheck,
+  CreditCard,
   Paperclip,
   PiggyBank,
   Receipt,
@@ -12,8 +11,7 @@ import { useMemo, useState } from "react";
 import type { EntryRecord } from "@projeto41/contracts";
 import { Modal } from "../dialog.js";
 import { Empty } from "../ui.js";
-import { ColorDot } from "../ColorPicker.js";
-import { InstallmentBadge } from "./InstallmentBadge.js";
+import { InstallmentBadge, installmentOf } from "./InstallmentBadge.js";
 import { moneyFromCents, signedMoneyFromCents, todayIso } from "../../lib/format.js";
 import { attachmentThumbUrl, attachmentUrl } from "../../lib/ledger.js";
 
@@ -61,52 +59,79 @@ function groupByDay(rows: EntryRecord[]): DayGroup[] {
   return groups;
 }
 
-function dayLabel(date: string, today = todayIso()) {
+/** "Quinta-feira" e "24 de setembro", separados para o cabeçalho do dia. */
+function dayParts(date: string, today = todayIso()) {
   const value = new Date(`${date}T12:00:00`);
   const yesterday = new Date(`${today}T12:00:00`);
   yesterday.setDate(yesterday.getDate() - 1);
   const sameYear = value.getFullYear() === new Date(`${today}T12:00:00`).getFullYear();
-  const long = value.toLocaleDateString("pt-BR", {
-    weekday: "long",
-    day: "numeric",
+  const weekday = value.toLocaleDateString("pt-BR", { weekday: "long" });
+  const rest = value.toLocaleDateString("pt-BR", {
     month: "long",
     ...(sameYear ? {} : { year: "numeric" })
   });
-  const label = long.charAt(0).toUpperCase() + long.slice(1);
-  if (date === today) return `Hoje · ${long}`;
-  if (date === todayIso(yesterday)) return `Ontem · ${long}`;
-  return label;
+  const relative = date === today ? "Hoje" : date === todayIso(yesterday) ? "Ontem" : null;
+  return {
+    day: String(value.getDate()).padStart(2, "0"),
+    weekday: weekday.charAt(0).toUpperCase() + weekday.slice(1),
+    month: rest,
+    relative
+  };
 }
 
 /**
- * O ícone diz o tipo de movimento antes de qualquer texto. Gasto com categoria
- * leva a inicial dela na cor dela: uma seta verde num gasto parecia entrada.
+ * A categoria abre a linha, com nome e cor: é a primeira coisa que se quer
+ * saber de um gasto. O que não tem categoria diz o que é — transferência,
+ * estorno, caixinha — no mesmo lugar, para a coluna nunca ficar vazia.
  */
-function EntryIcon({ entry }: { entry: EntryRecord }) {
-  if (entry.kind === "expense" && entry.refundOfEntryId == null && entry.categoryName) {
+function CategoryPill({ entry }: { entry: EntryRecord }) {
+  const special =
+    entry.refundOfEntryId != null
+      ? { icon: Undo2, label: "Estorno" }
+      : entry.goalId != null
+        ? { icon: PiggyBank, label: "Caixinha" }
+        : entry.kind === "transfer"
+          ? { icon: ArrowLeftRight, label: "Transferência" }
+          : null;
+  if (special && !entry.categoryName) {
+    const Icon = special.icon;
     return (
-      <span
-        className="fin-entry-icon letter"
-        style={{ "--entry-color": entry.categoryColor ?? undefined } as React.CSSProperties}
-        aria-hidden
-      >
-        {entry.categoryName.charAt(0).toUpperCase()}
+      <span className={`fin-cat-pill neutral ${entry.kind}`}>
+        <Icon size={13} aria-hidden />
+        <span>{special.label}</span>
       </span>
     );
   }
-  const Icon =
-    entry.refundOfEntryId != null
-      ? Undo2
-      : entry.goalId != null
-        ? PiggyBank
-        : entry.kind === "transfer"
-          ? ArrowLeftRight
-          : entry.amountCents < 0
-            ? ArrowDownRight
-            : ArrowUpRight;
+  if (!entry.categoryName) {
+    return (
+      <span className="fin-cat-pill empty">
+        <span>{entry.kind === "income" ? "Entrada" : entry.kind === "adjustment" ? "Ajuste" : "Sem categoria"}</span>
+      </span>
+    );
+  }
   return (
-    <span className={`fin-entry-icon ${entry.kind}`} aria-hidden>
-      <Icon size={16} />
+    <span
+      className="fin-cat-pill"
+      style={{ "--cat-color": entry.categoryColor ?? "#8b949e" } as React.CSSProperties}
+      title={entry.categoryName}
+    >
+      <i aria-hidden />
+      <span>{entry.categoryName}</span>
+    </span>
+  );
+}
+
+/** Quem pagou, com a cor da pessoa: numa casa com duas pessoas, é metade da pergunta. */
+function Payer({ entry }: { entry: EntryRecord }) {
+  if (!entry.personName) return <span className="fin-payer none">—</span>;
+  return (
+    <span
+      className="fin-payer"
+      style={{ "--payer-color": entry.personColor ?? "#8b949e" } as React.CSSProperties}
+      title={`Pago por ${entry.personName}`}
+    >
+      <b aria-hidden>{entry.personName.charAt(0).toUpperCase()}</b>
+      <span>{entry.personName}</span>
     </span>
   );
 }
@@ -138,17 +163,7 @@ export function EntryTable({
       <div className="fin-feed">
         {groups.map((group) => (
           <section className="fin-day" key={group.date}>
-            <header className="fin-day-head">
-              <strong>{dayLabel(group.date)}</strong>
-              {group.netCents !== 0 && (
-                <span
-                  className={group.netCents < 0 ? "fin-negative" : "fin-positive"}
-                  title="Entradas menos saídas do dia, sem transferências"
-                >
-                  {signedMoneyFromCents(group.netCents)}
-                </span>
-              )}
-            </header>
+            <DayHeader group={group} />
             <ul>
               {group.rows.map((entry) => (
                 <EntryRow
@@ -173,6 +188,37 @@ export function EntryTable({
   );
 }
 
+function DayHeader({ group }: { group: DayGroup }) {
+  const parts = dayParts(group.date);
+  return (
+    <header className="fin-day-head">
+      <span className="fin-day-date">
+        <span className="fin-day-number">{parts.day}</span>
+        <span className="fin-day-text">
+          <strong>
+            {parts.relative ? `${parts.relative} · ` : ""}
+            {parts.weekday}
+          </strong>
+          <small>{parts.month}</small>
+        </span>
+      </span>
+      <span className="fin-day-side">
+        <small>
+          {group.rows.length} lançamento{group.rows.length === 1 ? "" : "s"}
+        </small>
+        {group.netCents !== 0 && (
+          <strong
+            className={group.netCents < 0 ? "fin-negative" : "fin-positive"}
+            title="Entradas menos saídas do dia, sem transferências"
+          >
+            {signedMoneyFromCents(group.netCents)}
+          </strong>
+        )}
+      </span>
+    </header>
+  );
+}
+
 function EntryRow({
   entry,
   merged,
@@ -187,19 +233,10 @@ function EntryRow({
 }) {
   const isTransfer = entry.kind === "transfer";
   const attachment = entry.attachments[0];
-  const title =
-    entry.description ?? entry.placeName ?? entry.categoryName ?? (isTransfer ? "Transferência" : "Sem descrição");
+  const title = entry.description ?? entry.placeName ?? (isTransfer ? "Transferência" : "Sem descrição");
 
-  // A linha de detalhe responde "de onde, para onde e de quem" sem abrir nada.
+  // A linha de detalhe responde "onde e de que conta" sem abrir nada.
   const meta: React.ReactNode[] = [];
-  if (entry.categoryName) {
-    meta.push(
-      <span key="category" className="fin-inline">
-        <ColorDot color={entry.categoryColor ?? "#8b949e"} size={8} />
-        {entry.categoryName}
-      </span>
-    );
-  }
   if (entry.placeName && entry.description) meta.push(<span key="place">{entry.placeName}</span>);
   if (isTransfer && entry.counterpartAccountName) {
     meta.push(
@@ -210,12 +247,47 @@ function EntryRow({
       </span>
     );
   } else {
-    meta.push(<span key="account">{entry.accountName}</span>);
+    meta.push(
+      <span key="account" className="fin-inline">
+        {entry.accountKind === "credit_card" && <CreditCard size={11} aria-hidden />}
+        {entry.accountName}
+      </span>
+    );
   }
-  if (entry.personName) meta.push(<span key="person">{entry.personName}</span>);
 
   return (
     <li className={`fin-entry ${entry.status === "pending" ? "pending" : ""}`}>
+      <CategoryPill entry={entry} />
+
+      <button type="button" className="fin-entry-main" onClick={() => onSelect(entry)}>
+        <span className="fin-entry-title">
+          <span className="fin-entry-name">{title}</span>
+          <InstallmentBadge entry={entry} long />
+          {entry.goalId != null && entry.goalName && (
+            // Movimento de caixinha continua sendo transferência: não vira
+            // receita nem despesa em relatório nenhum (D21).
+            <em
+              className="fin-goal-chip"
+              style={{ borderColor: entry.goalColor ?? undefined }}
+              title={`Caixinha ${entry.goalName}`}
+            >
+              <PiggyBank size={11} aria-hidden />
+              {entry.goalName}
+            </em>
+          )}
+          {entry.tags
+            .filter((tag) => !(tag.name === "Parcela" && installmentOf(entry)))
+            .map((tag) => (
+            <em key={tag.id} className="fin-tag-chip" style={{ borderColor: tag.color }}>
+              {tag.name}
+            </em>
+          ))}
+        </span>
+        <span className="fin-entry-meta">{meta}</span>
+      </button>
+
+      <Payer entry={entry} />
+
       {attachment ? (
         <button
           type="button"
@@ -224,42 +296,16 @@ function EntryRow({
           aria-label="Ver comprovante"
         >
           <img src={attachmentThumbUrl(attachment.id)} alt="" loading="lazy" />
-        </button>
-      ) : (
-        <EntryIcon entry={entry} />
-      )}
-
-      <button type="button" className="fin-entry-main" onClick={() => onSelect(entry)}>
-        <span className="fin-entry-title">
-          <span className="fin-entry-name">{title}</span>
-          <InstallmentBadge entry={entry} />
-          {entry.refundOfEntryId != null && <em className="fin-refund-tag">estorno</em>}
-          {entry.goalId != null && (
-            // Movimento de caixinha continua sendo transferência: não vira
-            // receita nem despesa em relatório nenhum (D21).
-            <em
-              className="fin-goal-chip"
-              style={{ borderColor: entry.goalColor ?? undefined }}
-              title={`Caixinha ${entry.goalName ?? ""}`}
-            >
-              <PiggyBank size={11} aria-hidden />
-              {entry.goalName}
-            </em>
-          )}
-          {entry.tags.map((tag) => (
-            <em key={tag.id} className="fin-tag-chip" style={{ borderColor: tag.color }}>
-              {tag.name}
-            </em>
-          ))}
           {entry.attachments.length > 1 && (
             <span className="fin-clip" title={`${entry.attachments.length} anexos`}>
-              <Paperclip size={12} />
+              <Paperclip size={10} />
               {entry.attachments.length}
             </span>
           )}
-        </span>
-        <span className="fin-entry-meta">{meta}</span>
-      </button>
+        </button>
+      ) : (
+        <span className="fin-thumb-spacer" aria-hidden />
+      )}
 
       <span className="fin-entry-side">
         <strong

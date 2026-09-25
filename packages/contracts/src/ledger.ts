@@ -5,7 +5,6 @@ import { z } from "zod";
 export const personKindSchema = z.enum(["individual", "joint"]);
 export const accountKindSchema = z.enum([
   "checking",
-  "savings",
   "cash",
   "meal_voucher",
   "credit_card",
@@ -15,7 +14,8 @@ export const accountKindSchema = z.enum([
 export const categoryKindSchema = z.enum(["income", "expense"]);
 export const entryKindSchema = z.enum(["expense", "income", "transfer", "adjustment"]);
 export const entryStatusSchema = z.enum(["pending", "cleared", "reconciled"]);
-export const paymentMethodSchema = z.enum(["cash", "debit", "pix", "credit", "voucher", "other"]);
+/** Pix e débito são dinheiro (migração 011): só à vista contra crédito importa. */
+export const paymentMethodSchema = z.enum(["cash", "credit", "voucher", "other"]);
 export const transferPurposeSchema = z.enum([
   "generic",
   "invoice_payment",

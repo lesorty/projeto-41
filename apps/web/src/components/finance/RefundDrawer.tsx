@@ -8,6 +8,7 @@ import { Button, Field } from "../ui.js";
 import { api } from "../../lib/api.js";
 import { centsToInput, moneyFromCents, todayIso } from "../../lib/format.js";
 import { useToast } from "../../lib/toast.js";
+import { MoneyInput } from "../forms.js";
 
 
 /**
@@ -99,10 +100,9 @@ export function RefundDrawer({
           </p>
         ) : (
           <Field label="Valor do estorno" hint={`Lançamento: ${moneyFromCents(entry.amountCents)}`}>
-            <input
+            <MoneyInput
               value={amount}
-              onChange={(event) => setAmount(event.target.value)}
-              inputMode="decimal"
+              onChange={setAmount}
               autoFocus
             />
           </Field>
