@@ -92,6 +92,9 @@ export function statementStatus(input: {
 }): StatementStatus {
   if (input.totalCents === 0 && input.hasPayment) return "paid";
   if (input.today <= input.closingDate) return "open";
+  // Sem saldo devedor não há o que vencer: a fatura vazia ou zerada por
+  // estorno fica fechada, não vencida.
+  if (input.totalCents <= 0) return "closed";
   if (input.today > input.dueDate) return "overdue";
   return "closed";
 }

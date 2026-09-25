@@ -3527,31 +3527,150 @@ main {
   background: var(--accent-soft);
 }
 
+/* Comparativo: a categoria e a variação em destaque, os valores embaixo, em
+   colunas para caber mais categorias na mesma tela. */
+.fin-comparison-total {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  padding: 4px 2px 14px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.fin-comparison-total span {
+  font-size: 1rem;
+  font-weight: 700;
+}
+.fin-comparison-total strong {
+  font-size: 1.5rem;
+  font-variant-numeric: tabular-nums;
+}
+.fin-comparison-total small {
+  font-variant-numeric: tabular-nums;
+}
+
 .fin-comparison {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  /* Até três colunas: mais que isso a linha fica curta demais para ler. */
+  grid-template-columns: repeat(auto-fill, minmax(max(220px, calc((100% - 16px) / 3)), 1fr));
+  gap: 8px;
+}
+
+.fin-comparison li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 2px 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2, transparent);
+}
+
+.fin-comparison-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fin-comparison li strong {
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.fin-comparison li small {
+  grid-column: 1 / -1;
+  font-size: 0.76rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Resumo do relatório: o total vem maior que o resto. */
+.fin-report-summary > div small {
+  font-size: 0.76rem;
+  font-variant-numeric: tabular-nums;
+}
+.fin-report-summary .fin-report-total strong {
+  font-size: 1.7rem;
+}
+
+/* Rosca com legenda ao lado: a rosca não carrega rótulo nenhum, então não há
+   o que se atropelar, por mais categorias que existam. */
+.donut-split {
+  container-type: inline-size;
+  display: grid;
+  grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: center;
+}
+.donut-split .donut {
+  margin-bottom: 0;
+}
+.donut-split .donut-center strong {
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.donut-legend {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
-
-.fin-comparison li {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 2px;
-  border-bottom: 1px solid var(--border);
-  font-size: 0.89rem;
+.donut-legend li {
+  display: grid;
+  grid-template-columns: 9px minmax(0, 1fr) auto auto;
+  column-gap: 10px;
+  align-items: center;
+  padding: 5px 2px;
+  border-top: 1px solid var(--border);
+  font-size: 0.83rem;
 }
-
-.fin-comparison li:last-child {
-  border-bottom: 0;
+.donut-legend li:first-child {
+  border-top: 0;
 }
-
-.fin-comparison small {
+.donut-legend i {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+}
+.donut-legend-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.donut-legend-pct {
+  color: var(--text-muted);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.donut-legend strong {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  text-align: right;
+  min-width: 84px;
+}
+
+@media (max-width: 520px) {
+  .donut-split {
+    grid-template-columns: 1fr;
+  }
+  .donut-split .donut {
+    max-width: 220px;
+    margin: 0 auto;
+    width: 100%;
+  }
 }
 
 /* --- Fase 3: cartão, fatura e parcelamento -------------------------------- */
@@ -3919,23 +4038,6 @@ main {
 }
 
 /* Total da rosca, logo abaixo dela. */
-.fin-donut-total {
-  display: flex;
-  align-items: baseline;
-  justify-content: center;
-  gap: 8px;
-  margin: 4px 0 0;
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
-  color: var(--text-muted);
-  font-size: 0.85rem;
-}
-.fin-donut-total strong {
-  color: var(--text);
-  font-size: 1.1rem;
-  font-variant-numeric: tabular-nums;
-}
-
 .fin-note {
   margin: 0;
   font-size: 0.8rem;

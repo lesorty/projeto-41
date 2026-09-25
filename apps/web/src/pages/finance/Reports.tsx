@@ -1,7 +1,7 @@
 import { Receipt } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CategoryReport, CategoryTrend } from "@projeto41/contracts";
-import { fromCents } from "@projeto41/finance";
+import { daysBetween, fromCents } from "@projeto41/finance";
 import { AreaTrend, Donut, DualAreaTrend } from "../../components/charts.js";
 import { CategoryTotalsTable, toneClass } from "../../components/finance/CategoryTotalsTable.js";
 import {
@@ -13,6 +13,7 @@ import {
 import { Empty, Panel, SectionHeading, Skeleton } from "../../components/ui.js";
 import { api } from "../../lib/api.js";
 import { moneyFromCents } from "../../lib/format.js";
+import { spendTone, variationText } from "../../lib/report-format.js";
 import { useToast } from "../../lib/toast.js";
 
 /** Consulta de relatório: mês-calendário usa `period`, recorte livre usa from/to. */
@@ -28,13 +29,57 @@ function reportQuery(period: SelectedPeriod, compare: boolean) {
   return `?${params.toString()}`;
 }
 
-/** O total da rosca logo abaixo dela: as fatias mostram a parte, aqui fica o todo. */
-function DonutTotal({ cents }: { cents: number }) {
+/** O total do período antes de qualquer detalhe: é a primeira pergunta. */
+function ReportSummary({ report }: { report: CategoryReport }) {
+  const comparison = report.comparison;
+  const base = comparison
+    ? comparison.partial && comparison.previousToDateCents != null
+      ? comparison.previousToDateCents
+      : comparison.previousCents
+    : null;
+  const days = comparison?.partial
+    ? comparison.daysElapsed
+    : daysBetween(report.range.from, report.range.to) + 1;
+  const budget = report.budgetTotalCents;
+
   return (
-    <p className="fin-donut-total">
-      <span>Total</span>
-      <strong>{moneyFromCents(cents)}</strong>
-    </p>
+    <Panel className="fin-flow-panel">
+      <div className="fin-flow fin-report-summary">
+        <div className="fin-report-total">
+          <span>Total gasto</span>
+          <strong>{moneyFromCents(report.totalCents)}</strong>
+        </div>
+        {base != null && (
+          <div>
+            <span>Contra o anterior</span>
+            <strong className={spendTone(report.totalCents, base)}>
+              {variationText(report.totalCents, base)}
+            </strong>
+            <small className="fin-muted">
+              {moneyFromCents(base)} {comparison?.partial ? "até o mesmo dia" : "antes"}
+            </small>
+          </div>
+        )}
+        {budget != null && budget > 0 && (
+          <div>
+            <span>Dos objetivos</span>
+            <strong className={report.totalCents > budget ? "fin-negative" : ""}>
+              {Math.round((report.totalCents / budget) * 100)}%
+            </strong>
+            <small className="fin-muted">de {moneyFromCents(budget)}</small>
+          </div>
+        )}
+        {days > 0 && (
+          <div>
+            <span>Média por dia</span>
+            <strong>{moneyFromCents(Math.round(report.totalCents / days))}</strong>
+            <small className="fin-muted">
+              {days} dia{days === 1 ? "" : "s"}
+            </small>
+          </div>
+        )}
+      </div>
+    </Panel>
   );
 }
 
@@ -129,6 +174,8 @@ export function ReportsPage() {
 
       {!loading && report && (
         <>
+          <ReportSummary report={report} />
+
           <Panel title="Totais por categoria" subtitle="Clique numa categoria para ver a tendência">
             <CategoryTotalsTable
               report={report}
@@ -160,25 +207,28 @@ export function ReportsPage() {
               {report.slices.length === 0 ? (
                 <Empty icon={Receipt} text="Nenhum gasto no período." />
               ) : (
-                <>
-                  <Donut data={toSlices(report)} showValue formatValue={moneyFromCents} height={320} />
-                  <DonutTotal cents={report.totalCents} />
-                </>
+                <Donut
+                  data={toSlices(report)}
+                  legend
+                  showValue
+                  formatValue={moneyFromCents}
+                  height={220}
+                  center={{ label: "Total", value: moneyFromCents(report.totalCents) }}
+                />
               )}
             </Panel>
             <Panel title="Composição do ano" subtitle={String(period.year ?? period.from.slice(0, 4))}>
               {(yearReport?.slices.length ?? 0) === 0 ? (
                 <Empty icon={Receipt} text="Nenhum gasto no ano." />
               ) : (
-                <>
-                  <Donut
-                    data={toSlices(yearReport)}
-                    showValue
-                    formatValue={moneyFromCents}
-                    height={320}
-                  />
-                  <DonutTotal cents={yearReport?.totalCents ?? 0} />
-                </>
+                <Donut
+                  data={toSlices(yearReport)}
+                  legend
+                  showValue
+                  formatValue={moneyFromCents}
+                  height={220}
+                  center={{ label: "Total", value: moneyFromCents(yearReport?.totalCents ?? 0) }}
+                />
               )}
             </Panel>
           </div>
@@ -203,10 +253,21 @@ export function ReportsPage() {
                   )}
                 </p>
               )}
+              <ComparisonTotal
+                currentCents={report.totalCents}
+                previousCents={
+                  comparison.partial && comparison.previousToDateCents != null
+                    ? comparison.previousToDateCents
+                    : comparison.previousCents
+                }
+              />
               <ul className="fin-comparison">
                 {comparison.rows.map((row) => (
-                  <li key={row.categoryId ?? row.name}>
-                    <span className={toneClass(row.tone)}>{row.label}</span>
+                  <li key={row.categoryId ?? row.name} title={row.label}>
+                    <span className="fin-comparison-name">{row.name}</span>
+                    <strong className={toneClass(row.tone)}>
+                      {variationText(row.currentCents, row.previousCents)}
+                    </strong>
                     <small className="fin-muted">
                       {moneyFromCents(row.previousCents)} → {moneyFromCents(row.currentCents)}
                     </small>
@@ -218,5 +279,19 @@ export function ReportsPage() {
         </>
       )}
     </>
+  );
+}
+
+function ComparisonTotal({ currentCents, previousCents }: { currentCents: number; previousCents: number }) {
+  return (
+    <div className="fin-comparison-total">
+      <span>Total</span>
+      <strong className={spendTone(currentCents, previousCents)}>
+        {variationText(currentCents, previousCents)}
+      </strong>
+      <small className="fin-muted">
+        {moneyFromCents(previousCents)} → {moneyFromCents(currentCents)}
+      </small>
+    </div>
   );
 }

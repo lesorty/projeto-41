@@ -195,13 +195,22 @@ export function Donut({
   data,
   height = 280,
   showValue = false,
-  formatValue = money
+  formatValue = money,
+  legend = false,
+  center
 }: {
   data: DonutDatum[];
   height?: number;
   showValue?: boolean;
   /** Obrigatorio quando os valores sao centavos: `money` os leria como reais. */
   formatValue?: (value: number) => string;
+  /**
+   * Legenda ao lado em vez de rótulos com linha-guia. Com muitas fatias os
+   * rótulos se atropelam; a legenda lista todas sem disputar espaço.
+   */
+  legend?: boolean;
+  /** Texto no furo da rosca, como o total. */
+  center?: { label: string; value: string };
 }) {
   const { colors } = useTheme();
   const layoutCache = useRef<{ key: string; map: Map<number, LabelSpot> }>({ key: "", map: new Map() });
@@ -300,19 +309,20 @@ export function Donut({
     );
   };
 
-  return (
+  const total = data.reduce((sum, item) => sum + item.value, 0) || 1;
+  const chart = (
     <div className="donut">
       <ResponsiveContainer width="100%" height={height}>
-        <PieChart margin={{ top: 14, right: 14, bottom: 14, left: 14 }}>
+        <PieChart margin={legend ? { top: 4, right: 4, bottom: 4, left: 4 } : { top: 14, right: 14, bottom: 14, left: 14 }}>
           <Pie
             data={data}
             dataKey="value"
-            innerRadius="36%"
-            outerRadius="54%"
-            paddingAngle={2.5}
-            cornerRadius={5}
+            innerRadius={legend ? "62%" : "36%"}
+            outerRadius={legend ? "96%" : "54%"}
+            paddingAngle={legend ? 1.5 : 2.5}
+            cornerRadius={legend ? 3 : 5}
             stroke="none"
-            label={renderLabel}
+            label={legend ? false : renderLabel}
             labelLine={false}
             isAnimationActive={false}
           >
@@ -332,6 +342,33 @@ export function Donut({
           />
         </PieChart>
       </ResponsiveContainer>
+      {center && (
+        <div className="donut-center">
+          <span>{center.label}</span>
+          <strong>{center.value}</strong>
+        </div>
+      )}
+    </div>
+  );
+  if (!legend) return chart;
+
+  return (
+    <div className="donut-split">
+      {chart}
+      <ul className="donut-legend">
+        {data.map((item, index) => (
+          <li key={item.key}>
+            <i style={{ background: sliceColor(item, index, colors.series) }} />
+            <span className="donut-legend-name" title={item.label}>
+              {item.label}
+            </span>
+            <span className="donut-legend-pct">
+              {item.percentLabel ?? `${((item.value / total) * 100).toFixed(1).replace(".", ",")}%`}
+            </span>
+            {showValue && <strong>{formatValue(item.value)}</strong>}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

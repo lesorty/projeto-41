@@ -208,10 +208,10 @@ describe("statementStatus", () => {
     expect(
       statementStatus({ ...base, today: "2026-05-21", totalCents: 0, hasPayment: true })
     ).toBe("paid");
-    // Fatura zerada por estorno nao esta paga, esta zerada.
+    // Fatura zerada por estorno nao esta paga, esta zerada: fechada, nunca vencida.
     expect(
       statementStatus({ ...base, today: "2026-05-21", totalCents: 0, hasPayment: false })
-    ).toBe("overdue");
+    ).toBe("closed");
   });
 });
 
