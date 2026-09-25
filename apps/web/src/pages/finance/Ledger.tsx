@@ -1,5 +1,5 @@
 import { Download, HardDriveDownload, Plus } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { EntryRecord } from "@projeto41/contracts";
 import { CategoryGoals } from "../../components/finance/CategoryGoals.js";
 import { EntryDrawer } from "../../components/finance/EntryDrawer.js";
@@ -9,6 +9,7 @@ import { Button, Loading, Panel, SectionHeading } from "../../components/ui.js";
 import { moneyFromCents, signedMoneyFromCents } from "../../lib/format.js";
 import { daysBetween } from "@projeto41/finance";
 import { filterToQuery, ledgerApi, useLedgerReference } from "../../lib/ledger.js";
+import { paginateByDay } from "../../lib/ledger-pages.js";
 import type { LedgerPreset } from "../../lib/navigation.js";
 import { useToast } from "../../lib/toast.js";
 
@@ -18,6 +19,10 @@ import { useToast } from "../../lib/toast.js";
  */
 
 type LedgerKind = "expense" | "income";
+
+/** Linhas por página na tela. A busca no servidor vai em lotes maiores. */
+const PAGE_SIZE = 50;
+const FETCH_SIZE = 500;
 
 function firstDayOfMonth() {
   const now = new Date();
@@ -52,7 +57,7 @@ export function LedgerPage({
     to: preset.to ?? lastDayOfMonth(),
     ...(preset.personId != null ? { personId: preset.personId } : {}),
     page: 1,
-    pageSize: 50
+    pageSize: PAGE_SIZE
   }));
   const [result, setResult] = useState<Awaited<ReturnType<typeof ledgerApi.entries>> | null>(null);
   const [loading, setLoading] = useState(true);
@@ -63,23 +68,47 @@ export function LedgerPage({
     () => (fixedKind ? { ...filter, kind: fixedKind } : filter),
     [filter, fixedKind]
   );
+  // A página é da tela, não do servidor: trocar de página não busca de novo.
+  const queryFilter = { ...effectiveFilter, page: undefined, pageSize: undefined };
+  const queryKey = JSON.stringify(queryFilter);
 
+  /**
+   * Busca tudo que o filtro pega, em lotes, para paginar por dia aqui: a
+   * página do servidor corta pela contagem de linhas e partia um dia ao meio.
+   */
+  const latest = useRef(0);
   const load = useCallback(async () => {
+    // Trocar o filtro no meio de uma busca não pode deixar a resposta velha
+    // chegar por último e ocupar a tela.
+    const request = ++latest.current;
     try {
-      setResult(await ledgerApi.entries(effectiveFilter));
+      const query = JSON.parse(queryKey) as typeof queryFilter;
+      const first = await ledgerApi.entries({ ...query, page: 1, pageSize: FETCH_SIZE });
+      const rows = [...first.rows];
+      for (let page = 2; rows.length < first.total; page++) {
+        const next = await ledgerApi.entries({ ...query, page, pageSize: FETCH_SIZE });
+        if (request !== latest.current) return;
+        if (next.rows.length === 0) break;
+        rows.push(...next.rows);
+      }
+      if (request !== latest.current) return;
+      setResult({ ...first, rows, page: 1, pageSize: rows.length });
     } catch (error) {
+      if (request !== latest.current) return;
       toast.notify(error instanceof Error ? error.message : "Falha ao carregar", "error");
     } finally {
       setLoading(false);
     }
-  }, [effectiveFilter, toast]);
+  }, [queryKey, toast]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
   const totals = result?.totals;
-  const pageCount = result ? Math.max(1, Math.ceil(result.total / result.pageSize)) : 1;
+  const pages = useMemo(() => paginateByDay(result?.rows ?? [], PAGE_SIZE), [result]);
+  const pageCount = Math.max(1, pages.length);
+  const currentPage = Math.min(filter.page ?? 1, pageCount);
 
   return (
     <>
@@ -140,32 +169,38 @@ export function LedgerPage({
         title={`${result?.total ?? 0} lançamento${(result?.total ?? 0) === 1 ? "" : "s"}`}
         subtitle={
           pageCount > 1
-            ? `Página ${filter.page ?? 1} de ${pageCount} · os totais acima são do filtro inteiro`
+            ? `Página ${currentPage} de ${pageCount} · os totais acima são do filtro inteiro`
             : "Do mais recente para o mais antigo"
         }
       >
         {loading ? (
           <Loading />
         ) : (
-          <EntryTable rows={result?.rows ?? []} onSelect={setEditing} />
+          <EntryTable rows={pages[currentPage - 1] ?? []} onSelect={setEditing} />
         )}
 
         {pageCount > 1 && (
           <div className="fin-pager">
             <Button
               variant="ghost"
-              disabled={(filter.page ?? 1) <= 1}
-              onClick={() => setFilter((current) => ({ ...current, page: (current.page ?? 1) - 1 }))}
+              disabled={currentPage <= 1}
+              onClick={() => {
+                setFilter((current) => ({ ...current, page: currentPage - 1 }));
+                window.scrollTo({ top: 0 });
+              }}
             >
               Anterior
             </Button>
             <span>
-              Página {filter.page ?? 1} de {pageCount}
+              Página {currentPage} de {pageCount}
             </span>
             <Button
               variant="ghost"
-              disabled={(filter.page ?? 1) >= pageCount}
-              onClick={() => setFilter((current) => ({ ...current, page: (current.page ?? 1) + 1 }))}
+              disabled={currentPage >= pageCount}
+              onClick={() => {
+                setFilter((current) => ({ ...current, page: currentPage + 1 }));
+                window.scrollTo({ top: 0 });
+              }}
             >
               Próxima
             </Button>
