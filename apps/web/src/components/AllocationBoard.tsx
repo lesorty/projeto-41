@@ -34,17 +34,28 @@ export function AllocationBoard({
   onChange,
   onCommit,
   emptyText,
-  chartLabel = "Meta em construção"
+  chartLabel = "Meta em construção",
+  actualChartLabel
 }: {
   rows: AllocationRow[];
   onChange: (key: string, weight: number) => void;
   onCommit: (key: string, weight: number) => void | Promise<void>;
   emptyText: string;
   chartLabel?: string;
+  /** Sem nenhuma meta ainda, a rosca mostra o real com este título em vez de sumir. */
+  actualChartLabel?: string;
 }) {
-  const slices = rows
+  const targetSlices = rows
     .filter((row) => row.weight > 0)
     .map((row) => ({ key: row.key, label: row.label, value: row.weight, color: row.color }));
+  const showActual = targetSlices.length === 0 && actualChartLabel != null;
+  const slices = showActual
+    ? rows
+        .filter((row) => row.actualWeight > 0)
+        .map((row) => ({ key: row.key, label: row.label, value: row.actualWeight, color: row.color }))
+    : targetSlices;
+  // Com muitas fatias os rótulos da rosca se atropelam: a legenda lista todas.
+  const legend = slices.length > 6;
 
   // Teclado dispara um keyup por passo do slider: sem agrupar, segurar a seta
   // gravaria (e avisaria) dezenas de vezes. Grava o valor final, uma vez.
@@ -114,9 +125,14 @@ export function AllocationBoard({
         {rows.length === 0 && <Empty icon={Target} text={emptyText} />}
       </div>
       {slices.length > 0 && (
-        <aside className="allocation-chart">
-          <span className="allocation-chart-label">{chartLabel}</span>
-          <Donut data={slices} height={340} />
+        <aside className={`allocation-chart ${legend ? "with-legend" : ""}`}>
+          <span className="allocation-chart-label">{showActual ? actualChartLabel : chartLabel}</span>
+          <Donut
+            data={slices}
+            height={legend ? 200 : 340}
+            legend={legend}
+            formatValue={oneDecimal}
+          />
         </aside>
       )}
     </div>

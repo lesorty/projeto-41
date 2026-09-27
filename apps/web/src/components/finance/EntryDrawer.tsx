@@ -2,6 +2,7 @@ import { CreditCard, Save, Trash2, Undo2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   AttachmentRecord,
+  BalancesResult,
   SeriesScope,
   EntryRecord,
   EntryStatus,
@@ -17,7 +18,13 @@ import { InstallmentFields, purchaseTotal, type AmountBasis } from "./Installmen
 import { PhotoField } from "./PhotoField.js";
 import { RefundDrawer } from "./RefundDrawer.js";
 import { SeriesScopeDialog } from "./SeriesScopeDialog.js";
-import { centsToInput, todayIso } from "../../lib/format.js";
+import {
+  centsToInput,
+  ledgerDate,
+  moneyFromCents,
+  signedMoneyFromCents,
+  todayIso
+} from "../../lib/format.js";
 import {
   ACCOUNT_KIND_LABEL,
   STATUS_LABEL,
@@ -31,11 +38,14 @@ import { POSITION_CATEGORY_LABEL } from "../../lib/cash.js";
 import { useToast } from "../../lib/toast.js";
 
 /**
- * Tipos oferecidos no formulário. `adjustment` é interno, não se cria à mão.
- * Aporte é uma transferência da conta para uma posição de investimento: o
- * saldo cai, mas não é gasto.
+ * Tipos oferecidos no formulário. Aporte é uma transferência da conta para uma
+ * posição de investimento: o saldo cai, mas não é gasto. Ajuste corrige o
+ * saldo para bater com o banco, sem ser entrada nem saída nos relatórios.
  */
-type FormKind = "expense" | "income" | "transfer" | "investment";
+type FormKind = "expense" | "income" | "transfer" | "investment" | "adjustment";
+
+/** Ajuste pelo saldo que o banco mostra (o sistema acha a diferença) ou pela diferença direto. */
+type AdjustMode = "balance" | "difference";
 
 /** À vista sai de uma conta; crédito vai para a fatura de um cartão. */
 type PayWith = "money" | "credit";
@@ -72,9 +82,9 @@ export function EntryDrawer({
   // Na ponta de entrada de uma transferência, a conta do lançamento é o destino.
   const incomingLeg = isTransfer && (entry?.amountCents ?? 0) > 0;
 
-  const [kind, setKind] = useState<FormKind>(
-    entry ? (entry.kind === "adjustment" ? "expense" : (entry.kind as FormKind)) : defaultKind
-  );
+  const [kind, setKind] = useState<FormKind>(entry ? (entry.kind as FormKind) : defaultKind);
+  // Um ajuste já gravado é a diferença: o saldo daquele dia já o inclui.
+  const [adjustMode, setAdjustMode] = useState<AdjustMode>(entry ? "difference" : "balance");
   const [amount, setAmount] = useState(entry ? centsToInput(entry.amountCents) : "");
   const [date, setDate] = useState(entry?.date ?? todayIso());
   const entryAccount = reference.accounts.find((item) => item.id === entry?.accountId);
@@ -92,6 +102,10 @@ export function EntryDrawer({
     entryAccount && isCardAccount(entryAccount)
       ? entryAccount.id
       : (reference.accounts.find(isCardAccount)?.id ?? null)
+  );
+  // Ajuste vale para qualquer conta, cartão inclusive (para bater a fatura).
+  const [adjustAccountId, setAdjustAccountId] = useState<number | null>(
+    entry?.accountId ?? everydayAccount(reference)?.id ?? null
   );
   const [toAccountId, setToAccountId] = useState<number | null>(
     entry?.counterpartAccountId ?? reference.accounts.filter(isMoneyAccount)[1]?.id ?? null
@@ -194,18 +208,24 @@ export function EntryDrawer({
   // O drawer pode abrir antes dos cadastros chegarem: quando chegam, conta e
   // cartão ainda vazios ganham o padrão.
   useEffect(() => {
-    if (moneyAccountId == null) {
+    if (moneyAccountId == null || adjustAccountId == null) {
       const fallback = everydayAccount(reference);
-      if (fallback) setMoneyAccountId(fallback.id);
+      if (fallback && moneyAccountId == null) setMoneyAccountId(fallback.id);
+      if (fallback && adjustAccountId == null) setAdjustAccountId(fallback.id);
     }
     if (cardId == null) {
       const firstCard = reference.accounts.find(isCardAccount);
       if (firstCard) setCardId(firstCard.id);
     }
-  }, [reference, moneyAccountId, cardId]);
+  }, [reference, moneyAccountId, adjustAccountId, cardId]);
 
   // O que o lançamento usa de fato: a conta, ou o cartão quando é no crédito.
-  const accountId = kind === "expense" && payWith === "credit" ? cardId : moneyAccountId;
+  const accountId =
+    kind === "adjustment"
+      ? adjustAccountId
+      : kind === "expense" && payWith === "credit"
+        ? cardId
+        : moneyAccountId;
 
   const peopleOptions = useMemo(
     () => reference.people.filter((person) => person.active || person.id === entry?.personId),
@@ -221,6 +241,56 @@ export function EntryDrawer({
 
   // A pessoa é herdada da conta (D01), mas continua sobrescrevível.
   const account = reference.accounts.find((item) => item.id === accountId);
+
+  // Contas de dinheiro e cartões, sem repetir a opção "(arquivada)" do lançamento.
+  const adjustOptions = useMemo(
+    () => [
+      ...accountOptions,
+      ...cardOptions.filter((card) => !accountOptions.some((option) => option.value === card.value))
+    ],
+    [accountOptions, cardOptions]
+  );
+
+  // Cartão não tem "saldo do banco" para digitar: nele o ajuste é pela diferença.
+  const adjustByBalance =
+    kind === "adjustment" && adjustMode === "balance" && account?.kind !== "credit_card";
+
+  /**
+   * Saldo do sistema no fim do dia escolhido, sem este ajuste (na edição), para
+   * mostrar a diferença antes de gravar.
+   */
+  const [systemBalance, setSystemBalance] = useState<number | null>(null);
+  useEffect(() => {
+    if (!adjustByBalance || adjustAccountId == null || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      setSystemBalance(null);
+      return;
+    }
+    let alive = true;
+    api<BalancesResult>(`/ledger/balances?asOf=${date}`)
+      .then((result) => {
+        if (!alive) return;
+        const found = result.accounts.find((item) => item.id === adjustAccountId);
+        const own =
+          entry?.kind === "adjustment" &&
+          entry.accountId === adjustAccountId &&
+          entry.date <= date &&
+          entry.status !== "pending"
+            ? entry.amountCents
+            : 0;
+        setSystemBalance(found ? found.currentBalanceCents - own : null);
+      })
+      .catch(() => {
+        if (alive) setSystemBalance(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [adjustByBalance, adjustAccountId, date, entry]);
+  const typedSigned = parseCurrencyInput(amount);
+  const adjustDiff =
+    adjustByBalance && systemBalance != null && typedSigned != null
+      ? typedSigned - systemBalance
+      : null;
   const effectivePersonId = personId ?? account?.personId ?? null;
   const isCard = account?.kind === "credit_card";
   const typedCents = Math.abs(parseCurrencyInput(amount) ?? 0);
@@ -259,6 +329,10 @@ export function EntryDrawer({
 
   async function persist(scope: SeriesScope) {
     setScopeAsk(false);
+    if (kind === "adjustment") {
+      await persistAdjustment();
+      return;
+    }
     const cents = parseCurrencyInput(amount);
     if (cents == null || cents === 0) {
       toast.notify("Informe um valor válido", "error");
@@ -390,6 +464,58 @@ export function EntryDrawer({
     }
   }
 
+  /** Ajuste: um lançamento só, com o sinal da diferença, fora de entradas e saídas. */
+  async function persistAdjustment() {
+    if (accountId == null) {
+      toast.notify("Escolha uma conta", "error");
+      return;
+    }
+    const typed = parseCurrencyInput(amount);
+    if (typed == null) {
+      toast.notify(adjustByBalance ? "Informe o saldo do banco" : "Informe a diferença", "error");
+      return;
+    }
+    if (adjustByBalance && systemBalance == null) {
+      toast.notify("Aguarde o saldo da conta carregar", "error");
+      return;
+    }
+    const difference = adjustByBalance ? typed - (systemBalance ?? 0) : typed;
+    if (difference === 0) {
+      toast.notify("O saldo já bate: nada a ajustar", "error");
+      return;
+    }
+    const body = {
+      accountId,
+      personId: effectivePersonId,
+      date,
+      amountCents: difference,
+      kind: "adjustment" as const,
+      status: entry?.kind === "adjustment" ? entry.status : ("cleared" as EntryStatus),
+      categoryId: null,
+      placeId: null,
+      description:
+        description ||
+        (isCard ? "Ajuste para bater com a fatura" : "Ajuste de saldo conferido com o banco"),
+      // O saldo digitado fica anotado: é a prova do ajuste.
+      notes: adjustByBalance
+        ? `Saldo do banco em ${ledgerDate(date)}: ${moneyFromCents(typed)}.`
+        : notes || null,
+      paymentMethod: null,
+      tagIds
+    };
+    setSaving(true);
+    try {
+      if (editing && entry) await ledgerApi.updateEntry(entry.id, body, "one");
+      else await ledgerApi.createEntry(body);
+      toast.notify("Ajuste salvo");
+      await onSaved();
+    } catch (error) {
+      toast.notify(error instanceof Error ? error.message : "Falha ao salvar", "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   /** Local digitado vira registro reutilizável, resolvido pelo nome (D06). */
   async function resolvePlace(): Promise<number | null> {
     const name = placeName.trim();
@@ -427,7 +553,13 @@ export function EntryDrawer({
       onClose={onClose}
       footer={
         <>
-          {editing && entry && entry.kind !== "transfer" && entry.refundOfEntryId == null && kind !== "investment" && (
+          {editing &&
+            entry &&
+            entry.kind !== "transfer" &&
+            entry.kind !== "adjustment" &&
+            entry.refundOfEntryId == null &&
+            kind !== "investment" &&
+            kind !== "adjustment" && (
             <Button variant="ghost" icon={Undo2} onClick={() => setRefunding(true)}>
               Estornar
             </Button>
@@ -470,9 +602,39 @@ export function EntryDrawer({
               { value: "expense", label: "Saída" },
               { value: "income", label: "Entrada" },
               { value: "transfer", label: "Transferência" },
-              { value: "investment", label: "Aporte" }
+              { value: "investment", label: "Aporte" },
+              { value: "adjustment", label: "Ajuste" }
             ]}
           />
+        )}
+
+        {kind === "adjustment" && (
+          <>
+            <Field label="Conta">
+              <Dropdown<number>
+                value={adjustAccountId}
+                onChange={setAdjustAccountId}
+                options={adjustOptions}
+                placeholder="Escolher conta"
+                aria-label="Conta do ajuste"
+              />
+            </Field>
+            {account?.kind !== "credit_card" && (
+              <Field label="Como informar">
+                <Segmented<AdjustMode>
+                  value={adjustMode}
+                  onChange={(next) => {
+                    setAdjustMode(next);
+                    setAmount("");
+                  }}
+                  options={[
+                    { value: "balance", label: "Saldo do banco" },
+                    { value: "difference", label: "Diferença" }
+                  ]}
+                />
+              </Field>
+            )}
+          </>
         )}
 
         {kind === "investment" && editing && (
@@ -483,13 +645,44 @@ export function EntryDrawer({
         )}
 
         <div className="field-row entry-amount-row">
-          <Field label={kind === "expense" && installmentMode === "installments" && amountBasis === "installment" ? "Valor da parcela" : "Valor"}>
-            <MoneyInput value={amount} onChange={setAmount} autoFocus required />
+          <Field
+            label={
+              kind === "adjustment"
+                ? adjustByBalance
+                  ? "Saldo no banco"
+                  : "Diferença"
+                : kind === "expense" && installmentMode === "installments" && amountBasis === "installment"
+                  ? "Valor da parcela"
+                  : "Valor"
+            }
+            hint={kind === "adjustment" && !adjustByBalance ? "Negativo tira do saldo" : undefined}
+          >
+            <MoneyInput
+              value={amount}
+              onChange={setAmount}
+              allowNegative={kind === "adjustment"}
+              autoFocus
+              required
+            />
           </Field>
           <Field label={isCard && installmentMode === "installments" ? "Data da compra" : "Data"}>
             <DateField value={date} onChange={setDate} />
           </Field>
         </div>
+
+        {adjustByBalance && (
+          <p className="fin-callout">
+            {adjustAccountId == null
+              ? "Escolha a conta que vai bater com o banco."
+              : systemBalance == null
+              ? "Buscando o saldo da conta…"
+              : adjustDiff == null
+                ? `No sistema, o saldo no fim de ${ledgerDate(date)} é ${moneyFromCents(systemBalance)}. Digite o que o banco mostra.`
+                : adjustDiff === 0
+                  ? `Já bate: o sistema também tem ${moneyFromCents(systemBalance)} em ${ledgerDate(date)}.`
+                  : `No sistema: ${moneyFromCents(systemBalance)}. O ajuste lança ${signedMoneyFromCents(adjustDiff)}, que não conta como entrada nem saída.`}
+          </p>
+        )}
 
         {kind === "expense" && !isRefund && (
           <Field label="Forma de pagamento">
@@ -543,7 +736,7 @@ export function EntryDrawer({
               )}
             </>
           )
-        ) : (
+        ) : kind === "adjustment" ? null : (
           <div className={kind === "transfer" || kind === "investment" ? "field-row" : ""}>
             <Field
               label={
@@ -601,8 +794,9 @@ export function EntryDrawer({
           </p>
         )}
 
-        {/* Transferência nunca tem categoria (D21); aporte é transferência. */}
-        {kind !== "transfer" && kind !== "investment" && (
+        {/* Transferência nunca tem categoria (D21); aporte é transferência, e
+            ajuste não é gasto nem ganho. */}
+        {kind !== "transfer" && kind !== "investment" && kind !== "adjustment" && (
           <Field label="Categoria">
             <Dropdown<number>
               value={categoryId}
@@ -629,7 +823,7 @@ export function EntryDrawer({
           />
         </Field>
 
-        {kind !== "transfer" && (
+        {kind !== "transfer" && kind !== "adjustment" && (
           <PlaceAutocomplete
             value={placeName}
             onChange={(name, place) => {
@@ -644,6 +838,7 @@ export function EntryDrawer({
           />
         )}
 
+        {kind !== "adjustment" && (
         <div className="field-row">
           <Field label="Quem pagou" hint="Herdado da conta">
             <Dropdown<number>
@@ -670,6 +865,7 @@ export function EntryDrawer({
             />
           </Field>
         </div>
+        )}
 
         {reference.tags.length > 0 && (
           <Field label="Etiquetas" hint="Opcional">
@@ -688,6 +884,7 @@ export function EntryDrawer({
           </Field>
         )}
 
+        {kind !== "adjustment" && (
         <PhotoField
           attachments={attachments}
           pending={pendingPhoto}
@@ -699,6 +896,7 @@ export function EntryDrawer({
             setAttachments((current) => current.filter((item) => item.id !== id));
           }}
         />
+        )}
         </>
         )}
       </form>

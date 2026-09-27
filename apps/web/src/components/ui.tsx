@@ -254,11 +254,23 @@ export function MiniStat({ label, value, tone = "" }: { label: string; value: Re
   );
 }
 
-export function Delta({ value, suffix }: { value: number; suffix?: string }) {
+export function Delta({
+  value,
+  suffix,
+  goodWhen = "up",
+  title
+}: {
+  value: number;
+  suffix?: string;
+  /** Gasto subir é ruim: com `down`, a seta segue o número e a cor inverte. */
+  goodWhen?: "up" | "down";
+  title?: string;
+}) {
   const positive = value >= 0;
   const Icon = positive ? ArrowUpRight : ArrowDownRight;
+  const good = value === 0 || positive === (goodWhen === "up");
   return (
-    <span className={`delta ${positive ? "delta-up" : "delta-down"}`}>
+    <span className={`delta ${good ? "delta-up" : "delta-down"}`} title={title}>
       <Icon size={14} />
       {signedPercent(value)}
       {suffix && <em>{suffix}</em>}

@@ -160,6 +160,7 @@ export function SpendingAllocationPage() {
               onCommit={commit}
               emptyText="Nenhuma categoria de saída cadastrada."
               chartLabel="Objetivo em construção"
+              actualChartLabel="Gasto real do período · nenhum objetivo percentual ainda"
             />
           </Panel>
         </>

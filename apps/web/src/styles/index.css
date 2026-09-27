@@ -2275,6 +2275,17 @@ main {
 .allocation-list {
   display: flex;
   flex-direction: column;
+  /* Com vinte categorias a lista não empurra a página ao infinito: rola por dentro. */
+  max-height: min(560px, 64vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding-right: 6px;
+}
+.allocation-chart.with-legend .donut-legend {
+  max-height: min(320px, 40vh);
+  overflow-y: auto;
+  padding-right: 4px;
 }
 .allocation-row {
   display: grid;

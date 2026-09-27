@@ -82,7 +82,9 @@ export function FinanceDashboardPage({ onNavigate }: { onNavigate: FinanceNaviga
   const byPerson = useMemo(() => {
     if (!summary) return [];
     const groups = new Map<string, LedgerSummary["accounts"]>();
-    for (const account of summary.accounts) {
+    // A conta-ponte dos investimentos só soma o que foi aportado, não o valor
+    // da carteira, e já fica fora do saldo acima: aqui ela só confundiria.
+    for (const account of summary.accounts.filter((item) => item.kind !== "investment")) {
       const key = account.personName ?? "Sem pessoa";
       groups.set(key, [...(groups.get(key) ?? []), account]);
     }
@@ -108,6 +110,10 @@ export function FinanceDashboardPage({ onNavigate }: { onNavigate: FinanceNaviga
       to: period.to,
       ...(personId != null ? { personId } : {})
     });
+
+  // O anterior é o mês de antes (ou o ano, ou um recorte do mesmo tamanho).
+  const versus =
+    period.mode === "month" ? "vs. mês anterior" : period.mode === "year" ? "vs. ano anterior" : "vs. período anterior";
 
   const hasMovement =
     (summary?.month.incomeCents ?? 0) !== 0 || (summary?.month.expenseCents ?? 0) !== 0;
@@ -170,7 +176,11 @@ export function FinanceDashboardPage({ onNavigate }: { onNavigate: FinanceNaviga
                 label="Entradas"
                 value={moneyFromCents(summary.month.incomeCents)}
                 detail={
-                  <Delta value={ratio(summary.month.incomeCents, summary.previousMonth.incomeCents)} />
+                  <Delta
+                    value={ratio(summary.month.incomeCents, summary.previousMonth.incomeCents)}
+                    suffix={versus}
+                    title={`Antes: ${moneyFromCents(summary.previousMonth.incomeCents)}`}
+                  />
                 }
               />
             </button>
@@ -180,13 +190,21 @@ export function FinanceDashboardPage({ onNavigate }: { onNavigate: FinanceNaviga
               onClick={() => open("expenses")}
               aria-label="Ver os gastos do período"
             >
+              {/* Saída vem negativa do livro: a comparação é sobre o quanto saiu,
+                  então gastar mais sobe a seta e fica vermelho. */}
               <Stat
                 icon={ArrowDownCircle}
                 label="Saídas"
-                value={moneyFromCents(summary.month.expenseCents)}
+                value={moneyFromCents(Math.abs(summary.month.expenseCents))}
                 detail={
                   <Delta
-                    value={ratio(summary.month.expenseCents, summary.previousMonth.expenseCents)}
+                    value={ratio(
+                      Math.abs(summary.month.expenseCents),
+                      Math.abs(summary.previousMonth.expenseCents)
+                    )}
+                    goodWhen="down"
+                    suffix={versus}
+                    title={`Antes: ${moneyFromCents(Math.abs(summary.previousMonth.expenseCents))}`}
                   />
                 }
               />
@@ -201,7 +219,13 @@ export function FinanceDashboardPage({ onNavigate }: { onNavigate: FinanceNaviga
                 icon={PiggyBank}
                 label="Líquido"
                 value={moneyFromCents(summary.month.netCents)}
-                detail={<Delta value={ratio(summary.month.netCents, summary.previousMonth.netCents)} />}
+                detail={
+                  <Delta
+                    value={ratio(summary.month.netCents, summary.previousMonth.netCents)}
+                    suffix={versus}
+                    title={`Antes: ${moneyFromCents(summary.previousMonth.netCents)}`}
+                  />
+                }
               />
             </button>
           </div>
@@ -256,7 +280,14 @@ export function FinanceDashboardPage({ onNavigate }: { onNavigate: FinanceNaviga
               {slices.length === 0 ? (
                 <Empty icon={Receipt} text="Nenhum gasto no período." />
               ) : (
-                <Donut data={slices} showValue formatValue={moneyFromCents} />
+                <Donut
+                  data={slices}
+                  legend
+                  showValue
+                  formatValue={moneyFromCents}
+                  height={200}
+                  center={{ label: "Total", value: moneyFromCents(report?.totalCents ?? 0) }}
+                />
               )}
             </Panel>
           </div>
