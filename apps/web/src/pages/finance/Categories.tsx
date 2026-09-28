@@ -111,7 +111,10 @@ export function CategoriesPage() {
 
       <div className="fin-columns">
         {columns.map((column) => {
-          const items = categories.filter((category) => category.kind === column.kind);
+          // Em ordem alfabética, sem diferenciar acento nem maiúscula ("Água" junto do "A").
+          const items = categories
+            .filter((category) => category.kind === column.kind)
+            .sort((a, b) => a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" }));
           return (
             <Panel key={column.kind} title={column.title} subtitle={column.subtitle}>
               {items.length === 0 && <Empty icon={Tags} text="Nenhuma categoria." />}
