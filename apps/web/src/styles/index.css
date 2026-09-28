@@ -2790,18 +2790,35 @@ main {
   align-items: center;
 }
 
-.fin-color-wheel {
+/* Com `.fin-color-row` na frente: `.stack input { width: 100% }` ganhava de
+   uma classe só, esticava a roda numa faixa e espremia o hex num quadradinho
+   que parecia um botão sem função. */
+.fin-color-row .fin-color-wheel {
+  flex: 0 0 46px;
   width: 46px;
-  height: 38px;
-  padding: 2px;
-  border: 1px solid var(--border);
+  height: 42px;
+  padding: 3px;
+  border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   background: var(--input-bg);
   cursor: pointer;
 }
+.fin-color-row .fin-color-wheel::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+.fin-color-row .fin-color-wheel::-webkit-color-swatch {
+  border: 0;
+  border-radius: 6px;
+}
+.fin-color-row .fin-color-wheel::-moz-color-swatch {
+  border: 0;
+  border-radius: 6px;
+}
 
-.fin-color-hex {
-  flex: 1;
+.fin-color-row .fin-color-hex {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   text-transform: lowercase;
 }

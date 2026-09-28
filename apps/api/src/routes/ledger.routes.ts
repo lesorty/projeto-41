@@ -11,6 +11,14 @@ import {
   transferSchema
 } from "@projeto41/contracts";
 import { z } from "zod";
+import {
+  accountAttachmentIds,
+  accountUsage,
+  assertAccountPurgeable,
+  purgeAccount,
+  purgeCategory,
+  purgePerson
+} from "../services/purge-service.js";
 import type { RoutePlugin } from "./index.js";
 
 const idParam = z.object({ id: z.coerce.number().int().positive() });
@@ -31,7 +39,13 @@ const queryBoolean = z
   .enum(["true", "false", "1", "0"])
   .transform((value) => value === "true" || value === "1");
 
-export const registerLedgerRoutes: RoutePlugin = (app, { db }) => {
+/**
+ * `?purge=1` exclui de vez, resolvendo os vínculos (ver purge-service). Sem
+ * ele, o DELETE continua arquivando o que está em uso.
+ */
+const purgeQuery = z.object({ purge: queryBoolean.optional() });
+
+export const registerLedgerRoutes: RoutePlugin = (app, { db, attachmentService }) => {
   const ledger = db.ledger;
   const balances = () => ledger.balances.consolidated();
 
@@ -48,6 +62,10 @@ export const registerLedgerRoutes: RoutePlugin = (app, { db }) => {
   });
   app.delete("/api/ledger/people/:id", async (request) => {
     const { id } = idParam.parse(request.params);
+    if (purgeQuery.parse(request.query).purge) {
+      const result = purgePerson(db, id);
+      return { ok: true, archived: false, ...result, people: ledger.people.list() };
+    }
     const removed = ledger.people.remove(id);
     return { ok: true, archived: removed === 0, people: ledger.people.list() };
   });
@@ -68,8 +86,21 @@ export const registerLedgerRoutes: RoutePlugin = (app, { db }) => {
     ledger.accounts.update(id, accountSchema.parse(request.body));
     return { ok: true, balances: balances() };
   });
+  /** O que a exclusão definitiva leva junto: a tela mostra antes de confirmar. */
+  app.get("/api/ledger/accounts/:id/usage", async (request) =>
+    accountUsage(db, idParam.parse(request.params).id)
+  );
   app.delete("/api/ledger/accounts/:id", async (request) => {
     const { id } = idParam.parse(request.params);
+    if (purgeQuery.parse(request.query).purge) {
+      assertAccountPurgeable(db, id);
+      // Arquivos primeiro: depois do DELETE não há mais como achá-los.
+      for (const attachmentId of accountAttachmentIds(db, id)) {
+        await attachmentService?.remove(attachmentId);
+      }
+      const result = purgeAccount(db, id);
+      return { ok: true, archived: false, ...result, balances: balances() };
+    }
     const removed = ledger.accounts.remove(id);
     return { ok: true, archived: removed === 0, balances: balances() };
   });
@@ -111,6 +142,15 @@ export const registerLedgerRoutes: RoutePlugin = (app, { db }) => {
   });
   app.delete("/api/ledger/categories/:id", async (request) => {
     const { id } = idParam.parse(request.params);
+    if (purgeQuery.parse(request.query).purge) {
+      const result = purgeCategory(db, id);
+      return {
+        ok: true,
+        archived: false,
+        ...result,
+        categories: ledger.categories.list({ includeArchived: true })
+      };
+    }
     const removed = ledger.categories.remove(id);
     return {
       ok: true,

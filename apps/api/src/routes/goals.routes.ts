@@ -8,6 +8,7 @@ import {
   goalWithdrawalSchema
 } from "@projeto41/contracts";
 import { z } from "zod";
+import { purgeGoal } from "../services/purge-service.js";
 import type { RoutePlugin } from "./index.js";
 
 const idParam = z.object({ id: z.coerce.number().int().positive() });
@@ -87,6 +88,12 @@ export const registerGoalsRoutes: RoutePlugin = (app, { db, cdiService }) => {
   app.delete("/api/ledger/goals/:id", async (request, reply) => {
     const { id } = idParam.parse(request.params);
     if (!ledger.goals.get(id)) return reply.status(404).send({ error: "Caixinha nao encontrada" });
+    // `?purge=1`: exclui de vez, com a conta e os lançamentos da caixinha.
+    const { purge } = z.object({ purge: z.enum(["1", "true"]).optional() }).parse(request.query);
+    if (purge) {
+      purgeGoal(db, id);
+      return { ok: true, archived: false, balances: balances() };
+    }
     const result = ledger.goals.remove(id);
     return { ok: true, archived: !result.removed, balances: balances() };
   });

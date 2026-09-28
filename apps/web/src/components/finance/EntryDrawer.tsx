@@ -528,6 +528,27 @@ export function EntryDrawer({
 
   async function remove() {
     if (!entry) return;
+    if (isInvestmentLeg) {
+      // Desfaz como a tela Em caixa: o dinheiro volta para a conta e sai da posição.
+      const undo = await confirm({
+        title: entry.amountCents < 0 ? "Excluir aporte" : "Excluir resgate",
+        message:
+          entry.amountCents < 0
+            ? "O valor volta para a conta e sai da posição de investimento."
+            : "O valor sai da conta e volta para a posição de investimento.",
+        confirmLabel: "Excluir",
+        tone: "danger"
+      });
+      if (!undo) return;
+      try {
+        await api(`/investments/transfers/${entry.transferId}`, { method: "DELETE" });
+        toast.notify(entry.amountCents < 0 ? "Aporte excluído" : "Resgate excluído");
+        await onSaved();
+      } catch (error) {
+        toast.notify(error instanceof Error ? error.message : "Falha ao excluir", "error");
+      }
+      return;
+    }
     const ok = await confirm({
       title: "Excluir lançamento",
       message: isTransfer
@@ -564,7 +585,7 @@ export function EntryDrawer({
               Estornar
             </Button>
           )}
-          {editing && !isInvestmentLeg && (
+          {editing && (
             <Button variant="danger" icon={Trash2} onClick={() => void remove()}>
               Excluir
             </Button>
@@ -588,7 +609,8 @@ export function EntryDrawer({
         ) : isInvestmentLeg ? (
           <p className="fin-callout">
             Movimento de investimento: saiu da conta e foi para uma posição, sem contar como gasto.
-            Para desfazer ou corrigir, use Investimentos › Em caixa, que ajusta a posição junto.
+            Excluir desfaz o movimento e ajusta a posição junto; para corrigir o valor, exclua e
+            aporte de novo.
           </p>
         ) : isTransfer ? (
           <p className="fin-muted">

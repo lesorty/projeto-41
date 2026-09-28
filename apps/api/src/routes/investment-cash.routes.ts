@@ -94,6 +94,27 @@ export const registerInvestmentCashRoutes: RoutePlugin = (app, { db }) => {
     return reply.status(201).send({ ...result, ...snapshot() });
   });
 
+  /**
+   * Desfaz pelo livro: o aporte ou resgate que aparece como lançamento é
+   * achado pela transferência e desfeito como na tela Em caixa, devolvendo a
+   * posição junto.
+   */
+  app.delete("/api/investments/transfers/:transferId", async (request, reply) => {
+    const { transferId } = z
+      .object({ transferId: z.coerce.number().int().positive() })
+      .parse(request.params);
+    const movement = db.raw
+      .prepare("SELECT id FROM position_movements WHERE transfer_id = ?")
+      .get(transferId) as { id: number } | undefined;
+    if (!movement) {
+      return reply.status(404).send({
+        error: "Movimento de investimento nao encontrado. Se for compra ou venda, exclua pela carteira."
+      });
+    }
+    undoMovement(db, movement.id);
+    return { ok: true, ...snapshot() };
+  });
+
   app.delete("/api/investments/movements/:id", async (request) => {
     const params = z.object({ id: z.coerce.number().int().positive() }).parse(request.params);
     undoMovement(db, params.id);

@@ -1,10 +1,10 @@
-import { Save } from "lucide-react";
+import { Save, Trash2 } from "lucide-react";
 import { useState } from "react";
 import type { GoalMode, GoalProgress } from "@projeto41/contracts";
 import { parseCurrencyInput } from "@projeto41/finance";
 import { ColorPicker } from "../ColorPicker.js";
 import { DateField } from "../datepicker.js";
-import { Drawer } from "../dialog.js";
+import { Drawer, useConfirm } from "../dialog.js";
 import { Button, Field, Segmented } from "../ui.js";
 import { AccountSelect } from "./AccountSelect.js";
 import { api } from "../../lib/api.js";
@@ -24,6 +24,7 @@ export function GoalDrawer({
   onSaved: () => Promise<void>;
 }) {
   const toast = useToast();
+  const confirm = useConfirm();
   const editing = goal != null;
   const [mode, setMode] = useState<GoalMode>(goal?.mode ?? "account");
   const [name, setName] = useState(goal?.name ?? "");
@@ -69,12 +70,42 @@ export function GoalDrawer({
     }
   }
 
+  /**
+   * Excluir de vez. Caixinha com conta própria leva a conta e os lançamentos
+   * dela; o depósito que veio de outra conta fica lá como ajuste.
+   */
+  async function remove() {
+    if (!goal) return;
+    const ok = await confirm({
+      title: "Excluir caixinha de vez",
+      message:
+        goal.mode === "account"
+          ? `"${goal.name}" será apagada com a conta e os lançamentos dela. Depósitos feitos de outras contas ficam lá como ajuste, sem mudar o saldo delas. Não dá para desfazer.`
+          : `"${goal.name}" será apagada. A marcação some, e o dinheiro continua na conta. Não dá para desfazer.`,
+      confirmLabel: "Excluir de vez",
+      tone: "danger"
+    });
+    if (!ok) return;
+    try {
+      await api(`/ledger/goals/${goal.id}?purge=1`, { method: "DELETE" });
+      toast.notify("Caixinha excluída");
+      await onSaved();
+    } catch (error) {
+      toast.notify(error instanceof Error ? error.message : "Falha ao excluir", "error");
+    }
+  }
+
   return (
     <Drawer
       title={editing ? "Editar caixinha" : "Nova caixinha"}
       onClose={onClose}
       footer={
         <>
+          {editing && (
+            <Button variant="danger" icon={Trash2} onClick={() => void remove()}>
+              Excluir
+            </Button>
+          )}
           <Button variant="ghost" onClick={onClose}>
             Cancelar
           </Button>

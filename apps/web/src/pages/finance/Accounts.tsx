@@ -1,6 +1,7 @@
 import {
   Archive,
   ArchiveRestore,
+  Trash2,
   ArrowRight,
   Banknote,
   CreditCard,
@@ -40,6 +41,15 @@ import { centsToInput, debtFromCents, moneyFromCents } from "../../lib/format.js
 import { ACCOUNT_KIND_LABEL, isCard } from "../../lib/ledger.js";
 import { parseCurrencyInput } from "@projeto41/finance";
 import { useToast } from "../../lib/toast.js";
+
+/** O que excluir a conta de vez leva junto (GET /ledger/accounts/:id/usage). */
+type AccountUsage = {
+  entries: number;
+  cards: number;
+  goals: number;
+  transfersOut: number;
+  investmentLinks: number;
+};
 
 /**
  * Pessoas e contas.
@@ -166,6 +176,70 @@ export function AccountsPage({ onOpenCash }: { onOpenCash?: () => void }) {
       await load();
     } catch (error) {
       toast.notify(error instanceof Error ? error.message : "Falha ao arquivar", "error");
+    }
+  }
+
+  /**
+   * Excluir de vez: diz antes o que vai junto (lançamentos, cartões,
+   * caixinhas) e o que muda fora dela (a outra ponta das transferências).
+   */
+  async function purgeAccount(account: AccountRecord) {
+    let usage: AccountUsage;
+    try {
+      usage = await api<AccountUsage>(`/ledger/accounts/${account.id}/usage`);
+    } catch (error) {
+      toast.notify(error instanceof Error ? error.message : "Falha ao consultar a conta", "error");
+      return;
+    }
+    if (usage.investmentLinks > 0) {
+      toast.notify(
+        `"${account.name}" tem aportes, resgates ou compras de investimento. Desfaça em Investimentos antes de excluir.`,
+        "error"
+      );
+      return;
+    }
+    const goes = [
+      usage.entries > 0 && `${usage.entries} lançamento${usage.entries === 1 ? "" : "s"}`,
+      usage.cards > 0 && `${usage.cards} cartão${usage.cards === 1 ? "" : "ões"} ligado${usage.cards === 1 ? "" : "s"} a ela`,
+      usage.goals > 0 && `${usage.goals} caixinha${usage.goals === 1 ? "" : "s"}`
+    ].filter(Boolean);
+    const ok = await confirm({
+      title: `Excluir ${isCard(account) ? "cartão" : "conta"} de vez`,
+      message: [
+        `"${account.name}" será apagad${isCard(account) ? "o" : "a"}`,
+        goes.length > 0 ? ` junto com ${goes.join(", ")}.` : ".",
+        usage.transfersOut > 0
+          ? ` ${usage.transfersOut} transferência${usage.transfersOut === 1 ? "" : "s"} com outra conta vira${usage.transfersOut === 1 ? "" : "m"} ajuste lá, sem mudar o saldo dela.`
+          : "",
+        " Não dá para desfazer."
+      ].join(""),
+      confirmLabel: "Excluir de vez",
+      tone: "danger"
+    });
+    if (!ok) return;
+    try {
+      await api(`/ledger/accounts/${account.id}?purge=1`, { method: "DELETE" });
+      toast.notify(isCard(account) ? "Cartão excluído" : "Conta excluída");
+      await load();
+    } catch (error) {
+      toast.notify(error instanceof Error ? error.message : "Falha ao excluir", "error");
+    }
+  }
+
+  async function purgePerson(person: PersonRecord) {
+    const ok = await confirm({
+      title: "Excluir pessoa de vez",
+      message: `"${person.name}" será apagada. Contas e lançamentos dela continuam, só que sem pessoa. Não dá para desfazer.`,
+      confirmLabel: "Excluir de vez",
+      tone: "danger"
+    });
+    if (!ok) return;
+    try {
+      await api(`/ledger/people/${person.id}?purge=1`, { method: "DELETE" });
+      toast.notify("Pessoa excluída");
+      await load();
+    } catch (error) {
+      toast.notify(error instanceof Error ? error.message : "Falha ao excluir", "error");
     }
   }
 
@@ -297,6 +371,8 @@ export function AccountsPage({ onOpenCash }: { onOpenCash?: () => void }) {
                 }
                 onEditAccount={setEditing}
                 onArchiveAccount={(account) => void archive(account)}
+                onPurgeAccount={(account) => void purgeAccount(account)}
+                onPurgePerson={(target) => void purgePerson(target)}
                 onRestoreAccount={(account) => void restoreAccount(account)}
               />
             ))}
@@ -404,7 +480,9 @@ function OwnerCard({
   onAddCard,
   onEditAccount,
   onArchiveAccount,
-  onRestoreAccount
+  onRestoreAccount,
+  onPurgeAccount,
+  onPurgePerson
 }: {
   person: PersonRecord | null;
   accounts: AccountRecord[];
@@ -416,6 +494,8 @@ function OwnerCard({
   onEditAccount: (account: AccountRecord) => void;
   onArchiveAccount: (account: AccountRecord) => void;
   onRestoreAccount: (account: AccountRecord) => void;
+  onPurgeAccount: (account: AccountRecord) => void;
+  onPurgePerson: (person: PersonRecord) => void;
 }) {
   const archivedPerson = person != null && !person.active;
   // Soma de dinheiro, não de dívida: cartão, conta arquivada e a ponte dos
@@ -437,12 +517,24 @@ function OwnerCard({
     (account) => isCard(account) && (account.paymentAccountId == null || !bankIds.has(account.paymentAccountId))
   );
 
-  const accountActions = (account: AccountRecord) =>
-    account.archived ? (
-      <IconButton icon={ArchiveRestore} label="Desarquivar" onClick={() => onRestoreAccount(account)} />
-    ) : (
-      <IconButton icon={Archive} label="Arquivar" onClick={() => onArchiveAccount(account)} />
-    );
+  const accountActions = (account: AccountRecord) => (
+    <>
+      {account.archived ? (
+        <IconButton icon={ArchiveRestore} label="Desarquivar" onClick={() => onRestoreAccount(account)} />
+      ) : (
+        <IconButton icon={Archive} label="Arquivar" onClick={() => onArchiveAccount(account)} />
+      )}
+      {/* A conta-ponte dos investimentos não se exclui: ela liga os dois módulos. */}
+      {account.kind !== "investment" && (
+        <IconButton
+          icon={Trash2}
+          tone="danger"
+          label={`Excluir ${account.name} de vez`}
+          onClick={() => onPurgeAccount(account)}
+        />
+      )}
+    </>
+  );
 
   return (
     <Panel className={`fin-owner ${archivedPerson ? "archived" : ""}`}>
@@ -469,14 +561,28 @@ function OwnerCard({
         {person && (
           <div className="fin-owner-actions">
             {archivedPerson ? (
-              <Button variant="ghost" icon={ArchiveRestore} onClick={() => onRestorePerson(person)}>
-                Reativar
-              </Button>
+              <>
+                <Button variant="ghost" icon={ArchiveRestore} onClick={() => onRestorePerson(person)}>
+                  Reativar
+                </Button>
+                <IconButton
+                  icon={Trash2}
+                  tone="danger"
+                  label={`Excluir ${person.name} de vez`}
+                  onClick={() => onPurgePerson(person)}
+                />
+              </>
             ) : (
               <>
                 <IconButton icon={Plus} label={`Nova conta de ${person.name}`} onClick={() => onAddAccount(person.id)} />
                 <IconButton icon={Pencil} label={`Editar ${person.name}`} onClick={() => onEditPerson(person)} />
-                <IconButton icon={Archive} label={`Remover ${person.name}`} onClick={() => onRemovePerson(person)} />
+                <IconButton icon={Archive} label={`Arquivar ${person.name}`} onClick={() => onRemovePerson(person)} />
+                <IconButton
+                  icon={Trash2}
+                  tone="danger"
+                  label={`Excluir ${person.name} de vez`}
+                  onClick={() => onPurgePerson(person)}
+                />
               </>
             )}
           </div>

@@ -1,4 +1,4 @@
-import { Archive, Plus, Save, Tags } from "lucide-react";
+import { Archive, Plus, Save, Tags, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { CategoryKind, CategoryRecord, TagRecord } from "@projeto41/contracts";
 import { parseCurrencyInput } from "@projeto41/finance";
@@ -81,6 +81,30 @@ export function CategoriesPage() {
     await load();
   }
 
+  /** Excluir de vez: os lançamentos ficam, sem categoria. */
+  async function purge(category: CategoryRecord) {
+    const ok = await confirm({
+      title: "Excluir categoria de vez",
+      message: `"${category.name}" será apagada. Os lançamentos que estavam nela continuam, mas ficam sem categoria. Não dá para desfazer.`,
+      confirmLabel: "Excluir de vez",
+      tone: "danger"
+    });
+    if (!ok) return;
+    try {
+      const result = await api<{ entries?: number }>(`/ledger/categories/${category.id}?purge=1`, {
+        method: "DELETE"
+      });
+      toast.notify(
+        result.entries
+          ? `Categoria excluída · ${result.entries} lançamento${result.entries === 1 ? "" : "s"} sem categoria`
+          : "Categoria excluída"
+      );
+      await load();
+    } catch (error) {
+      toast.notify(error instanceof Error ? error.message : "Falha ao excluir", "error");
+    }
+  }
+
   async function removeTag(tag: TagRecord) {
     const ok = await confirm({
       title: "Excluir etiqueta",
@@ -138,6 +162,12 @@ export function CategoriesPage() {
                             label="Arquivar"
                             onClick={() => void archive(category)}
                           />
+                          <IconButton
+                            icon={Trash2}
+                            tone="danger"
+                            label={`Excluir ${category.name} de vez`}
+                            onClick={() => void purge(category)}
+                          />
                         </span>
                       </li>
                     );
@@ -166,7 +196,7 @@ export function CategoriesPage() {
                     <ColorDot color={tag.color} />
                     {tag.name}
                   </button>
-                  <IconButton icon={Archive} label="Excluir" onClick={() => void removeTag(tag)} />
+                  <IconButton icon={Trash2} tone="danger" label="Excluir" onClick={() => void removeTag(tag)} />
                 </li>
               ))}
             </ul>
