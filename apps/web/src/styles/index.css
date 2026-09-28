@@ -1896,14 +1896,23 @@ main {
   z-index: 70;
   top: calc(100% + 8px);
   left: 0;
+  /* Nunca a largura do campo: meia coluna não cabe sete dias e a grade vazava. */
   width: 280px;
-  max-width: 100%;
+  max-width: calc(100vw - 16px);
   padding: 14px;
   border-radius: var(--radius);
   border: 1px solid var(--border-strong);
   background: var(--surface);
   box-shadow: var(--shadow-pop);
   animation: pop 0.16s ease;
+}
+.datepop-right {
+  left: auto;
+  right: 0;
+}
+.datepop-up {
+  top: auto;
+  bottom: calc(100% + 8px);
 }
 .datepop-head {
   display: flex;
@@ -2821,6 +2830,94 @@ main {
   min-width: 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   text-transform: lowercase;
+}
+
+/* Selo do cartão na linha do livro: compra no crédito se destaca do que já
+   saiu da conta. O "·" de `span + span::before` cairia dentro do selo:
+   ele troca o ponto por um espaço. */
+.fin-entry-meta > span + .fin-card-chip {
+  margin-left: 8px;
+}
+.fin-entry-meta > span + .fin-card-chip::before {
+  content: none;
+}
+.fin-card-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 8px 1px 6px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+.fin-card-chip svg {
+  flex: 0 0 auto;
+}
+
+/* Seletor de arquivo: botão, nome cortado com reticências e limpar, na
+   altura dos outros campos. */
+.file-picker {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 5px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--input-bg);
+}
+.file-picker-button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition);
+}
+.file-picker-button:hover {
+  border-color: var(--accent);
+}
+.file-picker-button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.file-picker-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--text-faint);
+}
+.file-picker.has-file .file-picker-name {
+  color: var(--text);
+}
+.file-picker-clear {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.file-picker-clear:hover {
+  background: var(--surface-2);
+  color: var(--text);
 }
 
 .fin-swatches {

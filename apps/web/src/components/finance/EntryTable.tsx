@@ -249,13 +249,17 @@ function EntryRow({
           : `${entry.counterpartAccountName} → ${entry.accountName}`}
       </span>
     );
-  } else {
+  } else if (entry.accountKind === "credit_card") {
+    // Compra no cartão ganha um selo: é dinheiro que só sai na fatura, e na
+    // lista de tudo precisa se destacar do que já saiu da conta.
     meta.push(
-      <span key="account" className="fin-inline">
-        {entry.accountKind === "credit_card" && <CreditCard size={11} aria-hidden />}
+      <span key="account" className="fin-card-chip" title={`No cartão ${entry.accountName}`}>
+        <CreditCard size={12} aria-hidden />
         {entry.accountName}
       </span>
     );
+  } else {
+    meta.push(<span key="account">{entry.accountName}</span>);
   }
 
   return (

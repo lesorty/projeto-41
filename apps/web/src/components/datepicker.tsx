@@ -3,6 +3,9 @@ import { useEffect, useId, useRef, useState } from "react";
 import { monthNames, monthShort } from "../lib/format.js";
 
 const WEEKDAYS = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
+/** Tamanho do calendário aberto (o mesmo do CSS de `.datepop`), para escolher o lado. */
+const POP_WIDTH = 280;
+const POP_HEIGHT = 340;
 
 // Datas da app são strings "YYYY-MM-DD"; ancoramos ao meio-dia local para
 // evitar deslocamento de fuso ao formatar.
@@ -32,6 +35,20 @@ export function DateField({ value, onChange }: { value: string; onChange: (value
   const [view, setView] = useState(() => parseDate(value));
   const rootRef = useRef<HTMLDivElement>(null);
   const dialogId = useId();
+  // O calendário tem largura própria: num campo estreito, perto da borda
+  // direita ou do pé da tela, ele abre para o lado e para cima que cabem.
+  const [placement, setPlacement] = useState({ right: false, up: false });
+
+  function toggle() {
+    if (!open && rootRef.current) {
+      const rect = rootRef.current.getBoundingClientRect();
+      setPlacement({
+        right: rect.left + POP_WIDTH > window.innerWidth - 8,
+        up: rect.bottom + POP_HEIGHT > window.innerHeight - 8 && rect.top > POP_HEIGHT
+      });
+    }
+    setOpen((prev) => !prev);
+  }
 
   // Ao abrir, posiciona o calendário no mês da data selecionada.
   useEffect(() => {
@@ -82,13 +99,18 @@ export function DateField({ value, onChange }: { value: string; onChange: (value
         className={`datefield-trigger ${open ? "open" : ""}`}
         aria-haspopup="dialog"
         aria-expanded={open}
-        onClick={() => setOpen((prev) => !prev)}
+        onClick={toggle}
       >
         <CalendarDays size={15} />
         <span>{triggerLabel}</span>
       </button>
       {open && (
-        <div className="datepop" role="dialog" aria-modal="false" aria-labelledby={dialogId}>
+        <div
+          className={`datepop ${placement.right ? "datepop-right" : ""} ${placement.up ? "datepop-up" : ""}`}
+          role="dialog"
+          aria-modal="false"
+          aria-labelledby={dialogId}
+        >
           <div className="datepop-head">
             <button type="button" aria-label="Mês anterior" onClick={() => setView(new Date(year, month - 1, 1))}>
               <ChevronLeft size={16} />
