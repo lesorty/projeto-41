@@ -74,3 +74,23 @@ describe("POST /api/ledger/goals/:id/mark", () => {
     expect(await balanceOfGoal()).toBe(100_00);
   });
 });
+
+describe("PUT /api/ledger/goals/order", () => {
+  it("devolve as caixinhas na ordem gravada, com as novas no fim", async () => {
+    const second = (
+      await post("/api/ledger/goals", { name: "Carro", mode: "earmark", accountId: checking, color: "#123456" })
+    ).json().id;
+    const put = await app.inject({
+      method: "PUT",
+      url: "/api/ledger/goals/order",
+      payload: { ids: [second, goal, 9999] }
+    });
+    expect(put.json().ids).toEqual([second, goal]);
+
+    const third = (
+      await post("/api/ledger/goals", { name: "Casa", mode: "earmark", accountId: checking, color: "#654321" })
+    ).json().id;
+    const list = await app.inject("/api/ledger/goals").then((r) => r.json());
+    expect(list.map((item: { id: number }) => item.id)).toEqual([second, goal, third]);
+  });
+});

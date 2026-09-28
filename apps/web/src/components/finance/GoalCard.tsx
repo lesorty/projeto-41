@@ -1,6 +1,6 @@
-import { PiggyBank, Wallet } from "lucide-react";
+import { ChevronLeft, ChevronRight, PiggyBank, Wallet } from "lucide-react";
 import type { GoalProgress } from "@projeto41/contracts";
-import { AnimatedNumber, Button, Tag } from "../ui.js";
+import { AnimatedNumber, Button, IconButton, Tag } from "../ui.js";
 import { longDate, monthLabel, moneyFromCents } from "../../lib/format.js";
 
 /**
@@ -15,9 +15,12 @@ export function GoalCard({
   cdiThrough,
   onOpen,
   onDeposit,
-  onEdit
+  onEdit,
+  onMove
 }: {
   goal: GoalProgress;
+  /** Troca de lugar com a vizinha; ausente na ponta onde não dá para ir. */
+  onMove?: { back?: () => void; forward?: () => void };
   /** Última data com taxa publicada, para rotular a projeção. */
   cdiThrough: string | null;
   onOpen: () => void;
@@ -39,6 +42,22 @@ export function GoalCard({
             {goal.mode === "account" ? "Conta" : "Marcação"}
           </Tag>
           {yields && <Tag tone="positive">{goal.cdiPercent}% do CDI</Tag>}
+          {onMove && (
+            <span className="fin-goal-order">
+              <IconButton
+                icon={ChevronLeft}
+                label="Mover para antes"
+                disabled={!onMove.back}
+                onClick={onMove.back}
+              />
+              <IconButton
+                icon={ChevronRight}
+                label="Mover para depois"
+                disabled={!onMove.forward}
+                onClick={onMove.forward}
+              />
+            </span>
+          )}
         </span>
       </header>
 

@@ -54,6 +54,27 @@ export function GoalsPage() {
     [goals]
   );
 
+  /**
+   * Troca a caixinha de lugar com a vizinha. A tela muda na hora; se gravar
+   * falhar, volta para a ordem do servidor.
+   */
+  async function move(index: number, step: -1 | 1) {
+    const target = index + step;
+    if (target < 0 || target >= goals.length) return;
+    const next = [...goals];
+    [next[index], next[target]] = [next[target]!, next[index]!];
+    setGoals(next);
+    try {
+      await api("/ledger/goals/order", {
+        method: "PUT",
+        body: JSON.stringify({ ids: next.map((goal) => goal.id) })
+      });
+    } catch (error) {
+      toast.notify(error instanceof Error ? error.message : "Falha ao salvar a ordem", "error");
+      await load();
+    }
+  }
+
   async function openStatement(goal: GoalProgress) {
     const rows = await api<EntryListResult>(`/ledger/goals/${goal.id}/entries?pageSize=200`);
     setStatement({ goal, rows });
@@ -102,10 +123,18 @@ export function GoalsPage() {
         <Empty icon={PiggyBank} text="Nenhuma caixinha ainda." />
       ) : (
         <div className="fin-goal-grid">
-          {goals.map((goal) => (
+          {goals.map((goal, index) => (
             <GoalCard
               key={goal.id}
               goal={goal}
+              onMove={
+                goals.length > 1
+                  ? {
+                      back: index > 0 ? () => void move(index, -1) : undefined,
+                      forward: index < goals.length - 1 ? () => void move(index, 1) : undefined
+                    }
+                  : undefined
+              }
               cdiThrough={cdi?.lastDate ?? null}
               onOpen={() => void openStatement(goal)}
               onDeposit={() => setMoving(goal)}

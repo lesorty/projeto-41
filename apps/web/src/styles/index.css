@@ -5581,3 +5581,19 @@ select option {
 .couple-person dd {
   white-space: nowrap;
 }
+
+/* Setas para reordenar as caixinhas, discretas até o cartão ganhar foco. */
+.fin-goal-order {
+  display: inline-flex;
+  gap: 2px;
+  opacity: 0.55;
+  transition: opacity var(--transition);
+}
+.fin-goal-card:hover .fin-goal-order,
+.fin-goal-order:focus-within {
+  opacity: 1;
+}
+.fin-goal-order .icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
