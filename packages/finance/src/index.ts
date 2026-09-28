@@ -112,3 +112,4 @@ export * from "./cdi.js";
 export * from "./taxes.js";
 export * from "./goals.js";
 export * from "./anticipation.js";
+export * from "./couple-split.js";

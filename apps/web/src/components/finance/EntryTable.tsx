@@ -131,7 +131,9 @@ function Payer({ entry }: { entry: EntryRecord }) {
     <span
       className="fin-payer"
       style={{ "--payer-color": entry.personColor ?? "#8b949e" } as React.CSSProperties}
-      title={`Pago por ${entry.personName}`}
+      title={
+        entry.amountCents > 0 ? `Veio de ${entry.personName}` : `Pago por ${entry.personName}`
+      }
     >
       <b aria-hidden>{entry.personName.charAt(0).toUpperCase()}</b>
       <span>{entry.personName}</span>

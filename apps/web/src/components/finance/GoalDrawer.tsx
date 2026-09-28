@@ -5,12 +5,47 @@ import { parseCurrencyInput } from "@projeto41/finance";
 import { ColorPicker } from "../ColorPicker.js";
 import { DateField } from "../datepicker.js";
 import { Drawer, useConfirm } from "../dialog.js";
-import { Button, Field, Segmented } from "../ui.js";
+import { Button, Field } from "../ui.js";
 import { AccountSelect } from "./AccountSelect.js";
 import { api } from "../../lib/api.js";
 import { centsToInput } from "../../lib/format.js";
 import { useToast } from "../../lib/toast.js";
 import { MoneyInput } from "../forms.js";
+
+/**
+ * Os dois tipos lado a lado. A diferença decide onde o dinheiro está e se ele
+ * rende, então cada cartão diz o que é, o que acontece e quando usar.
+ */
+const GOAL_MODES: {
+  value: GoalMode;
+  label: string;
+  what: string;
+  facts: string[];
+  when: string;
+}[] = [
+  {
+    value: "account",
+    label: "Conta própria",
+    what: "Uma conta separada só para o objetivo, como a caixinha do banco ou um CDB.",
+    facts: [
+      "O dinheiro sai de uma conta ao depositar e volta ao resgatar",
+      "Pode render pelo CDI, com IR e IOF calculados",
+      "Aparece como conta, com saldo próprio"
+    ],
+    when: "Use quando o dinheiro fica de fato guardado em outro lugar."
+  },
+  {
+    value: "earmark",
+    label: "Marcação",
+    what: "Uma etiqueta sobre parte do saldo de uma conta que já existe.",
+    facts: [
+      "Nada se move: o dinheiro continua na conta",
+      "Não rende",
+      "Separa, por exemplo, R$ 1.500 da Nubank para a viagem"
+    ],
+    when: "Use quando o dinheiro fica na conta corrente e você só quer separá-lo."
+  }
+];
 
 export function GoalDrawer({
   goal,
@@ -127,40 +162,49 @@ export function GoalDrawer({
         </Field>
 
         <div className="field">
-          <span className="field-label">Modo</span>
-          {editing ? (
+          <span className="field-label">Tipo</span>
+          {editing && (
             // O modo não muda depois de criado: converter marcação em conta
             // significaria criar dinheiro do nada.
             <p className="fin-muted">
-              {goal.mode === "account" ? "Conta própria" : "Marcação sobre uma conta"} · o modo
-              não muda depois de criado. Para trocar, crie outra caixinha e transfira o dinheiro.
+              O tipo não muda depois de criado. Para trocar, crie outra caixinha e transfira o
+              dinheiro.
             </p>
-          ) : (
-            <Segmented<GoalMode>
-              value={mode}
-              onChange={setMode}
-              options={[
-                { value: "account", label: "Conta própria" },
-                { value: "earmark", label: "Marcação" }
-              ]}
-            />
           )}
+          <div className="goal-mode-options" role="radiogroup" aria-label="Tipo da caixinha">
+            {GOAL_MODES.filter((option) => !editing || option.value === goal.mode).map(
+              (option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={mode === option.value}
+                  className={`goal-mode-option ${mode === option.value ? "active" : ""}`}
+                  disabled={editing}
+                  onClick={() => setMode(option.value)}
+                >
+                  <strong>{option.label}</strong>
+                  <span>{option.what}</span>
+                  <ul>
+                    {option.facts.map((fact) => (
+                      <li key={fact}>{fact}</li>
+                    ))}
+                  </ul>
+                  <em>{option.when}</em>
+                </button>
+              )
+            )}
+          </div>
         </div>
 
         {!editing && mode === "earmark" && (
-          <>
-            <Field label="Conta marcada">
-              <AccountSelect
-                value={accountId}
-                onChange={setAccountId}
-                exclude={["credit_card", "investment", "goal"]}
-              />
-            </Field>
-            <p className="fin-muted">
-              Marcação é uma anotação sobre o saldo de uma conta que já existe. O
-              dinheiro não se move e <strong>não rende</strong>.
-            </p>
-          </>
+          <Field label="Conta marcada" hint="A conta onde o dinheiro já está.">
+            <AccountSelect
+              value={accountId}
+              onChange={setAccountId}
+              exclude={["credit_card", "investment", "goal"]}
+            />
+          </Field>
         )}
 
         <div className="field-row">

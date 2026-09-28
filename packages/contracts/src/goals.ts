@@ -71,6 +71,11 @@ export const goalAllocationSchema = z.object({
   amountCents: centsSchema.positive()
 });
 
+/** Separa (positivo) ou libera (negativo) parte do saldo numa marcação. */
+export const goalMarkSchema = z.object({
+  amountCents: centsSchema.refine((value) => value !== 0, "Informe um valor")
+});
+
 export const goalAccrueSchema = z.object({ through: isoDateSchema.optional() });
 
 export type GoalCreateInput = z.input<typeof goalCreateSchema>;

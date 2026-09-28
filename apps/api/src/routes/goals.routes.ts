@@ -4,6 +4,7 @@ import {
   goalAllocationSchema,
   goalCreateSchema,
   goalDepositSchema,
+  goalMarkSchema,
   goalUpdateSchema,
   goalWithdrawalSchema
 } from "@projeto41/contracts";
@@ -128,6 +129,16 @@ export const registerGoalsRoutes: RoutePlugin = (app, { db, cdiService }) => {
     const body = goalAllocationSchema.parse(request.body);
     const result = ledger.goals.allocate(id, body.entryId, body.amountCents);
     return { ...result, goal: ledger.goals.progress(id, today()) };
+  });
+
+  /** Marcação por valor, sem escolher lançamento: o "Movimentar" da marcação. */
+  app.post("/api/ledger/goals/:id/mark", async (request, reply) => {
+    const { id } = idParam.parse(request.params);
+    const goal = ledger.goals.get(id);
+    if (!goal) return reply.status(404).send({ error: "Caixinha nao encontrada" });
+    const { amountCents } = goalMarkSchema.parse(request.body);
+    const result = ledger.goals.mark(id, amountCents);
+    return { ...result, goal: ledger.goals.progress(id, today()), balances: balances() };
   });
 
   app.post("/api/ledger/goals/:id/deallocate", async (request, reply) => {

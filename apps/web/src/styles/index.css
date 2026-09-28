@@ -5384,3 +5384,200 @@ select option {
   left: auto;
   right: 0;
 }
+
+/* Tipo da caixinha: dois cartões que explicam o que cada um faz. */
+.goal-mode-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 10px;
+}
+.goal-mode-option {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--input-bg);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--transition), background var(--transition);
+}
+.goal-mode-option strong {
+  color: var(--text);
+  font-size: 14px;
+}
+.goal-mode-option ul {
+  margin: 0;
+  padding-left: 18px;
+}
+.goal-mode-option em {
+  font-style: normal;
+  color: var(--text-faint);
+}
+.goal-mode-option:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.goal-mode-option.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.goal-mode-option.active em {
+  color: var(--accent-text);
+}
+.goal-mode-option:disabled {
+  cursor: default;
+}
+
+/*
+ * Formulário de lançamento compacto: cabe inteiro na tela sem rolar. Os
+ * campos curtos andam em pares, as dicas repetidas saem, e a gaveta fica um
+ * pouco mais larga para as duplas não espremerem.
+ */
+.drawer:has(.entry-form) {
+  width: min(560px, 100%);
+}
+.entry-form.stack {
+  gap: 12px;
+}
+.entry-form .field {
+  gap: 5px;
+}
+.entry-form .field-row {
+  gap: 12px;
+}
+.entry-form .field-row > * {
+  min-width: 0;
+}
+.entry-form .fin-photo-field {
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.entry-form .fin-photo-field > .field-hint {
+  display: none;
+}
+.entry-form .fin-photo-item {
+  width: 44px;
+  height: 44px;
+}
+.entry-form .fin-photo-add {
+  flex-direction: row;
+  width: auto;
+  height: 38px;
+  padding: 0 12px;
+  gap: 6px;
+}
+
+/* De quem veio o dinheiro da conjunta, e quanto cada um deposita. */
+.couple-split {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.couple-split-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.couple-split-head span {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.couple-split-people {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+.couple-person {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+.couple-person > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+}
+.couple-person > header .fin-muted {
+  font-size: 12px;
+}
+.couple-person dl {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+}
+.couple-person dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+}
+.couple-person dt {
+  color: var(--text-muted);
+}
+.couple-person dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.couple-person .couple-deposit {
+  padding: 6px 8px;
+  margin: 2px -8px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+}
+.couple-person .couple-deposit dt,
+.couple-person .couple-deposit dd {
+  color: var(--accent-text);
+}
+.couple-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.couple-progress small {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.couple-progress-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+}
+.couple-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+.couple-progress-fill.done {
+  background: var(--positive);
+}
+.fin-callout.warning {
+  border-color: var(--warning);
+  background: var(--warning-soft);
+  color: var(--text);
+}
+.drawer:has(#target-form) {
+  width: min(600px, 100%);
+}
+.couple-person dt,
+.couple-person dd {
+  white-space: nowrap;
+}

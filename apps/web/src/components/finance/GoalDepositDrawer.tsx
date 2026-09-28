@@ -36,12 +36,31 @@ export function GoalDepositDrawer({
    * do resgate total; num saque parcial ela é o teto do imposto.
    */
   const showTaxes = direction === "withdraw" && (goal.iofCents > 0 || goal.irCents > 0);
+  // Marcação não move dinheiro: separa ou libera parte do saldo da conta que
+  // ela marca. Não tem conta de origem, data nem descrição.
+  const earmark = goal.mode === "earmark";
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     const cents = parseCurrencyInput(amount);
     if (cents == null || cents <= 0) {
       toast.notify("Informe um valor válido", "error");
+      return;
+    }
+    if (earmark) {
+      setSaving(true);
+      try {
+        await api(`/ledger/goals/${goal.id}/mark`, {
+          method: "POST",
+          body: JSON.stringify({ amountCents: direction === "deposit" ? cents : -cents })
+        });
+        toast.notify(direction === "deposit" ? "Valor separado" : "Valor liberado");
+        await onDone();
+      } catch (error) {
+        toast.notify(error instanceof Error ? error.message : "Falha ao salvar", "error");
+      } finally {
+        setSaving(false);
+      }
       return;
     }
     if (accountId == null) {
@@ -89,11 +108,26 @@ export function GoalDepositDrawer({
         <Segmented<Direction>
           value={direction}
           onChange={setDirection}
-          options={[
-            { value: "deposit", label: "Depositar" },
-            { value: "withdraw", label: "Sacar" }
-          ]}
+          options={
+            earmark
+              ? [
+                  { value: "deposit", label: "Separar" },
+                  { value: "withdraw", label: "Liberar" }
+                ]
+              : [
+                  { value: "deposit", label: "Depositar" },
+                  { value: "withdraw", label: "Sacar" }
+                ]
+          }
         />
+
+        {earmark && (
+          <p className="fin-muted">
+            {direction === "deposit"
+              ? `Separa parte do saldo de ${goal.accountName ?? "conta"} para esta caixinha. O dinheiro continua na conta.`
+              : `Devolve parte do que está separado ao saldo livre de ${goal.accountName ?? "conta"}.`}
+          </p>
+        )}
 
         <div className="field-row">
           <Field label="Valor">
@@ -105,18 +139,22 @@ export function GoalDepositDrawer({
               placeholder="0,00"
             />
           </Field>
-          <Field label="Data">
-            <DateField value={date} onChange={setDate} />
-          </Field>
+          {!earmark && (
+            <Field label="Data">
+              <DateField value={date} onChange={setDate} />
+            </Field>
+          )}
         </div>
 
-        <Field label={direction === "deposit" ? "Sai da conta" : "Volta para a conta"}>
-          <AccountSelect
-            value={accountId}
-            onChange={setAccountId}
-            exclude={["credit_card", "investment", "goal"]}
-          />
-        </Field>
+        {!earmark && (
+          <Field label={direction === "deposit" ? "Sai da conta" : "Volta para a conta"}>
+            <AccountSelect
+              value={accountId}
+              onChange={setAccountId}
+              exclude={["credit_card", "investment", "goal"]}
+            />
+          </Field>
+        )}
 
         {showTaxes && (
           <div className="fin-effect">
@@ -131,13 +169,15 @@ export function GoalDepositDrawer({
           </div>
         )}
 
-        <Field label="Descrição" hint="Opcional">
-          <input
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-            placeholder="Ex.: sobra do mês"
-          />
-        </Field>
+        {!earmark && (
+          <Field label="Descrição" hint="Opcional">
+            <input
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              placeholder="Ex.: sobra do mês"
+            />
+          </Field>
+        )}
       </form>
     </Drawer>
   );

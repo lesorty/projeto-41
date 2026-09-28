@@ -32,6 +32,14 @@ export function AccountSelect({
   }, []);
 
   const usable = accounts.filter((account) => !exclude.includes(account.kind));
+  const firstUsable = usable[0]?.id ?? null;
+
+  // Sem "nenhuma", o navegador mostra a primeira conta como escolhida mesmo
+  // com o valor vazio: o formulário parecia pronto e o servidor recusava por
+  // falta de conta. O valor passa a ser o que a tela mostra.
+  useEffect(() => {
+    if (!allowNone && value == null && firstUsable != null) onChange(firstUsable);
+  }, [allowNone, value, firstUsable, onChange]);
   const groups = new Map<string, AccountRecord[]>();
   for (const account of usable) {
     const key = account.personName ?? "Sem pessoa";

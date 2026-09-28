@@ -291,6 +291,81 @@ export function createGoalsRepository(db: Db) {
         return { ok: true as const, freeBalanceCents: available };
       })(),
 
+    /**
+     * Marcação por valor: separa (`delta` > 0) ou libera (`delta` < 0) parte do
+     * saldo da conta, sem o usuário escolher lançamento.
+     *
+     * A alocação continua presa a um lançamento, como o esquema pede: separar
+     * soma no último dinheiro que entrou na conta; liberar tira das alocações
+     * mais recentes primeiro. A mesma invariante do `allocate` vale no fim.
+     */
+    mark: (id: number, deltaCents: number) =>
+      db.transaction(() => {
+        const goal = repository.get(id);
+        if (!goal) throw notFound("Caixinha");
+        if (goal.mode !== "earmark" || goal.accountId == null) {
+          throw new LedgerError("Separar valor so existe em caixinha de marcacao");
+        }
+        if (!Number.isInteger(deltaCents) || deltaCents === 0) {
+          throw new LedgerError("Informe um valor para separar ou liberar");
+        }
+
+        if (deltaCents > 0) {
+          const anchor = db
+            .prepare(
+              `SELECT id FROM entries
+               WHERE account_id = ? AND amount_cents > 0 AND date <= ?
+                 AND status IN ('cleared','reconciled')
+               ORDER BY date DESC, id DESC LIMIT 1`
+            )
+            .get(goal.accountId, today()) as { id: number } | undefined;
+          if (!anchor) {
+            throw new LedgerError("A conta ainda nao recebeu dinheiro para separar");
+          }
+          db.prepare(
+            `INSERT INTO goal_allocations(goal_id, entry_id, amount_cents) VALUES (?, ?, ?)
+             ON CONFLICT(goal_id, entry_id) DO UPDATE SET amount_cents = amount_cents + excluded.amount_cents`
+          ).run(id, anchor.id, deltaCents);
+        } else {
+          const allocations = db
+            .prepare(
+              `SELECT ga.entry_id AS entryId, ga.amount_cents AS amountCents
+               FROM goal_allocations ga JOIN entries e ON e.id = ga.entry_id
+               WHERE ga.goal_id = ? ORDER BY e.date DESC, e.id DESC`
+            )
+            .all(id) as { entryId: number; amountCents: number }[];
+          const marked = allocations.reduce((sum, row) => sum + row.amountCents, 0);
+          if (marked < -deltaCents) {
+            throw new LedgerError(`A caixinha so tem R$ ${(marked / 100).toFixed(2).replace(".", ",")} separados`);
+          }
+          let remaining = -deltaCents;
+          for (const row of allocations) {
+            if (remaining <= 0) break;
+            const take = Math.min(row.amountCents, remaining);
+            remaining -= take;
+            if (take === row.amountCents) {
+              db.prepare("DELETE FROM goal_allocations WHERE goal_id = ? AND entry_id = ?").run(
+                id,
+                row.entryId
+              );
+            } else {
+              db.prepare(
+                "UPDATE goal_allocations SET amount_cents = amount_cents - ? WHERE goal_id = ? AND entry_id = ?"
+              ).run(take, id, row.entryId);
+            }
+          }
+        }
+
+        const available = repository.freeBalance(goal.accountId);
+        // Liberar sempre pode: é o que conserta uma conta que ficou curta.
+        if (deltaCents > 0 && available < 0) {
+          throw new LedgerError(
+            `Falta saldo livre na conta: passaria em R$ ${(Math.abs(available) / 100).toFixed(2).replace(".", ",")}`
+          );
+        }
+        return { ok: true as const, freeBalanceCents: available };
+      })(),
+
     deallocate: (id: number, entryId: number) =>
       db.prepare("DELETE FROM goal_allocations WHERE goal_id = ? AND entry_id = ?").run(id, entryId)
         .changes,

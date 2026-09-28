@@ -291,7 +291,18 @@ export function EntryDrawer({
     adjustByBalance && systemBalance != null && typedSigned != null
       ? typedSigned - systemBalance
       : null;
-  const effectivePersonId = personId ?? account?.personId ?? null;
+  // Entrada direto na conjunta (salário, Pix de fora): a conta é do casal, mas o
+  // dinheiro veio de alguém, e é isso que diz quanto cada um já depositou.
+  const accountOwner = reference.people.find((person) => person.id === account?.personId);
+  const jointDeposit = kind === "income" && accountOwner?.kind === "joint";
+  const individualIds = new Set(
+    reference.people.filter((person) => person.kind === "individual").map((person) => person.id)
+  );
+  const effectivePersonId = jointDeposit
+    ? personId != null && individualIds.has(personId)
+      ? personId
+      : null
+    : (personId ?? account?.personId ?? null);
   const isCard = account?.kind === "credit_card";
   const typedCents = Math.abs(parseCurrencyInput(amount) ?? 0);
   const totalCents =
@@ -336,6 +347,10 @@ export function EntryDrawer({
     const cents = parseCurrencyInput(amount);
     if (cents == null || cents === 0) {
       toast.notify("Informe um valor válido", "error");
+      return;
+    }
+    if (jointDeposit && effectivePersonId == null) {
+      toast.notify("Diga de quem veio o dinheiro que entrou na conta conjunta", "error");
       return;
     }
     if (accountId == null) {
@@ -601,7 +616,7 @@ export function EntryDrawer({
         </>
       }
     >
-      <form id="entry-form" className="stack" onSubmit={submit}>
+      <form id="entry-form" className="stack entry-form" onSubmit={submit}>
         {isRefund ? (
           <p className="fin-muted">
             Estorno de um lançamento: o valor abate o original, e o tipo não muda.
@@ -707,20 +722,46 @@ export function EntryDrawer({
         )}
 
         {kind === "expense" && !isRefund && (
-          <Field label="Forma de pagamento">
-            <Segmented<PayWith>
-              value={payWith}
-              onChange={(next) => {
-                if (inSeries) return;
-                setPayWith(next);
-                if (next === "money") setInstallmentMode("single");
-              }}
-              options={[
-                { value: "money", label: "Dinheiro" },
-                { value: "credit", label: "Crédito" }
-              ]}
-            />
-          </Field>
+          <div className="field-row">
+            <Field label="Pagamento">
+              <Segmented<PayWith>
+                value={payWith}
+                onChange={(next) => {
+                  if (inSeries) return;
+                  setPayWith(next);
+                  if (next === "money") setInstallmentMode("single");
+                }}
+                options={[
+                  { value: "money", label: "Dinheiro" },
+                  { value: "credit", label: "Crédito" }
+                ]}
+              />
+            </Field>
+            {payWith === "credit" ? (
+              cardOptions.length > 0 && (
+                <Field label="Cartão">
+                  <Dropdown<number>
+                    value={cardId}
+                    onChange={setCardId}
+                    options={cardOptions}
+                    placeholder="Escolher cartão"
+                    disabled={inSeries}
+                    aria-label="Cartão"
+                  />
+                </Field>
+              )
+            ) : (
+              <Field label="Conta">
+                <Dropdown<number>
+                  value={moneyAccountId}
+                  onChange={setMoneyAccountId}
+                  options={accountOptions}
+                  placeholder="Escolher conta"
+                  aria-label="Conta"
+                />
+              </Field>
+            )}
+          </div>
         )}
 
         {kind === "expense" && payWith === "credit" && !isRefund ? (
@@ -729,19 +770,8 @@ export function EntryDrawer({
               Nenhum cartão cadastrado. Crie o cartão dentro da conta do banco, em Contas e pessoas.
             </p>
           ) : (
-            <>
-              <Field label="Cartão">
-                <Dropdown<number>
-                  value={cardId}
-                  onChange={setCardId}
-                  options={cardOptions}
-                  placeholder="Escolher cartão"
-                  disabled={inSeries}
-                  aria-label="Cartão"
-                />
-              </Field>
-              {/* Parcelar é na criação; na edição só se vê o plano que já existe. */}
-              {(!editing || inSeries) && (
+            /* Parcelar é na criação; na edição só se vê o plano que já existe. */
+            (!editing || inSeries) && (
               <InstallmentFields
                 mode={inSeries ? "installments" : installmentMode}
                 onModeChange={setInstallmentMode}
@@ -755,10 +785,9 @@ export function EntryDrawer({
                 dueDay={account?.dueDay ?? 10}
                 readOnly={inSeries}
               />
-              )}
-            </>
+            )
           )
-        ) : kind === "adjustment" ? null : (
+        ) : kind === "adjustment" || (kind === "expense" && !isRefund) ? null : (
           <div className={kind === "transfer" || kind === "investment" ? "field-row" : ""}>
             <Field
               label={
@@ -819,60 +848,83 @@ export function EntryDrawer({
         {/* Transferência nunca tem categoria (D21); aporte é transferência, e
             ajuste não é gasto nem ganho. */}
         {kind !== "transfer" && kind !== "investment" && kind !== "adjustment" && (
-          <Field label="Categoria">
-            <Dropdown<number>
-              value={categoryId}
-              onChange={setCategoryId}
-              emptyLabel="Sem categoria"
-              options={categories.map((category) => ({
-                value: category.id,
-                label: category.name,
-                color: category.color ?? null
-              }))}
-              aria-label="Categoria"
+          <div className="field-row">
+            <Field label="Categoria">
+              <Dropdown<number>
+                value={categoryId}
+                onChange={setCategoryId}
+                emptyLabel="Sem categoria"
+                options={categories.map((category) => ({
+                  value: category.id,
+                  label: category.name,
+                  color: category.color ?? null
+                }))}
+                aria-label="Categoria"
+              />
+            </Field>
+            <PlaceAutocomplete
+              hint={null}
+              value={placeName}
+              onChange={(name, place) => {
+                setPlaceName(name);
+                setPlaceId(place?.id ?? null);
+                // Categoria padrão do local só preenche o que ainda está vazio:
+                // nunca sobrescreve a escolha do usuário.
+                if (place?.defaultCategoryId != null && categoryId == null) {
+                  setCategoryId(place.defaultCategoryId);
+                }
+              }}
             />
-          </Field>
+          </div>
         )}
 
         {/* O aporte se descreve sozinho ("Aporte · posição"): o resto é do gasto. */}
         {kind !== "investment" && (
         <>
-        <Field label="Descrição" hint="Opcional">
-          <input
-            value={description}
-            onChange={(event) => setDescription(event.target.value)}
-            placeholder="Ex.: Compra da semana"
-          />
-        </Field>
-
-        {kind !== "transfer" && kind !== "adjustment" && (
-          <PlaceAutocomplete
-            value={placeName}
-            onChange={(name, place) => {
-              setPlaceName(name);
-              setPlaceId(place?.id ?? null);
-              // Categoria padrão do local só preenche o que ainda está vazio:
-              // nunca sobrescreve a escolha do usuário.
-              if (place?.defaultCategoryId != null && categoryId == null) {
-                setCategoryId(place.defaultCategoryId);
-              }
-            }}
-          />
-        )}
+        <div className={reference.tags.length > 0 ? "field-row" : ""}>
+          <Field label="Descrição">
+            <input
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              placeholder="Opcional · ex.: compra da semana"
+            />
+          </Field>
+          {reference.tags.length > 0 && (
+            <Field label="Etiquetas">
+              <Dropdown<number>
+                multiple
+                value={tagIds}
+                onChange={setTagIds}
+                placeholder="Nenhuma"
+                options={reference.tags.map((tag) => ({
+                  value: tag.id,
+                  label: tag.name,
+                  color: tag.color
+                }))}
+                aria-label="Etiquetas"
+              />
+            </Field>
+          )}
+        </div>
 
         {kind !== "adjustment" && (
         <div className="field-row">
-          <Field label="Quem pagou" hint="Herdado da conta">
+          <Field
+            label={jointDeposit ? "De quem veio" : kind === "income" ? "Quem recebeu" : "Quem pagou"}
+          >
             <Dropdown<number>
               value={effectivePersonId}
               onChange={setPersonId}
-              emptyLabel="Sem pessoa"
-              options={peopleOptions.map((person) => ({
-                value: person.id,
-                label: person.name,
-                color: person.color
-              }))}
-              aria-label="Quem pagou"
+              emptyLabel={jointDeposit ? undefined : "Sem pessoa"}
+              placeholder={jointDeposit ? "Escolher quem depositou" : undefined}
+              options={peopleOptions
+                .filter((person) => !jointDeposit || person.kind === "individual")
+                .map((person) => ({
+                  value: person.id,
+                  label: person.name,
+                  color: person.color
+                }))}
+              aria-label={jointDeposit ? "De quem veio" : "Quem pagou"}
             />
           </Field>
           <Field label="Status">
@@ -887,23 +939,6 @@ export function EntryDrawer({
             />
           </Field>
         </div>
-        )}
-
-        {reference.tags.length > 0 && (
-          <Field label="Etiquetas" hint="Opcional">
-            <Dropdown<number>
-              multiple
-              value={tagIds}
-              onChange={setTagIds}
-              placeholder="Nenhuma etiqueta"
-              options={reference.tags.map((tag) => ({
-                value: tag.id,
-                label: tag.name,
-                color: tag.color
-              }))}
-              aria-label="Etiquetas"
-            />
-          </Field>
         )}
 
         {kind !== "adjustment" && (
@@ -953,10 +988,13 @@ export function EntryDrawer({
 /** Autocomplete de local: resolve pelo nome normalizado no servidor. */
 function PlaceAutocomplete({
   value,
-  onChange
+  onChange,
+  hint = "Opcional. Reaproveitado entre lançamentos."
 }: {
   value: string;
   onChange: (name: string, place: PlaceRecord | null) => void;
+  /** `null` esconde a dica (formulários compactos). */
+  hint?: string | null;
 }) {
   const [options, setOptions] = useState<PlaceRecord[]>([]);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -979,7 +1017,7 @@ function PlaceAutocomplete({
   }
 
   return (
-    <Field label="Local" hint="Opcional. Reaproveitado entre lançamentos.">
+    <Field label="Local" hint={hint ?? undefined}>
       <input
         value={value}
         onChange={(event) => search(event.target.value)}
