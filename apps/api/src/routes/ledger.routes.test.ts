@@ -84,6 +84,25 @@ describe("cadastros do livro", () => {
     expect(response.json().balances.consolidatedCents).toBe(150_00);
   });
 
+  it("saldos trazem o que esta marcado em caixinha, para o ajuste comparar com o livre", async () => {
+    await post("/api/ledger/entries", {
+      accountId: checking,
+      date: "2026-01-05",
+      amountCents: 50_00,
+      kind: "income",
+      status: "cleared"
+    });
+    const goal = (
+      await post("/api/ledger/goals", { name: "Viagem", mode: "earmark", accountId: checking, color: "#123456" })
+    ).json().id;
+    expect((await post(`/api/ledger/goals/${goal}/mark`, { amountCents: 30_00 })).statusCode).toBe(200);
+
+    const balances = await app.inject("/api/ledger/balances").then((r) => r.json());
+    const nubank = balances.accounts.find((a: { id: number }) => a.id === checking);
+    expect(nubank.currentBalanceCents).toBe(150_00);
+    expect(nubank.earmarkedCents).toBe(30_00);
+  });
+
   it("exige ciclo ao criar cartao (D04)", async () => {
     const response = await post("/api/ledger/accounts", {
       name: "Cartao",

@@ -263,10 +263,13 @@ export function EntryDrawer({
     kind === "adjustment" && adjustMode === "balance" && account?.kind !== "credit_card";
 
   /**
-   * Saldo do sistema no fim do dia escolhido, sem este ajuste (na edição), para
-   * mostrar a diferença antes de gravar.
+   * Saldo livre do sistema no fim do dia escolhido, sem este ajuste (na
+   * edição), para mostrar a diferença antes de gravar. Livre: o que está
+   * marcado em caixinhas fica fora, então digitar 3.000 quer dizer 3.000
+   * soltos na conta com as caixinhas por cima, e não 3.000 somando tudo.
    */
   const [systemBalance, setSystemBalance] = useState<number | null>(null);
+  const [earmarkedCents, setEarmarkedCents] = useState(0);
   useEffect(() => {
     if (!adjustByBalance || adjustAccountId == null || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       setSystemBalance(null);
@@ -284,7 +287,9 @@ export function EntryDrawer({
           entry.status !== "pending"
             ? entry.amountCents
             : 0;
-        setSystemBalance(found ? found.currentBalanceCents - own : null);
+        const earmarked = found?.earmarkedCents ?? 0;
+        setEarmarkedCents(earmarked);
+        setSystemBalance(found ? found.currentBalanceCents - own - earmarked : null);
       })
       .catch(() => {
         if (alive) setSystemBalance(null);
@@ -551,7 +556,9 @@ export function EntryDrawer({
         (isCard ? "Ajuste para bater com a fatura" : "Ajuste de saldo conferido com o banco"),
       // O saldo digitado fica anotado: é a prova do ajuste.
       notes: adjustByBalance
-        ? `Saldo do banco em ${ledgerDate(date)}: ${moneyFromCents(typed)}.`
+        ? earmarkedCents > 0
+          ? `Saldo livre em ${ledgerDate(date)}: ${moneyFromCents(typed)}, mais ${moneyFromCents(earmarkedCents)} em caixinhas.`
+          : `Saldo do banco em ${ledgerDate(date)}: ${moneyFromCents(typed)}.`
         : notes || null,
       paymentMethod: null,
       tagIds
@@ -724,13 +731,23 @@ export function EntryDrawer({
             label={
               kind === "adjustment"
                 ? adjustByBalance
-                  ? "Saldo no banco"
+                  ? earmarkedCents > 0
+                    ? "Saldo livre, fora das caixinhas"
+                    : "Saldo no banco"
                   : "Diferença"
                 : kind === "expense" && installmentMode === "installments" && amountBasis === "installment"
                   ? "Valor da parcela"
                   : "Valor"
             }
-            hint={kind === "adjustment" && !adjustByBalance ? "Negativo tira do saldo" : undefined}
+            hint={
+              kind === "adjustment"
+                ? adjustByBalance
+                  ? earmarkedCents > 0
+                    ? `As caixinhas (${moneyFromCents(earmarkedCents)}) ficam por cima`
+                    : undefined
+                  : "Negativo tira do saldo"
+                : undefined
+            }
           >
             <MoneyInput
               value={amount}
@@ -755,10 +772,12 @@ export function EntryDrawer({
               : systemBalance == null
               ? "Buscando o saldo da conta…"
               : adjustDiff == null
-                ? `No sistema, o saldo no fim de ${ledgerDate(date)} é ${moneyFromCents(systemBalance)}. Digite o que o banco mostra.`
+                ? earmarkedCents > 0
+                  ? `No sistema, o saldo livre no fim de ${ledgerDate(date)} é ${moneyFromCents(systemBalance)}, com mais ${moneyFromCents(earmarkedCents)} separados em caixinhas. Digite só o que está solto na conta: as caixinhas continuam por cima.`
+                  : `No sistema, o saldo no fim de ${ledgerDate(date)} é ${moneyFromCents(systemBalance)}. Digite o que o banco mostra.`
                 : adjustDiff === 0
                   ? `Já bate: o sistema também tem ${moneyFromCents(systemBalance)} em ${ledgerDate(date)}.`
-                  : `No sistema: ${moneyFromCents(systemBalance)}. O ajuste lança ${signedMoneyFromCents(adjustDiff)}, que não conta como entrada nem saída.`}
+                  : `${earmarkedCents > 0 ? "Livre no sistema" : "No sistema"}: ${moneyFromCents(systemBalance)}. O ajuste lança ${signedMoneyFromCents(adjustDiff)}, que não conta como entrada nem saída${earmarkedCents > 0 ? `; a conta fica com ${moneyFromCents((typedSigned ?? 0) + earmarkedCents)} contando as caixinhas` : ""}.`}
           </p>
         )}
 
