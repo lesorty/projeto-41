@@ -36,6 +36,10 @@ um novo `[Unreleased]` vazio no topo.
   histórico. O que já existia ficou na conta "Principal", que continua
   mostrando o patrimônio com as contas do banco; o Patrimônio do módulo de
   finanças soma todas.
+- **Fatura**: clicar numa compra abre o lançamento para editar ali mesmo (e, nas
+  parcelas, perguntar se vale só para ela, para ela e as futuras ou para todas);
+  atalhos levam à compra nas Transações ou a todas as parcelas dela; e uma lista
+  de **parcelas futuras** deixa editar cada uma antes de a fatura chegar.
 - **Caixa cripto** (stablecoin na corretora, em dólar) e "Reserva de
   emergência" com o nome completo no "Novo caixa".
 

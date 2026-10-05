@@ -6227,3 +6227,18 @@ select option {
   font-size: 13px;
 }
 
+
+/* Fatura: a linha inteira abre o lançamento; os atalhos ficam na ponta. */
+.fin-row-click {
+  cursor: pointer;
+}
+.fin-row-click:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.fin-row-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  white-space: nowrap;
+}

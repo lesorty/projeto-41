@@ -10,6 +10,14 @@ export type LedgerPreset = {
   from?: string;
   to?: string;
   personId?: number;
+  /** Só esta conta (ou cartão). */
+  accountId?: number;
+  /** Só as parcelas deste plano: a compra parcelada inteira, passadas e futuras. */
+  installmentPlanId?: number;
+  /** Só o que está na fatura deste mês (AAAA-MM). */
+  statementMonth?: string;
+  /** Sem recorte de datas: o filtro pega todo o histórico. */
+  allTime?: boolean;
   /** Na carteira: chegar com a compra aberta (o "Alocar" do caixa). */
   openTrade?: boolean;
   /** E, nessa compra, pagar com este caixa. */

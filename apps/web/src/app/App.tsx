@@ -432,7 +432,7 @@ export function App() {
             )}
             {page === "finance" && <FinanceDashboardPage onNavigate={navigate} />}
             {page === "reports" && <ReportsPage />}
-            {page === "invoice" && <InvoicePage />}
+            {page === "invoice" && <InvoicePage onNavigate={navigate} />}
             {page === "goals" && <GoalsPage />}
             {page === "import" && <ImportPage />}
             {page === "networth" && (

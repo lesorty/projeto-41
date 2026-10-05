@@ -308,6 +308,20 @@ function buildChips(filter: LedgerFilter, reference: LedgerReference) {
       clear: { goalId: undefined }
     });
   }
+  if (filter.installmentPlanId) {
+    chips.push({
+      key: "plan",
+      label: "Compra parcelada",
+      clear: { installmentPlanId: undefined }
+    });
+  }
+  if (filter.statementMonth) {
+    chips.push({
+      key: "statement",
+      label: `Fatura de ${filter.statementMonth}`,
+      clear: { statementMonth: undefined }
+    });
+  }
   if (filter.search) {
     chips.push({ key: "search", label: `Busca: ${filter.search}`, clear: { search: undefined } });
   }

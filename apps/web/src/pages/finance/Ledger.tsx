@@ -55,9 +55,15 @@ export function LedgerPage({
   const toast = useToast();
   const reference = useLedgerReference();
   const [filter, setFilter] = useState<LedgerFilter>(() => ({
-    from: preset.from ?? firstDayOfMonth(),
-    to: preset.to ?? lastDayOfMonth(),
+    // Chegando de outra tela com um recorte que não é de datas (a fatura, uma
+    // compra parcelada), o filtro pega todo o histórico: o mês corrente
+    // esconderia justamente as parcelas que a pessoa foi procurar.
+    from: preset.from ?? (preset.allTime ? undefined : firstDayOfMonth()),
+    to: preset.to ?? (preset.allTime ? undefined : lastDayOfMonth()),
     ...(preset.personId != null ? { personId: preset.personId } : {}),
+    ...(preset.accountId != null ? { accountId: preset.accountId } : {}),
+    ...(preset.installmentPlanId != null ? { installmentPlanId: preset.installmentPlanId } : {}),
+    ...(preset.statementMonth ? { statementMonth: preset.statementMonth } : {}),
     page: 1,
     pageSize: PAGE_SIZE
   }));

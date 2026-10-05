@@ -1,4 +1,13 @@
-import { CreditCard, FastForward, Receipt, RotateCcw, Undo2, Wallet } from "lucide-react";
+import {
+  CreditCard,
+  FastForward,
+  ListTree,
+  Receipt,
+  RotateCcw,
+  Search,
+  Undo2,
+  Wallet
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   AccountRecord,
@@ -12,6 +21,7 @@ import { ColorDot } from "../../components/ColorPicker.js";
 import { useConfirm } from "../../components/dialog.js";
 import { AnticipateDrawer } from "../../components/finance/AnticipateDrawer.js";
 import { CardLimit } from "../../components/finance/CardLimit.js";
+import { EntryDrawer } from "../../components/finance/EntryDrawer.js";
 import { InstallmentBadge } from "../../components/finance/InstallmentBadge.js";
 import { InvoicePaymentDrawer } from "../../components/finance/InvoicePaymentDrawer.js";
 import { StatementNav } from "../../components/finance/StatementNav.js";
@@ -19,6 +29,7 @@ import {
   AnimatedNumber,
   Button,
   Empty,
+  IconButton,
   Loading,
   Panel,
   SectionHeading,
@@ -27,6 +38,8 @@ import {
 } from "../../components/ui.js";
 import { api } from "../../lib/api.js";
 import { ledgerDate, monthLabel, moneyFromCents } from "../../lib/format.js";
+import { useLedgerReference } from "../../lib/ledger.js";
+import type { FinanceNavigate } from "../../lib/navigation.js";
 import { useToast } from "../../lib/toast.js";
 
 type StatementDetail = {
@@ -40,8 +53,11 @@ type StatementDetail = {
   totalCents: number;
 };
 
-export function InvoicePage() {
+export function InvoicePage({ onNavigate }: { onNavigate?: FinanceNavigate }) {
   const toast = useToast();
+  const reference = useLedgerReference();
+  // A compra aberta para editar, sem sair da fatura.
+  const [editing, setEditing] = useState<EntryRecord | null>(null);
   const confirm = useConfirm();
   const [cards, setCards] = useState<CardSummary[]>([]);
   const [accounts, setAccounts] = useState<AccountRecord[]>([]);
@@ -114,6 +130,17 @@ export function InvoicePage() {
     await loadStatements();
     await loadDetail();
   }
+
+  /** Abre o lançamento no livro, no dia dele e só neste cartão. */
+  const showInLedger = (entry: EntryRecord) =>
+    onNavigate?.("transactions", { accountId: entry.accountId, from: entry.date, to: entry.date });
+  /** Todas as parcelas da compra, passadas e futuras, de uma vez. */
+  const showPlanInLedger = (entry: EntryRecord) =>
+    onNavigate?.("transactions", {
+      accountId: entry.accountId,
+      installmentPlanId: entry.installmentPlanId ?? undefined,
+      allTime: true
+    });
 
   const card = cards.find((item) => item.id === cardId);
   const active = statements.find((statement) => statement.month === month);
@@ -271,11 +298,23 @@ export function InvoicePage() {
                     <th>Categoria</th>
                     <th>Pessoa</th>
                     <th className="num">Valor</th>
+                    <th aria-label="Ir para" />
                   </tr>
                 </thead>
                 <tbody>
                   {detail.purchases.map((entry) => (
-                    <tr key={entry.id}>
+                    <tr
+                      key={entry.id}
+                      className="fin-row-click"
+                      tabIndex={0}
+                      onClick={() => setEditing(entry)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" && event.target === event.currentTarget) {
+                          setEditing(entry);
+                        }
+                      }}
+                      title="Abrir para editar"
+                    >
                       <td className="fin-date">{ledgerDate(entry.date)}</td>
                       <td>
                         <span className="fin-desc-main">
@@ -293,7 +332,10 @@ export function InvoicePage() {
                             <Button
                               variant="ghost"
                               icon={RotateCcw}
-                              onClick={() => void restore(entry.id)}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                void restore(entry.id);
+                              }}
                             >
                               Restaurar
                             </Button>
@@ -312,6 +354,22 @@ export function InvoicePage() {
                       </td>
                       <td>{entry.personName ?? "—"}</td>
                       <td className="num fin-amount">{moneyFromCents(-entry.amountCents)}</td>
+                      <td className="fin-row-actions" onClick={(event) => event.stopPropagation()}>
+                        {onNavigate && (
+                          <IconButton
+                            icon={Search}
+                            label="Ver nas transações"
+                            onClick={() => showInLedger(entry)}
+                          />
+                        )}
+                        {onNavigate && entry.installmentPlanId != null && (
+                          <IconButton
+                            icon={ListTree}
+                            label="Ver todas as parcelas desta compra"
+                            onClick={() => showPlanInLedger(entry)}
+                          />
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -319,6 +377,7 @@ export function InvoicePage() {
                   <tr>
                     <th colSpan={4}>Total da fatura</th>
                     <th className="num">{moneyFromCents(detail.totalCents)}</th>
+                    <th />
                   </tr>
                 </tfoot>
               </table>
@@ -349,10 +408,89 @@ export function InvoicePage() {
         </Panel>
       )}
 
+      {futureInstallments.length > 0 && (
+        <Panel
+          title="Parcelas futuras"
+          subtitle="Clique numa parcela para editar só ela, ela e as próximas, ou a série toda"
+        >
+          <div className="table-scroll">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Fatura</th>
+                  <th>Descrição</th>
+                  <th>Categoria</th>
+                  <th className="num">Valor</th>
+                  <th aria-label="Ir para" />
+                </tr>
+              </thead>
+              <tbody>
+                {[...futureInstallments]
+                  .sort(
+                    (a, b) =>
+                      (a.statementMonth ?? "").localeCompare(b.statementMonth ?? "") ||
+                      a.date.localeCompare(b.date)
+                  )
+                  .map((entry) => (
+                    <tr
+                      key={entry.id}
+                      className="fin-row-click"
+                      tabIndex={0}
+                      onClick={() => setEditing(entry)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" && event.target === event.currentTarget) {
+                          setEditing(entry);
+                        }
+                      }}
+                      title="Abrir para editar"
+                    >
+                      <td className="fin-date">
+                        {entry.statementMonth ? monthLabel(entry.statementMonth) : "—"}
+                      </td>
+                      <td>
+                        <span className="fin-desc-main">
+                          {entry.description ?? entry.placeName ?? "Sem descrição"}
+                          <InstallmentBadge entry={entry} />
+                        </span>
+                      </td>
+                      <td>{entry.categoryName ?? <span className="fin-muted">—</span>}</td>
+                      <td className="num fin-amount">{moneyFromCents(-entry.amountCents)}</td>
+                      <td className="fin-row-actions" onClick={(event) => event.stopPropagation()}>
+                        {onNavigate && (
+                          <IconButton
+                            icon={ListTree}
+                            label="Ver todas as parcelas desta compra"
+                            onClick={() => showPlanInLedger(entry)}
+                          />
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+      )}
+
       {trend.length > 1 && (
         <Panel title="Evolução da fatura" subtitle="Últimas 12 faturas, incluindo as futuras">
           <AreaTrend data={trend} dataKey="value" />
         </Panel>
+      )}
+
+      {/* O formulário nasce com os cadastros já carregados: aberto antes, trataria o cartão como conta arquivada. */}
+      {editing && !reference.loading && (
+        <EntryDrawer
+          entry={editing}
+          reference={reference}
+          onReloadReference={reference.reload}
+          onClose={() => setEditing(null)}
+          onSaved={async () => {
+            setEditing(null);
+            await refreshAll();
+            await reference.reload();
+          }}
+        />
       )}
 
       {anticipating && card && (
