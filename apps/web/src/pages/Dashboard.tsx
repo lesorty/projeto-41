@@ -49,6 +49,8 @@ export function DashboardPage({ data }: { data: Dashboard }) {
     return [
       { key: "bitcoin", label: "Bitcoin", value: btc },
       { key: "shitcoins", label: "Altcoins", value: alts },
+      // A classe cripto soma a carteira e os caixas em cripto (stablecoin).
+      { key: "crypto", label: "Caixa cripto", value: Math.max((data.categories.crypto ?? 0) - btc - alts, 0) },
       { key: "b3", label: "Bolsa B3", value: data.categories.b3 ?? 0 },
       { key: "dollar", label: "Dólar", value: data.categories.dollar ?? 0 },
       { key: "cash", label: "Caixa BR", value: data.categories.cash ?? 0 },

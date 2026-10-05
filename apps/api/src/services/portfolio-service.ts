@@ -1,4 +1,4 @@
-import type { AppDatabase, PriceRecord } from "@projeto41/db";
+import { withInvestmentAccount, type AppDatabase, type PriceRecord } from "@projeto41/db";
 import { buildNetWorth, markCashControlStart } from "./net-worth-service.js";
 import { calculatePosition } from "@projeto41/finance";
 
@@ -135,6 +135,18 @@ export function createDailySnapshot(db: AppDatabase, date: string) {
   });
   markCashControlStart(db, date, netWorth);
   return netWorth.totalBrl;
+}
+
+/**
+ * O retrato do dia de cada conta de investimento e o de todas juntas: cada
+ * histórico é desenhado com os próprios registros.
+ */
+export function createDailySnapshots(db: AppDatabase, date: string) {
+  const total = withInvestmentAccount(null, () => createDailySnapshot(db, date));
+  for (const account of db.investmentAccounts.list()) {
+    withInvestmentAccount(account.id, () => createDailySnapshot(db, date));
+  }
+  return total;
 }
 
 // Variação do dia por ativo, como razão (0.012 = +1,2%) ou null quando indisponível.

@@ -240,6 +240,24 @@ button {
   color: var(--text-faint);
 }
 
+.account-switch {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 4px 12px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.account-switch-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.account-switch-row > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+
 .sidebar nav {
   display: flex;
   flex-direction: column;

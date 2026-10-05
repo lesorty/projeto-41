@@ -1,6 +1,11 @@
 import Database from "better-sqlite3";
 import { migrations, runMigrations } from "./migrations/index.js";
 import { createLedgerRepositories } from "./repositories/index.js";
+import {
+  investmentAccountForWrite,
+  investmentAccountScope,
+  PRINCIPAL_INVESTMENT_ACCOUNT
+} from "./investment-scope.js";
 import type { Contribution, ManualPosition, Operation } from "@projeto41/contracts";
 
 /**
@@ -65,6 +70,9 @@ export type CryptoAsset = {
 
 export type AppDatabase = ReturnType<typeof createDatabase>;
 
+/** Escopo do histórico que soma todas as contas de investimento (migração 017). */
+const ALL_ACCOUNTS_SNAPSHOT = 0;
+
 export type PositionMovementKind =
   | "deposit"
   | "withdrawal"
@@ -105,7 +113,9 @@ export type PositionMovement = PositionMovementRow & {
  * entre uma conta e a conta-ponte, em reais. Movimento entre posições não
  * passa pela ponte e fica de fora.
  */
-function ledgerContributions(raw: Database.Database) {
+function ledgerContributions(raw: Database.Database, account: number | null) {
+  // A conta de investimento de um aporte pelo livro é a da posição que ele
+  // abasteceu ou a da operação que ele pagou; sem nenhuma das duas, a Principal.
   const rows = raw
     .prepare(
       `SELECT t.id AS transferId, fe.date,
@@ -120,9 +130,15 @@ function ledgerContributions(raw: Database.Database) {
        JOIN accounts ta ON ta.id = te.account_id
        WHERE t.purpose = 'investment'
          AND (fa.kind = 'investment') <> (ta.kind = 'investment')
+         AND (@account IS NULL OR @account = COALESCE(
+           (SELECT p.investment_account_id FROM position_movements pm
+            JOIN manual_positions p ON p.id = pm.position_id WHERE pm.transfer_id = t.id),
+           (SELECT o.investment_account_id FROM operation_transfers ot
+            JOIN operations o ON o.id = ot.operation_id WHERE ot.transfer_id = t.id),
+           ${PRINCIPAL_INVESTMENT_ACCOUNT}))
        ORDER BY fe.date, t.id`
     )
-    .all() as {
+    .all({ account }) as {
     transferId: number;
     date: string;
     cents: number;
@@ -156,26 +172,76 @@ export function createDatabase(path: string) {
     // Modulo de financas (centavos inteiros), separado das tabelas legadas de
     // investimento que seguem em REAL logo abaixo (D19).
     ledger: createLedgerRepositories(raw),
-    operations: {
-      list: (portfolio?: string) =>
+    investmentAccounts: {
+      list: () =>
         raw
+          .prepare(
+            `SELECT id, name, sort_order AS sortOrder FROM investment_accounts
+             ORDER BY sort_order, id`
+          )
+          .all() as { id: number; name: string; sortOrder: number }[],
+      get: (id: number) =>
+        raw
+          .prepare("SELECT id, name, sort_order AS sortOrder FROM investment_accounts WHERE id = ?")
+          .get(id) as { id: number; name: string; sortOrder: number } | undefined,
+      /** Conta nova começa vazia, com as metas de alocação da Principal. */
+      create: (name: string) =>
+        raw.transaction(() => {
+          const id = Number(
+            raw
+              .prepare(
+                `INSERT INTO investment_accounts(name, sort_order, created_at)
+                 VALUES (?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM investment_accounts), ?)`
+              )
+              .run(name, new Date().toISOString()).lastInsertRowid
+          );
+          raw
+            .prepare(
+              `INSERT INTO allocation_targets(investment_account_id, category, weight)
+               SELECT ?, category, weight FROM allocation_targets WHERE investment_account_id = ?`
+            )
+            .run(id, PRINCIPAL_INVESTMENT_ACCOUNT);
+          return id;
+        })(),
+      rename: (id: number, name: string) =>
+        raw.prepare("UPDATE investment_accounts SET name = ? WHERE id = ?").run(name, id).changes
+    },
+    operations: {
+      /**
+       * Da conta da requisição. `allAccounts` é para quem precisa do todo
+       * independente da tela, como a lista de ativos a cotar.
+       */
+      list: (portfolio?: string, options: { allAccounts?: boolean } = {}) => {
+        const account = options.allAccounts ? null : investmentAccountScope();
+        const where = [
+          portfolio ? "portfolio = @portfolio" : null,
+          account != null ? "investment_account_id = @account" : null
+        ].filter(Boolean);
+        return raw
           .prepare(
             `SELECT id, portfolio, type, asset, date, quantity, total, currency, notes,
                     account_id AS accountId
              FROM operations
-             ${portfolio ? "WHERE portfolio = ?" : ""}
+             ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
              ORDER BY date DESC, id DESC`
           )
-          .all(...(portfolio ? [portfolio] : [])) as (Operation & { id: number })[],
+          .all({ portfolio: portfolio ?? null, account }) as (Operation & { id: number })[];
+      },
       create: (operation: Operation) => {
         const result = raw
           .prepare(
             `INSERT INTO operations
-             (portfolio, type, asset, date, quantity, total, currency, notes, account_id)
+             (portfolio, type, asset, date, quantity, total, currency, notes, account_id,
+              investment_account_id)
              VALUES (@portfolio, @type, @asset, @date, @quantity, @total, @currency, @notes,
-                     @accountId)`
+                     @accountId, @investmentAccountId)`
           )
-          .run({ notes: null, accountId: null, ...operation });
+          .run({
+            notes: null,
+            accountId: null,
+            ...operation,
+            investmentAccountId: investmentAccountForWrite()
+          });
         return Number(result.lastInsertRowid);
       },
       update: (id: number, operation: Operation) =>
@@ -188,10 +254,16 @@ export function createDatabase(path: string) {
           )
           .run({ notes: null, accountId: null, ...operation, id }).changes,
       remove: (id: number) => raw.prepare("DELETE FROM operations WHERE id = ?").run(id).changes,
-      clear: (portfolio?: string) =>
-        raw
-          .prepare(`DELETE FROM operations ${portfolio ? "WHERE portfolio = ?" : ""}`)
-          .run(...(portfolio ? [portfolio] : [])).changes
+      clear: (portfolio?: string) => {
+        const account = investmentAccountScope();
+        const where = [
+          portfolio ? "portfolio = @portfolio" : null,
+          account != null ? "investment_account_id = @account" : null
+        ].filter(Boolean);
+        return raw
+          .prepare(`DELETE FROM operations ${where.length ? `WHERE ${where.join(" AND ")}` : ""}`)
+          .run({ portfolio: portfolio ?? null, account }).changes;
+      }
     },
     // Keyed by symbol: the asset identity across operations/prices/dividends.
     // Assumes one coin per ticker; re-picking a different coin for an existing
@@ -218,9 +290,11 @@ export function createDatabase(path: string) {
         raw
           .prepare(
             `SELECT id, category, name, invested, current_value AS currentValue,
-             currency, notes, cdi_percent AS cdiPercent, cdi_since AS cdiSince FROM manual_positions ORDER BY category, id`
+             currency, notes, cdi_percent AS cdiPercent, cdi_since AS cdiSince FROM manual_positions
+             WHERE @account IS NULL OR investment_account_id = @account
+             ORDER BY category, id`
           )
-          .all() as (ManualPosition & { id: number })[],
+          .all({ account: investmentAccountScope() }) as (ManualPosition & { id: number })[],
       upsert: (position: ManualPosition) => {
         const values = { notes: null, cdiPercent: null, cdiSince: null, ...position };
         if (position.id) {
@@ -236,11 +310,12 @@ export function createDatabase(path: string) {
         const result = raw
           .prepare(
             `INSERT INTO manual_positions
-             (category, name, invested, current_value, currency, notes, cdi_percent, cdi_since)
+             (category, name, invested, current_value, currency, notes, cdi_percent, cdi_since,
+              investment_account_id)
              VALUES (@category, @name, @invested, @currentValue, @currency, @notes, @cdiPercent,
-                     @cdiSince)`
+                     @cdiSince, @investmentAccountId)`
           )
-          .run(values);
+          .run({ ...values, investmentAccountId: investmentAccountForWrite() });
         return Number(result.lastInsertRowid);
       },
       remove: (id: number) =>
@@ -283,11 +358,19 @@ export function createDatabase(path: string) {
              LEFT JOIN entries e ON e.id = CASE WHEN m.kind = 'deposit' THEN t.from_entry_id
                                                 ELSE t.to_entry_id END
              LEFT JOIN accounts a ON a.id = e.account_id
-             ${options.positionId ? "WHERE m.position_id = @positionId" : ""}
+             ${
+               options.positionId
+                 ? "WHERE m.position_id = @positionId"
+                 : "WHERE @account IS NULL OR p.investment_account_id = @account"
+             }
              ORDER BY m.date DESC, m.id DESC
              LIMIT @limit`
           )
-          .all({ positionId: options.positionId ?? null, limit: options.limit ?? 50 }) as PositionMovement[],
+          .all({
+            positionId: options.positionId ?? null,
+            limit: options.limit ?? 50,
+            account: investmentAccountScope()
+          }) as PositionMovement[],
       get: (id: number) =>
         raw
           .prepare(
@@ -339,36 +422,53 @@ export function createDatabase(path: string) {
       integratedPositionIds: () =>
         (
           raw
-            .prepare("SELECT DISTINCT position_id AS id FROM position_movements WHERE transfer_id IS NOT NULL")
-            .all() as { id: number }[]
+            .prepare(
+              `SELECT DISTINCT m.position_id AS id FROM position_movements m
+               JOIN manual_positions p ON p.id = m.position_id
+               WHERE m.transfer_id IS NOT NULL
+                 AND (@account IS NULL OR p.investment_account_id = @account)`
+            )
+            .all({ account: investmentAccountScope() }) as { id: number }[]
         ).map((row) => row.id)
     },
     dividends: {
+      /** Todas as contas juntas somam os proventos do mesmo ativo. */
       list: () =>
-        raw.prepare("SELECT asset, amount FROM dividends ORDER BY asset").all() as {
+        raw
+          .prepare(
+            `SELECT asset, SUM(amount) AS amount FROM dividends
+             WHERE @account IS NULL OR investment_account_id = @account
+             GROUP BY asset ORDER BY asset`
+          )
+          .all({ account: investmentAccountScope() }) as {
           asset: string;
           amount: number;
         }[],
       set: (asset: string, amount: number) =>
         raw
           .prepare(
-            `INSERT INTO dividends(asset, amount) VALUES (?, ?)
-             ON CONFLICT(asset) DO UPDATE SET amount=excluded.amount`
+            `INSERT INTO dividends(investment_account_id, asset, amount) VALUES (?, ?, ?)
+             ON CONFLICT(investment_account_id, asset) DO UPDATE SET amount=excluded.amount`
           )
-          .run(asset, amount)
+          .run(investmentAccountForWrite(), asset, amount)
     },
     contributions: {
       list: () =>
         raw
-          .prepare("SELECT id, date, amount, notes FROM contributions ORDER BY date")
-          .all() as (Contribution & { id: number })[],
+          .prepare(
+            `SELECT id, date, amount, notes FROM contributions
+             WHERE @account IS NULL OR investment_account_id = @account ORDER BY date`
+          )
+          .all({ account: investmentAccountScope() }) as (Contribution & { id: number })[],
       create: (entry: Contribution) =>
         Number(
           raw
             .prepare(
-              "INSERT INTO contributions(date, amount, notes) VALUES (@date, @amount, @notes)"
+              `INSERT INTO contributions(date, amount, notes, investment_account_id)
+               VALUES (@date, @amount, @notes, @investmentAccountId)`
             )
-            .run({ notes: null, ...entry }).lastInsertRowid
+            .run({ notes: null, ...entry, investmentAccountId: investmentAccountForWrite() })
+            .lastInsertRowid
         ),
       update: (id: number, entry: Contribution) =>
         raw
@@ -377,12 +477,17 @@ export function createDatabase(path: string) {
           )
           .run({ notes: null, ...entry, id }).changes,
       remove: (id: number) => raw.prepare("DELETE FROM contributions WHERE id=?").run(id).changes,
-      fromLedger: () => ledgerContributions(raw),
+      fromLedger: () => ledgerContributions(raw, investmentAccountScope()),
       /** Os digitados e os do livro, em ordem de data: é o que a tela e o rendimento usam. */
       all: () =>
         [
           ...(
-            raw.prepare("SELECT id, date, amount, notes FROM contributions").all() as (Contribution & {
+            raw
+              .prepare(
+                `SELECT id, date, amount, notes FROM contributions
+                 WHERE @account IS NULL OR investment_account_id = @account`
+              )
+              .all({ account: investmentAccountScope() }) as (Contribution & {
               id: number;
             })[]
           ).map((row) => ({
@@ -391,7 +496,7 @@ export function createDatabase(path: string) {
             transferId: null,
             accountName: null
           })),
-          ...ledgerContributions(raw)
+          ...ledgerContributions(raw, investmentAccountScope())
         ].sort((a, b) => a.date.localeCompare(b.date))
     },
     prices: {
@@ -443,19 +548,25 @@ export function createDatabase(path: string) {
           .prepare("UPDATE prices SET error=?, fetched_at=? WHERE symbol=?")
           .run(error, fetchedAt, symbol)
     },
+    // Metas de alocação são de cada conta; sem conta escolhida, as da Principal.
     targets: {
       list: () =>
-        raw.prepare("SELECT category, weight FROM allocation_targets ORDER BY category").all() as {
+        raw
+          .prepare(
+            `SELECT category, weight FROM allocation_targets
+             WHERE investment_account_id = ? ORDER BY category`
+          )
+          .all(investmentAccountForWrite()) as {
           category: string;
           weight: number;
         }[],
       set: (category: string, weight: number) =>
         raw
           .prepare(
-            `INSERT INTO allocation_targets(category, weight) VALUES (?,?)
-             ON CONFLICT(category) DO UPDATE SET weight=excluded.weight`
+            `INSERT INTO allocation_targets(investment_account_id, category, weight) VALUES (?,?,?)
+             ON CONFLICT(investment_account_id, category) DO UPDATE SET weight=excluded.weight`
           )
-          .run(category, weight)
+          .run(investmentAccountForWrite(), category, weight)
     },
     settings: {
       get: (key: string) =>
@@ -478,9 +589,9 @@ export function createDatabase(path: string) {
           raw
             .prepare(
               `SELECT date, total_brl AS totalBrl, payload, price_times AS priceTimes
-               FROM snapshots ORDER BY date`
+               FROM snapshots WHERE investment_account_id = ? ORDER BY date`
             )
-            .all() as {
+            .all(investmentAccountScope() ?? ALL_ACCOUNTS_SNAPSHOT) as {
             date: string;
             totalBrl: number;
             payload: string;
@@ -505,13 +616,14 @@ export function createDatabase(path: string) {
       upsert: (snapshot: SnapshotInput) =>
         raw
           .prepare(
-            `INSERT INTO snapshots(date,total_brl,payload,price_times)
-             VALUES (@date,@totalBrl,@payload,@priceTimes)
-             ON CONFLICT(date) DO UPDATE SET total_brl=excluded.total_brl,
+            `INSERT INTO snapshots(investment_account_id,date,total_brl,payload,price_times)
+             VALUES (@scope,@date,@totalBrl,@payload,@priceTimes)
+             ON CONFLICT(investment_account_id, date) DO UPDATE SET total_brl=excluded.total_brl,
              payload=excluded.payload, price_times=excluded.price_times`
           )
           .run({
             ...snapshot,
+            scope: investmentAccountScope() ?? ALL_ACCOUNTS_SNAPSHOT,
             payload: JSON.stringify(snapshot.payload),
             priceTimes: JSON.stringify(snapshot.priceTimes ?? {})
           })
@@ -674,3 +786,4 @@ function ensureColumn(db: Database.Database, table: string, column: string, type
 export * from "./repositories/index.js";
 export * from "./migrations/index.js";
 export * from "./testing.js";
+export * from "./investment-scope.js";

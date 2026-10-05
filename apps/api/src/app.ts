@@ -2,7 +2,7 @@ import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import staticPlugin from "@fastify/static";
 import Fastify from "fastify";
-import type { AppDatabase } from "@projeto41/db";
+import { withInvestmentAccount, type AppDatabase } from "@projeto41/db";
 import { z } from "zod";
 import type { IconService } from "./icons/icon-service.js";
 import type { AttachmentService } from "./attachments/attachment-service.js";
@@ -12,6 +12,7 @@ import {
   registerCardsRoutes,
   registerCdiRoutes,
   registerGoalsRoutes,
+  registerInvestmentAccountsRoutes,
   registerInvestmentCashRoutes,
   registerIconsRoutes,
   registerImportExportRoutes,
@@ -96,6 +97,24 @@ export function buildApp({
     return reply.status(500).send({ error: "Erro interno" });
   });
 
+  // Conta do módulo de investimentos escolhida na tela. Ausente ou "all":
+  // todas (é o que o patrimônio do módulo de finanças pede). No preHandler,
+  // depois do corpo lido, para o escopo valer até o fim do handler.
+  app.addHook("preHandler", (request, reply, done) => {
+    const header = request.headers["x-investment-account"];
+    const raw = Array.isArray(header) ? header[0] : header;
+    if (raw == null || raw === "" || raw === "all") {
+      withInvestmentAccount(null, done);
+      return;
+    }
+    const id = Number(raw);
+    if (!Number.isInteger(id) || id <= 0 || !db.investmentAccounts.get(id)) {
+      void reply.status(400).send({ error: "Conta de investimento invalida" });
+      return;
+    }
+    withInvestmentAccount(id, done);
+  });
+
   app.get("/api/health", async () => ({ ok: true }));
 
   const deps: RouteDeps = {
@@ -115,6 +134,7 @@ export function buildApp({
   registerLedgerReportsRoutes(app, deps);
   registerCardsRoutes(app, deps);
   registerInvestmentCashRoutes(app, deps);
+  registerInvestmentAccountsRoutes(app, deps);
   registerCdiRoutes(app, deps);
   registerGoalsRoutes(app, deps);
   registerAttachmentsRoutes(app, deps);

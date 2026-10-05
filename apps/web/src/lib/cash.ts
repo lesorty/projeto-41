@@ -40,7 +40,7 @@ export type PositionMovement = {
 };
 
 /** Onde o dinheiro espera: pode pagar uma compra e receber uma venda. */
-export const LIQUID_CATEGORIES = ["cash", "dollar", "reserve"] as const;
+export const LIQUID_CATEGORIES = ["cash", "dollar", "reserve", "crypto"] as const;
 export const isLiquid = (position: Pick<ManualPositionRecord, "category">) =>
   (LIQUID_CATEGORIES as readonly string[]).includes(position.category);
 
@@ -58,7 +58,8 @@ export const MOVE_LABEL: Record<PositionMovement["kind"], string> = {
 export const POSITION_CATEGORY_LABEL: Record<string, string> = {
   cash: "Caixa BR",
   dollar: "Dólar",
-  reserve: "Reserva",
+  reserve: "Reserva de emergência",
+  crypto: "Caixa cripto",
   fixed_income: "Renda fixa",
   global: "Ações globais"
 };

@@ -25,7 +25,8 @@ export const operationSchema = z.object({
 
 export const manualPositionSchema = z.object({
   id: z.number().int().positive().optional(),
-  category: z.enum(["dollar", "cash", "reserve", "fixed_income", "global"]),
+  // `crypto` é caixa em cripto (stablecoin na corretora, à espera de compra).
+  category: z.enum(["dollar", "cash", "reserve", "crypto", "fixed_income", "global"]),
   name: z.string().trim().min(1),
   invested: z.number().nonnegative().default(0),
   currentValue: z.number().nonnegative(),
@@ -43,6 +44,13 @@ export const contributionSchema = z.object({
   amount: z.number().nonnegative(),
   notes: z.string().trim().optional()
 });
+
+/** Conta do módulo de investimentos: cada uma com os próprios registros. */
+export const investmentAccountSchema = z.object({
+  name: z.string().trim().min(1).max(60)
+});
+
+export type InvestmentAccount = { id: number; name: string; sortOrder: number };
 
 export type Operation = z.infer<typeof operationSchema>;
 export type ManualPosition = z.infer<typeof manualPositionSchema>;

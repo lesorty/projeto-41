@@ -14,6 +14,7 @@ import { migration013EarmarkCdi } from "./013-earmark-cdi.js";
 import { migration014PositionCdi } from "./014-position-cdi.js";
 import { migration015GuidedYield } from "./015-guided-yield.js";
 import { migration016GuidedYieldComplete } from "./016-guided-yield-complete.js";
+import { migration017InvestmentAccounts } from "./017-investment-accounts.js";
 import type { Migration } from "./runner.js";
 
 /**
@@ -36,7 +37,8 @@ export const migrations: Migration[] = [
   migration013EarmarkCdi,
   migration014PositionCdi,
   migration015GuidedYield,
-  migration016GuidedYieldComplete
+  migration016GuidedYieldComplete,
+  migration017InvestmentAccounts
 ];
 
 export * from "./runner.js";

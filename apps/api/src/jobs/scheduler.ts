@@ -2,7 +2,7 @@ import cron from "node-cron";
 import type { AppDatabase } from "@projeto41/db";
 import type { CdiService } from "../cdi/cdi-service.js";
 import type { createPriceService } from "../prices/price-service.js";
-import { createDailySnapshot } from "../services/portfolio-service.js";
+import { createDailySnapshots } from "../services/portfolio-service.js";
 import { syncAllYields } from "../services/yield-sync.js";
 
 function localDate(timezone: string) {
@@ -51,7 +51,7 @@ export function startScheduler(
       () => {
         // O retrato do dia sai com o rendimento em dia.
         syncAllYields(db, localDate(timezone));
-        createDailySnapshot(db, localDate(timezone));
+        createDailySnapshots(db, localDate(timezone));
       },
       { timezone }
     )

@@ -328,11 +328,13 @@ export function InvestmentCashPage({
   );
 }
 
+type CashCategory = "cash" | "dollar" | "crypto" | "reserve";
+
 /** Um caixa novo é uma posição líquida de "Caixa e renda fixa", começando em zero. */
 function NewCashDrawer({ onClose, onSaved }: { onClose: () => void; onSaved: () => Promise<void> }) {
   const toast = useToast();
   const [name, setName] = useState("");
-  const [category, setCategory] = useState<"cash" | "dollar" | "reserve">("cash");
+  const [category, setCategory] = useState<CashCategory>("cash");
   const [saving, setSaving] = useState(false);
 
   async function submit(event: React.FormEvent) {
@@ -350,7 +352,8 @@ function NewCashDrawer({ onClose, onSaved }: { onClose: () => void; onSaved: () 
           name: name.trim(),
           invested: 0,
           currentValue: 0,
-          currency: category === "dollar" ? "USD" : "BRL"
+          // Dólar e cripto (stablecoin) vivem em dólar.
+          currency: category === "dollar" || category === "crypto" ? "USD" : "BRL"
         })
       });
       toast.notify("Caixa criado: aporte para colocar dinheiro nele");
@@ -374,13 +377,14 @@ function NewCashDrawer({ onClose, onSaved }: { onClose: () => void; onSaved: () 
           />
         </Field>
         <Field label="Tipo" hint="Aparece também em Caixa e renda fixa">
-          <Segmented<"cash" | "dollar" | "reserve">
+          <Segmented<CashCategory>
             value={category}
             onChange={setCategory}
             options={[
               { value: "cash", label: "Caixa BR" },
               { value: "dollar", label: "Dólar" },
-              { value: "reserve", label: "Reserva" }
+              { value: "crypto", label: "Cripto" },
+              { value: "reserve", label: "Reserva de emergência" }
             ]}
           />
         </Field>

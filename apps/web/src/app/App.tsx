@@ -22,17 +22,24 @@ import {
   IncomePage,
   TransactionsPage
 } from "../pages/finance/Ledger.js";
+import { InvestmentAccountSwitch } from "../components/InvestmentAccountSwitch.js";
 import { Loading } from "../components/ui.js";
 import { Ticker, TickerSettings } from "../components/ticker.js";
 import type { TickerCandidate } from "../components/ticker.js";
 import { api } from "../lib/api.js";
+import {
+  ALL_INVESTMENT_ACCOUNTS,
+  currentInvestmentAccount,
+  PRINCIPAL_INVESTMENT_ACCOUNT,
+  setCurrentInvestmentAccount
+} from "../lib/investment-account.js";
 import { relativeTime } from "../lib/format.js";
 import { portfolioIconUrl } from "../lib/icons.js";
 import { usePrivacy } from "../lib/privacy.js";
 import { useTheme } from "../lib/theme.js";
 import { useToast } from "../lib/toast.js";
 import type { LedgerPreset } from "../lib/navigation.js";
-import type { Dashboard } from "@projeto41/contracts";
+import type { Dashboard, InvestmentAccount } from "@projeto41/contracts";
 import {
   initialPage,
   lastPageOf,
@@ -112,16 +119,42 @@ export function App() {
     });
   }, []);
 
+  // Conta do módulo de investimentos: cada uma com os próprios registros.
+  const [investmentAccounts, setInvestmentAccounts] = useState<InvestmentAccount[]>([]);
+  const [investmentAccountId, setInvestmentAccountId] = useState(currentInvestmentAccount);
+  const chooseInvestmentAccount = useCallback((id: number) => {
+    if (id === currentInvestmentAccount()) return;
+    setCurrentInvestmentAccount(id);
+    setInvestmentAccountId(id);
+    setLoading(true);
+  }, []);
+  const loadInvestmentAccounts = useCallback(async () => {
+    const list = await api<InvestmentAccount[]>("/investment-accounts", {
+      headers: ALL_INVESTMENT_ACCOUNTS
+    });
+    setInvestmentAccounts(list);
+    // A conta lembrada pode não existir mais (banco recriado).
+    if (!list.some((account) => account.id === currentInvestmentAccount())) {
+      chooseInvestmentAccount(PRINCIPAL_INVESTMENT_ACCOUNT);
+    }
+  }, [chooseInvestmentAccount]);
+  useEffect(() => void loadInvestmentAccounts().catch(() => undefined), [loadInvestmentAccounts]);
+
+  // O Patrimônio do módulo de finanças soma todas as contas de investimento;
+  // as telas de investimento veem só a conta escolhida.
   const loadDashboard = useCallback(async () => {
     try {
       setError("");
-      setDashboard(await api<Dashboard>("/dashboard"));
+      setDashboard(
+        await api<Dashboard>("/dashboard", investing ? undefined : { headers: ALL_INVESTMENT_ACCOUNTS })
+      );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Não foi possível carregar os dados");
     } finally {
       setLoading(false);
     }
-  }, []);
+    // A conta entra nas dependências para recarregar ao trocar de conta.
+  }, [investing, investmentAccountId]);
 
   useEffect(() => void loadDashboard(), [loadDashboard]);
 
@@ -243,6 +276,18 @@ export function App() {
           <p className="module-switch-tagline">{module.tagline}</p>
         </div>
 
+        {investing && investmentAccounts.length > 0 && (
+          <InvestmentAccountSwitch
+            accounts={investmentAccounts}
+            value={investmentAccountId}
+            onChange={chooseInvestmentAccount}
+            onSaved={(account, created) => {
+              void loadInvestmentAccounts();
+              if (created) chooseInvestmentAccount(account.id);
+            }}
+          />
+        )}
+
         <nav aria-label={`Telas de ${module.label}`}>
           {module.groups.map((section) => (
             <div className="nav-group" key={section.group}>
@@ -323,7 +368,8 @@ export function App() {
         {waiting ? (
           <Loading />
         ) : (
-          <div className="page">
+          // Trocar de conta remonta as telas: nenhuma guarda dado da anterior.
+          <div className="page" key={investmentAccountId}>
             {page === "dashboard" && dashboard && <DashboardPage data={dashboard} />}
             {page === "investment-cash" && (
               <InvestmentCashPage

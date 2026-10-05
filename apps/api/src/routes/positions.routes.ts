@@ -1,4 +1,5 @@
 import { manualPositionSchema } from "@projeto41/contracts";
+import { investmentSettingKey } from "@projeto41/db";
 import { z } from "zod";
 import { removePosition } from "../services/investment-cash-service.js";
 import {
@@ -106,12 +107,12 @@ export const registerPositionsRoutes: RoutePlugin = (app, { db, cdiService }) =>
   });
 
   app.get("/api/planning", async () => ({
-    initialCapital: Number(db.settings.get("initialCapital") ?? 0),
-    monthlyContribution: Number(db.settings.get("monthlyContribution") ?? 0),
-    monthlyReturnPercent: Number(db.settings.get("monthlyReturnPercent") ?? 0),
-    months: Number(db.settings.get("months") ?? 120),
-    annualInflationPercent: Number(db.settings.get("annualInflationPercent") ?? 0),
-    initialYear: Number(db.settings.get("initialYear") ?? new Date().getFullYear())
+    initialCapital: Number(db.settings.get(investmentSettingKey("initialCapital")) ?? 0),
+    monthlyContribution: Number(db.settings.get(investmentSettingKey("monthlyContribution")) ?? 0),
+    monthlyReturnPercent: Number(db.settings.get(investmentSettingKey("monthlyReturnPercent")) ?? 0),
+    months: Number(db.settings.get(investmentSettingKey("months")) ?? 120),
+    annualInflationPercent: Number(db.settings.get(investmentSettingKey("annualInflationPercent")) ?? 0),
+    initialYear: Number(db.settings.get(investmentSettingKey("initialYear")) ?? new Date().getFullYear())
   }));
   app.put("/api/planning", async (request) => {
     const values = z
@@ -124,7 +125,10 @@ export const registerPositionsRoutes: RoutePlugin = (app, { db, cdiService }) =>
         initialYear: z.number().int()
       })
       .parse(request.body);
-    for (const [key, value] of Object.entries(values)) db.settings.set(key, String(value));
+    // O planejamento é de cada conta de investimento.
+    for (const [key, value] of Object.entries(values)) {
+      db.settings.set(investmentSettingKey(key), String(value));
+    }
     return { ok: true };
   });
 

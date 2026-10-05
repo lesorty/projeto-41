@@ -1,6 +1,7 @@
 import {
   ArrowRightLeft,
   Banknote,
+  Bitcoin,
   Coins,
   DollarSign,
   Landmark,
@@ -25,12 +26,10 @@ const groups = [
   { id: "dollar", label: "Dólar", icon: DollarSign, hint: "Contas e carteiras em dólar", tracksInvested: false },
   { id: "cash", label: "Caixa BR", icon: Banknote, hint: "Saldo disponível em reais", tracksInvested: false },
   { id: "reserve", label: "Reserva de emergência", icon: PiggyBank, hint: "Liquidez para imprevistos", tracksInvested: false },
+  { id: "crypto", label: "Caixa cripto", icon: Bitcoin, hint: "Stablecoin na corretora, à espera de compra", tracksInvested: false },
   { id: "fixed_income", label: "Renda fixa", icon: Landmark, hint: "Tesouro e títulos", tracksInvested: true },
   { id: "global", label: "Ações globais", icon: Coins, hint: "Exposição internacional", tracksInvested: true }
 ] as const;
-
-const tracksInvested = (category: string) =>
-  groups.find((group) => group.id === category)?.tracksInvested ?? false;
 
 /** CDI só faz sentido em reais: renda fixa e os caixas. */
 const canEarnCdi = (category: string, currencyCode: string) =>
@@ -317,7 +316,12 @@ function PositionDrawer({
           <Field label="Categoria">
             <select
               value={category}
-              onChange={(event) => setCategory(event.target.value as ManualPositionRecord["category"])}
+              onChange={(event) => {
+                const next = event.target.value as ManualPositionRecord["category"];
+                setCategory(next);
+                // Dólar e cripto vivem em dólar; o resto, em reais.
+                if (creating) setCurrencyCode(next === "dollar" || next === "crypto" ? "USD" : "BRL");
+              }}
             >
               {groups.map((group) => (
                 <option key={group.id} value={group.id}>
@@ -549,7 +553,7 @@ function PositionStatement({
               {line.description &&
                 line.kind !== "adjust" &&
                 line.kind !== "yield" &&
-                !line.description.startsWith(MOVE_LABEL[line.kind] ?? " ") && (
+                !line.description.startsWith(MOVE_LABEL[line.kind] ?? "\0") && (
                 <small className="fin-muted"> · {line.description}</small>
               )}
             </span>

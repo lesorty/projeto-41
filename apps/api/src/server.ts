@@ -49,8 +49,8 @@ const stopScheduler = config.demoMode
   : startScheduler(db, livePriceService, config.timezone, cdiService);
 
 function iconTargets() {
-  const crypto = [...new Set(db.operations.list("crypto").map((operation) => operation.asset))];
-  const b3 = [...new Set(db.operations.list("b3").map((operation) => operation.asset))];
+  const crypto = [...new Set(db.operations.list("crypto", { allAccounts: true }).map((operation) => operation.asset))];
+  const b3 = [...new Set(db.operations.list("b3", { allAccounts: true }).map((operation) => operation.asset))];
   return [
     ...crypto.map((key) => ({ kind: "crypto" as IconKind, key })),
     ...b3.map((key) => ({ kind: "b3" as IconKind, key })),

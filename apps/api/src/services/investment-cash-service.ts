@@ -1,5 +1,5 @@
 import type { Operation } from "@projeto41/contracts";
-import type { AppDatabase, PositionMovementKind } from "@projeto41/db";
+import { investmentSettingKey, type AppDatabase, type PositionMovementKind } from "@projeto41/db";
 import { toCents } from "@projeto41/finance";
 
 /**
@@ -48,24 +48,25 @@ const readNumber = (value: string | undefined): number | null => {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 };
 
+/** Cada conta de investimento tem a própria forma de pagar. */
 export function readCashSettings(db: AppDatabase): CashSettings {
-  const positionId = readNumber(db.settings.get("investment.default_position_id"));
+  const positionId = readNumber(db.settings.get(investmentSettingKey("investment.default_position_id")));
   return {
-    autoDebit: (db.settings.get("investment.auto_debit") ?? "1") === "1",
-    defaultAccountId: readNumber(db.settings.get("investment.default_account_id")),
+    autoDebit: (db.settings.get(investmentSettingKey("investment.auto_debit")) ?? "1") === "1",
+    defaultAccountId: readNumber(db.settings.get(investmentSettingKey("investment.default_account_id"))),
     // Um caixa apagado não pode continuar sendo o padrão.
     defaultPositionId: positionId != null && db.positions.get(positionId) ? positionId : null
   };
 }
 
 export function writeCashSettings(db: AppDatabase, settings: CashSettings) {
-  db.settings.set("investment.auto_debit", settings.autoDebit ? "1" : "0");
+  db.settings.set(investmentSettingKey("investment.auto_debit"), settings.autoDebit ? "1" : "0");
   db.settings.set(
-    "investment.default_account_id",
+    investmentSettingKey("investment.default_account_id"),
     settings.defaultAccountId == null ? "" : String(settings.defaultAccountId)
   );
   db.settings.set(
-    "investment.default_position_id",
+    investmentSettingKey("investment.default_position_id"),
     settings.defaultPositionId == null ? "" : String(settings.defaultPositionId)
   );
 }

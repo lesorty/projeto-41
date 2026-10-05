@@ -1,4 +1,8 @@
-import type { AppDatabase } from "@projeto41/db";
+import {
+  investmentAccountScope,
+  PRINCIPAL_INVESTMENT_ACCOUNT,
+  type AppDatabase
+} from "@projeto41/db";
 import { fromCents } from "@projeto41/finance";
 import { buildPortfolios } from "./portfolio-service.js";
 
@@ -76,8 +80,15 @@ export function buildNetWorth(db: AppDatabase, now = new Date()): NetWorth {
   // As classes do livro. `kind='investment'` é descartada incondicionalmente,
   // mesmo com `include_in_net_worth = 1`: o mesmo dinheiro já aparece como
   // valor de mercado das carteiras, e somar as duas pontas contaria duas vezes.
-  const byKind = db.ledger.balances.byKind();
-  const debt = db.ledger.balances.creditCardDebt();
+  // O livro (contas, caixinhas, cartão) entra uma vez só: no todo e na conta
+  // Principal, que é onde ele sempre esteve. As outras contas de investimento
+  // mostram só os próprios investimentos; somá-las não conta o banco duas vezes.
+  const scope = investmentAccountScope();
+  const withLedger = scope == null || scope === PRINCIPAL_INVESTMENT_ACCOUNT;
+  const byKind: Partial<Record<string, number>> = withLedger ? db.ledger.balances.byKind() : {};
+  const debt = withLedger
+    ? db.ledger.balances.creditCardDebt()
+    : { totalOwedCents: 0, currentStatementCents: 0 };
 
   classes["ledger:bank"] = fromCents((byKind.checking ?? 0) + (byKind.savings ?? 0));
   classes["ledger:cash"] = fromCents(byKind.cash ?? 0);

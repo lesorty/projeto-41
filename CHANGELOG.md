@@ -30,9 +30,20 @@ um novo `[Unreleased]` vazio no topo.
     números separados (fatura atual e total devido), limite usado e disponível,
     parcelamento com plano persistido, estorno e antecipação de parcelas.
 - Backup do banco pela API `backup()` do SQLite, com botão visível no livro.
+- **Contas no módulo de investimentos**: seletor no menu lateral para escolher,
+  criar e renomear contas. Cada conta tem os próprios registros — operações,
+  caixas e renda fixa, aportes, proventos, metas de alocação, planejamento e
+  histórico. O que já existia ficou na conta "Principal", que continua
+  mostrando o patrimônio com as contas do banco; o Patrimônio do módulo de
+  finanças soma todas.
+- **Caixa cripto** (stablecoin na corretora, em dólar) e "Reserva de
+  emergência" com o nome completo no "Novo caixa".
 
 ### Changed
 
+- O ajuste de saldo por "Saldo do banco" compara com o saldo **livre**: o
+  valor digitado é o que está solto na conta, e o que está separado em
+  caixinhas fica por cima, em vez de ser comido pelo ajuste.
 - Migrações agora são versionadas, com transação por versão e suporte a
   reconstrução de tabela para ampliar `CHECK`.
 - `apps/web` consome os tipos de `@projeto41/contracts`; `src/lib/types.ts`
