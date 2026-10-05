@@ -1,7 +1,6 @@
 import {
   ArrowRightLeft,
   Banknote,
-  Bitcoin,
   Coins,
   DollarSign,
   Landmark,
@@ -26,7 +25,6 @@ const groups = [
   { id: "dollar", label: "Dólar", icon: DollarSign, hint: "Contas e carteiras em dólar", tracksInvested: false },
   { id: "cash", label: "Caixa BR", icon: Banknote, hint: "Saldo disponível em reais", tracksInvested: false },
   { id: "reserve", label: "Reserva de emergência", icon: PiggyBank, hint: "Liquidez para imprevistos", tracksInvested: false },
-  { id: "crypto", label: "Caixa cripto", icon: Bitcoin, hint: "Stablecoin na corretora, à espera de compra", tracksInvested: false },
   { id: "fixed_income", label: "Renda fixa", icon: Landmark, hint: "Tesouro e títulos", tracksInvested: true },
   { id: "global", label: "Ações globais", icon: Coins, hint: "Exposição internacional", tracksInvested: true }
 ] as const;
@@ -319,8 +317,8 @@ function PositionDrawer({
               onChange={(event) => {
                 const next = event.target.value as ManualPositionRecord["category"];
                 setCategory(next);
-                // Dólar e cripto vivem em dólar; o resto, em reais.
-                if (creating) setCurrencyCode(next === "dollar" || next === "crypto" ? "USD" : "BRL");
+                // Dólar vive em dólar; o resto, em reais.
+                if (creating) setCurrencyCode(next === "dollar" ? "USD" : "BRL");
               }}
             >
               {groups.map((group) => (
