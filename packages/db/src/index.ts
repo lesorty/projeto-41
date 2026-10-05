@@ -115,7 +115,9 @@ export type PositionMovement = PositionMovementRow & {
  */
 function ledgerContributions(raw: Database.Database, account: number | null) {
   // A conta de investimento de um aporte pelo livro é a da posição que ele
-  // abasteceu ou a da operação que ele pagou; sem nenhuma das duas, a Principal.
+  // abasteceu ou a da operação que ele pagou. Sem nenhuma das duas (a posição
+  // foi apagada mas o lançamento ficou no banco), não é de conta nenhuma: só
+  // aparece no todo.
   const rows = raw
     .prepare(
       `SELECT t.id AS transferId, fe.date,
@@ -134,8 +136,7 @@ function ledgerContributions(raw: Database.Database, account: number | null) {
            (SELECT p.investment_account_id FROM position_movements pm
             JOIN manual_positions p ON p.id = pm.position_id WHERE pm.transfer_id = t.id),
            (SELECT o.investment_account_id FROM operation_transfers ot
-            JOIN operations o ON o.id = ot.operation_id WHERE ot.transfer_id = t.id),
-           ${PRINCIPAL_INVESTMENT_ACCOUNT}))
+            JOIN operations o ON o.id = ot.operation_id WHERE ot.transfer_id = t.id)))
        ORDER BY fe.date, t.id`
     )
     .all({ account }) as {

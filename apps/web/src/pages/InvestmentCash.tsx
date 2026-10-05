@@ -335,6 +335,12 @@ function NewCashDrawer({ onClose, onSaved }: { onClose: () => void; onSaved: () 
   const toast = useToast();
   const [name, setName] = useState("");
   const [category, setCategory] = useState<CashCategory>("cash");
+  // Dólar e cripto começam em dólar, mas qualquer caixa pode ser em reais.
+  const [currencyCode, setCurrencyCode] = useState<"BRL" | "USD">("BRL");
+  const chooseCategory = (next: CashCategory) => {
+    setCategory(next);
+    setCurrencyCode(next === "dollar" || next === "crypto" ? "USD" : "BRL");
+  };
   const [saving, setSaving] = useState(false);
 
   async function submit(event: React.FormEvent) {
@@ -352,8 +358,7 @@ function NewCashDrawer({ onClose, onSaved }: { onClose: () => void; onSaved: () 
           name: name.trim(),
           invested: 0,
           currentValue: 0,
-          // Dólar e cripto (stablecoin) vivem em dólar.
-          currency: category === "dollar" || category === "crypto" ? "USD" : "BRL"
+          currency: currencyCode
         })
       });
       toast.notify("Caixa criado: aporte para colocar dinheiro nele");
@@ -379,12 +384,29 @@ function NewCashDrawer({ onClose, onSaved }: { onClose: () => void; onSaved: () 
         <Field label="Tipo" hint="Aparece também em Caixa e renda fixa">
           <Segmented<CashCategory>
             value={category}
-            onChange={setCategory}
+            onChange={chooseCategory}
             options={[
               { value: "cash", label: "Caixa BR" },
               { value: "dollar", label: "Dólar" },
               { value: "crypto", label: "Cripto" },
               { value: "reserve", label: "Reserva de emergência" }
+            ]}
+          />
+        </Field>
+        <Field
+          label="Moeda"
+          hint={
+            currencyCode === "USD"
+              ? "Em dólar: o aporte sai do banco em reais e é convertido pela cotação do dia."
+              : "Em reais: o valor do caixa é o que você aportou, sem conversão."
+          }
+        >
+          <Segmented<"BRL" | "USD">
+            value={currencyCode}
+            onChange={setCurrencyCode}
+            options={[
+              { value: "BRL", label: "Reais (R$)" },
+              { value: "USD", label: "Dólares (US$)" }
             ]}
           />
         </Field>
