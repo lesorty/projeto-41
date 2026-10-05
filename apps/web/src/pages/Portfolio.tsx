@@ -394,8 +394,6 @@ function OperationDrawer({
 }) {
   const toast = useToast();
   const isCrypto = portfolio === "crypto";
-  // Cripto é sempre armazenado em USD; entryCurrency é só a moeda de digitação.
-  const storedCode = isCrypto ? "USD" : "BRL";
   const initialQty = initial?.quantity ?? 0;
   const initialTotal = initial?.total ?? 0;
 
@@ -405,22 +403,27 @@ function OperationDrawer({
   const [assetName, setAssetName] = useState(initial?.asset ?? "");
   const [date, setDate] = useState(initial && initial.date !== "1900-01-01" ? initial.date : todayIso());
   const canUseBrl = isCrypto && usdBrl > 0;
-  // A moeda de digitação é a última usada, também ao editar: reabrir sempre
-  // em USD fazia quem digitou em reais gravar reais como dólares.
+  // A operação é gravada na moeda em que foi digitada: quem compra em reais
+  // vê reais na carteira e no livro, sem conversão de ida e volta. Ao editar,
+  // a moeda é a da operação; numa nova, a última usada.
   const [entryCurrency, setEntryCurrency] = useState<"USD" | "BRL">(() =>
-    canUseBrl && readEntryCurrency() !== "USD" ? "BRL" : "USD"
+    initial && isCrypto
+      ? initial.currency
+      : canUseBrl && readEntryCurrency() !== "USD"
+        ? "BRL"
+        : "USD"
   );
   const [useFee, setUseFee] = useState(false);
   const code = isCrypto ? entryCurrency : "BRL";
-  const shown = (usd: number) => (entryCurrency === "BRL" ? Math.round(usd * usdBrl * 100) / 100 : usd);
+  const storedCode = code;
 
   // Quantidade × Preço = Total. O usuário preenche dois campos quaisquer e o
   // terceiro é resolvido sozinho. `recent` guarda a ordem de edição: o último
   // item é o campo atualmente calculado (o "stale").
   const [fields, setFields] = useState<Record<TradeField, string>>(() => ({
     qty: initialQty ? String(initialQty) : "",
-    unit: initialQty > 0 ? String(shown(round(initialTotal / initialQty))) : "",
-    total: initialTotal ? String(shown(initialTotal)) : ""
+    unit: initialQty > 0 ? String(round(initialTotal / initialQty)) : "",
+    total: initialTotal ? String(initialTotal) : ""
   }));
   const [recent, setRecent] = useState<TradeField[]>(
     initial || isCrypto ? ["qty", "total", "unit"] : ["qty", "unit", "total"]
@@ -489,14 +492,6 @@ function OperationDrawer({
       toast.notify("Preencha ao menos dois dos três valores", "error");
       return;
     }
-    // Operação digitada em BRL é convertida para USD antes de gravar.
-    if (isCrypto && entryCurrency === "BRL") {
-      if (!(usdBrl > 0)) {
-        toast.notify("Cotação USD/BRL indisponível para converter", "error");
-        return;
-      }
-      total = round(total / usdBrl);
-    }
     // Taxa Binance (0,1%): na compra reduz a quantidade recebida; na venda
     // reduz o valor recebido. O que foi pago/vendido permanece igual.
     if (isCrypto && useFee) {
@@ -542,8 +537,7 @@ function OperationDrawer({
    * O que vai efetivamente sair (ou entrar) na conta, em BRL. Mostrar isso
    * antes de salvar evita o usuário descobrir a conversão depois, no extrato.
    */
-  const totalInStored =
-    isCrypto && entryCurrency === "BRL" && usdBrl > 0 ? netTotal / usdBrl : netTotal;
+  const totalInStored = netTotal;
   const movementBrl = storedCode === "USD" ? totalInStored * usdBrl : totalInStored;
   const conversion =
     storedCode !== "USD"
@@ -555,7 +549,7 @@ function OperationDrawer({
   return (
     <Drawer
       title={initial ? "Editar operação" : "Nova operação"}
-      subtitle={isCrypto ? "Carteira cripto · valores em USD" : "Bolsa B3 · valores em BRL"}
+      subtitle={isCrypto ? "Carteira cripto · em reais ou dólares" : "Bolsa B3 · valores em BRL"}
       onClose={onClose}
       footer={
         <>

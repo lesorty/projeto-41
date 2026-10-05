@@ -16,6 +16,7 @@ import {
   Tag
 } from "../../components/ui.js";
 import { api } from "../../lib/api.js";
+import { ALL_INVESTMENT_ACCOUNTS } from "../../lib/investment-account.js";
 import { categoryLabel, longDate, money, percent } from "../../lib/format.js";
 import { useToast } from "../../lib/toast.js";
 
@@ -37,7 +38,8 @@ export function NetWorthPage({
   const [positions, setPositions] = useState<ManualPositionRecord[]>([]);
 
   const loadPositions = useCallback(async () => {
-    setPositions(await api<ManualPositionRecord[]>("/positions"));
+    // O patrimônio soma todas as contas de investimento.
+    setPositions(await api<ManualPositionRecord[]>("/positions", { headers: ALL_INVESTMENT_ACCOUNTS }));
   }, []);
 
   useEffect(() => {

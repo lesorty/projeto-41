@@ -35,6 +35,7 @@ import {
 } from "../../lib/ledger.js";
 import type { LedgerReference } from "../../lib/ledger.js";
 import { api } from "../../lib/api.js";
+import { ALL_INVESTMENT_ACCOUNTS } from "../../lib/investment-account.js";
 import { POSITION_CATEGORY_LABEL } from "../../lib/cash.js";
 import { useToast } from "../../lib/toast.js";
 
@@ -141,7 +142,9 @@ export function EntryDrawer({
   // As posições só são buscadas quando o aporte é escolhido.
   useEffect(() => {
     if (kind !== "investment" || positions != null) return;
-    api<ManualPositionRecord[]>("/positions")
+    // O livro é um só: o aporte pode ir para posição de qualquer conta de
+    // investimento, não só da escolhida no menu de investimentos.
+    api<ManualPositionRecord[]>("/positions", { headers: ALL_INVESTMENT_ACCOUNTS })
       .then((list) => {
         setPositions(list);
         setPositionId((current) => current ?? list[0]?.id ?? null);
