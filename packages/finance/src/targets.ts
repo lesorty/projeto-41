@@ -128,8 +128,15 @@ export function computeTargets(input: TargetInput): TargetResult {
 
   if (input.splitMode === "income_proportional") {
     const jointTarget = input.jointExpenseTargetCents ?? null;
-    const base =
-      totalTargetCents == null ? null : totalTargetCents - (jointTarget ?? 0);
+    let base = totalTargetCents == null ? null : totalTargetCents - (jointTarget ?? 0);
+    // Teto conjunto maior que o total deixava alvo individual negativo, e a
+    // barra dizia "estourou" sem a pessoa ter gastado nada.
+    if (base != null && base < 0) {
+      warnings.push(
+        "O alvo conjunto é maior que o alvo total do período: não sobra alvo individual."
+      );
+      base = 0;
+    }
 
     const overrides = individuals.map((person) => input.targetOverrides?.[person.id] ?? null);
     const withoutOverride = individuals.filter((_, index) => overrides[index] == null);
@@ -137,7 +144,10 @@ export function computeTargets(input: TargetInput): TargetResult {
 
     let allocated: number[] = [];
     if (base != null) {
-      const remaining = base - overrideSum;
+      const remaining = Math.max(0, base - overrideSum);
+      if (base - overrideSum < 0) {
+        warnings.push("Os alvos manuais passam do que sobra do alvo total do período.");
+      }
       if (withoutOverride.length === 0) {
         if (overrideSum !== base) {
           warnings.push("Os alvos manuais não fecham com o alvo total do período.");
@@ -156,9 +166,7 @@ export function computeTargets(input: TargetInput): TargetResult {
     let cursor = 0;
     const bars: TargetBar[] = [];
     if (joint) {
-      bars.push(
-        bar(joint.id, joint.name, joint.color, jointTarget, realizedOf(joint.id))
-      );
+      bars.push(bar(joint.id, joint.name, joint.color, jointTarget, realizedOf(joint.id)));
     }
     individuals.forEach((person, index) => {
       const override = overrides[index];
@@ -170,7 +178,12 @@ export function computeTargets(input: TargetInput): TargetResult {
       bars.push(bar(person.id, person.name, person.color, target, realizedOf(person.id)));
     });
 
-    return { splitMode: "income_proportional", totalTargetCents, bars, warnings };
+    return {
+      splitMode: "income_proportional",
+      totalTargetCents,
+      bars,
+      warnings
+    };
   }
 
   // Modo pooled: o casal junta a renda, reserva um teto conjunto e divide o
@@ -201,5 +214,10 @@ export function computeTargets(input: TargetInput): TargetResult {
     );
   });
 
-  return { splitMode: "pooled", totalTargetCents: pooledIncomeCents, bars, warnings };
+  return {
+    splitMode: "pooled",
+    totalTargetCents: pooledIncomeCents,
+    bars,
+    warnings
+  };
 }

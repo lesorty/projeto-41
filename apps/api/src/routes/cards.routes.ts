@@ -51,22 +51,22 @@ export const registerCardsRoutes: RoutePlugin = (app, { db }) => {
   app.post("/api/ledger/cards/:id/statements/:month/payment", async (request, reply) => {
     const { id, month } = monthParam.parse(request.params);
     const payment = ledger.statements.pay(id, month, invoicePaymentSchema.parse(request.body));
-    return reply
-      .status(201)
-      .send({ ok: true, payment, card: ledger.cards.summary(id), balances: balances() });
+    return reply.status(201).send({
+      ok: true,
+      payment,
+      card: ledger.cards.summary(id),
+      balances: balances()
+    });
   });
 
-  app.delete(
-    "/api/ledger/cards/:id/statements/:month/payment/:transferId",
-    async (request) => {
-      const { id } = monthParam.parse(request.params);
-      const { transferId } = z
-        .object({ transferId: z.coerce.number().int().positive() })
-        .parse(request.params);
-      ledger.statements.undoPayment(transferId);
-      return { ok: true, card: ledger.cards.summary(id), balances: balances() };
-    }
-  );
+  app.delete("/api/ledger/cards/:id/statements/:month/payment/:transferId", async (request) => {
+    const { id } = monthParam.parse(request.params);
+    const { transferId } = z
+      .object({ transferId: z.coerce.number().int().positive() })
+      .parse(request.params);
+    ledger.statements.undoPayment(transferId);
+    return { ok: true, card: ledger.cards.summary(id), balances: balances() };
+  });
 
   app.post("/api/ledger/cards/:id/anticipate", async (request) => {
     const { id } = idParam.parse(request.params);
@@ -87,7 +87,10 @@ export const registerCardsRoutes: RoutePlugin = (app, { db }) => {
     const query = z
       .object({
         accountId: z.coerce.number().int().positive().optional(),
-        activeOnly: z.coerce.boolean().optional()
+        activeOnly: z
+          .enum(["true", "false", "1", "0"])
+          .transform((value) => value === "true" || value === "1")
+          .optional()
       })
       .parse(request.query);
     return ledger.installmentPlans.list(query);
@@ -172,9 +175,11 @@ export const registerCardsRoutes: RoutePlugin = (app, { db }) => {
       return reply.status(404).send({ error: "Lancamento nao encontrado" });
     }
     const refundId = ledger.refunds.create(id, refundSchema.parse(request.body));
-    return reply
-      .status(201)
-      .send({ id: refundId, entry: ledger.entries.get(refundId), balances: balances() });
+    return reply.status(201).send({
+      id: refundId,
+      entry: ledger.entries.get(refundId),
+      balances: balances()
+    });
   });
 
   app.post("/api/ledger/installment-plans/:id/refund", async (request, reply) => {

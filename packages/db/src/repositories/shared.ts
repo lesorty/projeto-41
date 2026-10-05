@@ -42,3 +42,34 @@ export const notFound = (what: string) => new LedgerError(`${what} nao encontrad
 export function countReferencing(db: Db, sql: string, id: number): number {
   return (db.prepare(sql).get(id) as { n: number }).n;
 }
+
+/**
+ * Quantas linhas de qualquer tabela impedem apagar `table.id`, lido do próprio
+ * esquema: toda chave estrangeira sem `ON DELETE CASCADE` ou `SET NULL`. Uma
+ * lista escrita à mão esquecia tabelas novas (parcelamentos, importação) e o
+ * DELETE estourava na chave estrangeira em vez de arquivar.
+ */
+export function countBlockingReferences(db: Db, table: string, id: number): number {
+  const tables = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+    .all() as { name: string }[];
+  let total = 0;
+  for (const { name } of tables) {
+    const keys = db.prepare(`PRAGMA foreign_key_list("${name}")`).all() as {
+      table: string;
+      from: string;
+      on_delete: string;
+    }[];
+    for (const key of keys) {
+      if (key.table !== table) continue;
+      if (key.on_delete === "CASCADE" || key.on_delete === "SET NULL") continue;
+      if (name === table) continue;
+      total += (
+        db.prepare(`SELECT COUNT(*) AS n FROM "${name}" WHERE "${key.from}" = ?`).get(id) as {
+          n: number;
+        }
+      ).n;
+    }
+  }
+  return total;
+}

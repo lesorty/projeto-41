@@ -9,6 +9,11 @@ import { migration008BudgetShareDiscounts } from "./008-budget-share-discounts.j
 import { migration009BrokerCash } from "./009-broker-cash.js";
 import { migration010PositionCash } from "./010-position-cash.js";
 import { migration011SimplerKinds } from "./011-simpler-kinds.js";
+import { migration012ImportRowRelease } from "./012-import-row-release.js";
+import { migration013EarmarkCdi } from "./013-earmark-cdi.js";
+import { migration014PositionCdi } from "./014-position-cdi.js";
+import { migration015GuidedYield } from "./015-guided-yield.js";
+import { migration016GuidedYieldComplete } from "./016-guided-yield-complete.js";
 import type { Migration } from "./runner.js";
 
 /**
@@ -26,7 +31,12 @@ export const migrations: Migration[] = [
   migration008BudgetShareDiscounts,
   migration009BrokerCash,
   migration010PositionCash,
-  migration011SimplerKinds
+  migration011SimplerKinds,
+  migration012ImportRowRelease,
+  migration013EarmarkCdi,
+  migration014PositionCdi,
+  migration015GuidedYield,
+  migration016GuidedYieldComplete
 ];
 
 export * from "./runner.js";

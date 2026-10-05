@@ -162,7 +162,14 @@ export const registerLedgerRoutes: RoutePlugin = (app, { db, attachmentService }
   // Etiquetas ---------------------------------------------------------------
   app.get("/api/ledger/tags", async () => ledger.tags.list());
   app.post("/api/ledger/tags", async (request, reply) => {
-    const id = ledger.tags.create(tagSchema.parse(request.body));
+    // Nome que já existe devolve a etiqueta existente: o banco recusaria o
+    // nome repetido e o usuário veria "Erro interno".
+    const input = tagSchema.parse(request.body);
+    const existing = ledger.tags.list().find(
+      (tag) => tag.name.trim().toLocaleLowerCase("pt-BR") === input.name.trim().toLocaleLowerCase("pt-BR")
+    );
+    if (existing) return reply.status(200).send({ id: existing.id, tags: ledger.tags.list() });
+    const id = ledger.tags.create(input);
     return reply.status(201).send({ id, tags: ledger.tags.list() });
   });
   app.put("/api/ledger/tags/:id", async (request) => {
@@ -184,7 +191,12 @@ export const registerLedgerRoutes: RoutePlugin = (app, { db, attachmentService }
     return ledger.places.list(search);
   });
   app.post("/api/ledger/places", async (request, reply) => {
-    const id = ledger.places.create(placeSchema.parse(request.body));
+    // O formulário cria o local pelo nome digitado quando ninguém escolheu a
+    // sugestão. Se ele já existe, é ele: recusar derrubava o lançamento inteiro.
+    const input = placeSchema.parse(request.body);
+    const existing = ledger.places.getByName(input.name);
+    if (existing) return reply.status(200).send({ id: existing.id, place: existing });
+    const id = ledger.places.create(input);
     return reply.status(201).send({ id, place: ledger.places.get(id) });
   });
   app.put("/api/ledger/places/:id", async (request) => {
@@ -248,14 +260,24 @@ export const registerLedgerRoutes: RoutePlugin = (app, { db, attachmentService }
           scope === "all" ? true : (row.installmentNumber ?? 0) > (existing.installmentNumber ?? 0)
         );
       for (const sibling of siblings) {
+        // Só os campos descritivos viajam pela série. Status, pessoa, notas e
+        // forma de pagamento são de cada parcela: copiar o status da primeira
+        // marcava as futuras como pagas e as tirava do saldo pendente.
         ledger.entries.update(sibling.id, {
-          ...input,
-          // Cada irmao mantem o proprio valor, data e numero: so os campos
-          // descritivos viajam pela serie.
-          amountCents: sibling.amountCents,
-          date: sibling.date,
           accountId: sibling.accountId,
-          statementMonth: sibling.statementMonth
+          personId: sibling.personId,
+          date: sibling.date,
+          amountCents: sibling.amountCents,
+          kind: sibling.kind,
+          status: sibling.status,
+          categoryId: input.categoryId ?? null,
+          placeId: input.placeId ?? null,
+          description: input.description ?? null,
+          notes: sibling.notes,
+          paymentMethod: sibling.paymentMethod,
+          statementMonth: sibling.statementMonth,
+          refundOfEntryId: sibling.refundOfEntryId,
+          tagIds: input.tagIds
         });
       }
     }

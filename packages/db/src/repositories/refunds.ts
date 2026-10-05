@@ -61,17 +61,23 @@ export function createRefundsRepository(db: Db) {
 
     create: (
       entryId: number,
-      input: { amountCents?: number; date: string; description?: string | null }
+      input: {
+        amountCents?: number;
+        date: string;
+        description?: string | null;
+      }
     ): number => {
       const original = originalOf(entryId);
       const magnitude = Math.abs(original.amountCents);
-      const amountCents = Math.abs(input.amountCents ?? magnitude);
-      const already = repository.refundedCents(entryId);
+      // O estorno tem o sinal contrário do original: devolve uma saída (+) ou
+      // desfaz uma entrada (−). Sempre positivo, estornar uma receita somava
+      // dinheiro na conta em vez de tirar.
+      const direction = original.amountCents < 0 ? 1 : -1;
+      const amountCents = direction * Math.abs(input.amountCents ?? magnitude);
+      const already = Math.abs(repository.refundedCents(entryId));
 
-      if (already + amountCents > magnitude) {
-        throw new LedgerError(
-          "O estorno passa do valor do lancamento original"
-        );
+      if (already + Math.abs(amountCents) > magnitude) {
+        throw new LedgerError("O estorno passa do valor do lancamento original");
       }
 
       // `kind` continua o do original: estorno de despesa e `expense` com valor
@@ -130,6 +136,20 @@ export function createRefundsRepository(db: Db) {
         )
         .get(planId) as { id: number } | undefined;
       if (!first) throw notFound("Parcela");
+      const already = (
+        db
+          .prepare(
+            `SELECT COALESCE(SUM(r.amount_cents), 0) AS total FROM entries r
+             JOIN entries o ON o.id = r.refund_of_entry_id
+             WHERE o.installment_plan_id = ?`
+          )
+          .get(planId) as { total: number }
+      ).total;
+      if (already + plan.totalCents > plan.totalCents) {
+        throw new LedgerError(
+          "Esta compra parcelada ja tem estorno: o total ja foi devolvido em parte ou por inteiro"
+        );
+      }
 
       return entries.createInternal({
         accountId: plan.accountId,
@@ -156,9 +176,7 @@ export function createRefundsRepository(db: Db) {
           .get(entryId) as { n: number }
       ).n;
       if (count > 0) {
-        throw new LedgerError(
-          "Remova antes o estorno deste lancamento"
-        );
+        throw new LedgerError("Remova antes o estorno deste lancamento");
       }
     }
   };

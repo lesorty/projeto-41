@@ -48,9 +48,10 @@ describe("migration 006 — goals e CDI", () => {
     expect(indexes("goal_allocations")).toContain("goal_allocations_entry");
   });
 
-  it("recusa caixinha de marcacao com rendimento", () => {
-    expect(() => insertGoal({ mode: "earmark", cdiPercent: 110 })).toThrow();
-    expect(() => insertGoal({ mode: "earmark" })).not.toThrow();
+  // A 013 libera o CDI na marcação; a regra do percentual positivo continua.
+  it("aceita caixinha de marcacao com rendimento", () => {
+    expect(() => insertGoal({ mode: "earmark", cdiPercent: 110 })).not.toThrow();
+    expect(() => insertGoal({ mode: "earmark", cdiPercent: 0 })).toThrow();
   });
 
   it("recusa caixinha de conta sem conta", () => {

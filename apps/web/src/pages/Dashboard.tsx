@@ -2,13 +2,13 @@ import { ArrowDownRight, ArrowUpRight, CircleDollarSign, PiggyBank, Wallet } fro
 import { useMemo, useState } from "react";
 import { AreaTrend, Donut } from "../components/charts.js";
 import { AnimatedNumber, Card, Delta, Kpi, Panel } from "../components/ui.js";
-import { fx, money, percent, signedPercent, usd } from "../lib/format.js";
+import { fx, money, percent, signedPercent, todayIso, usd } from "../lib/format.js";
 import type { Dashboard, Snapshot } from "@projeto41/contracts";
 
 // Variação do saldo atual (ao vivo) em relação ao snapshot mais próximo de `days` atrás.
 function changeSince(history: Snapshot[], current: number, days: number) {
   if (!history.length) return 0;
-  const cutoff = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+  const cutoff = todayIso(new Date(Date.now() - days * 86400000));
   const past = [...history].reverse().find((item) => item.date <= cutoff) ?? history[0]!;
   return past.totalBrl > 0 ? current / past.totalBrl - 1 : 0;
 }
@@ -32,7 +32,7 @@ export function filterHistory<T extends { date: string }>(history: T[], range: R
     range === "ytd"
       ? new Date(now.getFullYear(), 0, 1)
       : new Date(now.getTime() - days * 86400000);
-  const iso = cutoff.toISOString().slice(0, 10);
+  const iso = todayIso(cutoff);
   return history.filter((item) => item.date >= iso);
 }
 
@@ -60,7 +60,7 @@ export function DashboardPage({ data }: { data: Dashboard }) {
   }, [data]);
 
   // "Hoje" = saldo atual vs. o último fechamento registrado em um dia anterior a hoje.
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayIso();
   const yesterday = [...data.history].reverse().find((item) => item.date < today);
   const dayChange = yesterday && yesterday.totalBrl > 0 ? data.totalBrl / yesterday.totalBrl - 1 : 0;
   const monthChange = changeSince(data.history, data.totalBrl, 30);

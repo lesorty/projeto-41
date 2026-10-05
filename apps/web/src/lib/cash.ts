@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { AccountRecord, ManualPositionRecord } from "@projeto41/contracts";
+import type { AccountRecord, ManualPositionRecord, PositionRecord } from "@projeto41/contracts";
 import { api } from "./api.js";
 
 /**
@@ -29,7 +29,7 @@ export type PositionMovement = {
   positionCategory: string;
   positionCurrency: string;
   date: string;
-  kind: "deposit" | "withdrawal" | "move_in" | "move_out" | "buy" | "sell";
+  kind: "deposit" | "withdrawal" | "move_in" | "move_out" | "buy" | "sell" | "yield" | "adjust";
   amount: number;
   transferId: number | null;
   operationId: number | null;
@@ -43,6 +43,17 @@ export type PositionMovement = {
 export const LIQUID_CATEGORIES = ["cash", "dollar", "reserve"] as const;
 export const isLiquid = (position: Pick<ManualPositionRecord, "category">) =>
   (LIQUID_CATEGORIES as readonly string[]).includes(position.category);
+
+export const MOVE_LABEL: Record<PositionMovement["kind"], string> = {
+  deposit: "Aporte",
+  withdrawal: "Resgate",
+  move_in: "Entrada",
+  move_out: "Saída",
+  buy: "Compra",
+  sell: "Venda",
+  yield: "Rendimento",
+  adjust: "Correção"
+};
 
 export const POSITION_CATEGORY_LABEL: Record<string, string> = {
   cash: "Caixa BR",
@@ -59,14 +70,14 @@ export const isFundingAccount = (account: AccountRecord) =>
 export function useInvestmentCash() {
   const [settings, setSettings] = useState<CashSettings | null>(null);
   const [accounts, setAccounts] = useState<AccountRecord[]>([]);
-  const [positions, setPositions] = useState<ManualPositionRecord[]>([]);
+  const [positions, setPositions] = useState<PositionRecord[]>([]);
   const [loading, setLoading] = useState(true);
 
   const reload = useCallback(async () => {
     const [nextSettings, nextAccounts, nextPositions] = await Promise.all([
       api<CashSettings>("/investments/cash-settings"),
       api<AccountRecord[]>("/ledger/accounts"),
-      api<ManualPositionRecord[]>("/positions")
+      api<PositionRecord[]>("/positions")
     ]);
     setSettings(nextSettings);
     setAccounts(nextAccounts);

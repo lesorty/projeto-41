@@ -30,7 +30,11 @@ export const manualPositionSchema = z.object({
   invested: z.number().nonnegative().default(0),
   currentValue: z.number().nonnegative(),
   currency: currencySchema.default("BRL"),
-  notes: z.string().trim().optional()
+  notes: z.string().trim().optional(),
+  /** Percentual do CDI que a posição rende. `null` ou ausente: não rende. */
+  cdiPercent: z.number().positive().max(1000).nullable().optional(),
+  /** Dia a partir do qual o valor atual rende. */
+  cdiSince: z.string().date().nullable().optional()
 });
 
 export const contributionSchema = z.object({

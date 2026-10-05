@@ -8,8 +8,9 @@ import {
   Wallet
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { CategoryReport, LedgerSummary, TargetReport } from "@projeto41/contracts";
+import type { CategoryReport, GoalProgress, LedgerSummary, TargetReport } from "@projeto41/contracts";
 import { Donut } from "../../components/charts.js";
+import { AccountStrip } from "../../components/finance/AccountStrip.js";
 import { ColorDot } from "../../components/ColorPicker.js";
 import {
   PeriodPicker,
@@ -47,6 +48,7 @@ export function FinanceDashboardPage({ onNavigate }: { onNavigate: FinanceNaviga
   const [summary, setSummary] = useState<LedgerSummary | null>(null);
   const [targets, setTargets] = useState<TargetReport | null>(null);
   const [report, setReport] = useState<CategoryReport | null>(null);
+  const [goals, setGoals] = useState<GoalProgress[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [configuring, setConfiguring] = useState(false);
 
@@ -58,13 +60,15 @@ export function FinanceDashboardPage({ onNavigate }: { onNavigate: FinanceNaviga
         : filterToQuery({ from: period.from, to: period.to });
       // Tudo no mesmo recorte. O alvo é mensal: fora de um mês ele não tem o
       // que comparar, e mostrar o do mês corrente ao lado de um ano confundia.
-      const [nextSummary, nextTargets, nextReport] = await Promise.all([
+      const [nextSummary, nextTargets, nextReport, nextGoals] = await Promise.all([
         api<LedgerSummary>(`/ledger/summary${query}`),
         period.period
           ? api<TargetReport>(`/ledger/targets?period=${period.period}`)
           : Promise.resolve(null),
-        api<CategoryReport>(`/ledger/reports/categories${query}&compare=0`.replace("?&", "?"))
+        api<CategoryReport>(`/ledger/reports/categories${query}&compare=0`.replace("?&", "?")),
+        api<GoalProgress[]>("/ledger/goals")
       ]);
+      setGoals(nextGoals);
       setSummary(nextSummary);
       setTargets(nextTargets);
       setReport(nextReport);
@@ -90,6 +94,11 @@ export function FinanceDashboardPage({ onNavigate }: { onNavigate: FinanceNaviga
     }
     return [...groups.entries()];
   }, [summary]);
+
+  const goalsTotal = useMemo(
+    () => (goals ?? []).reduce((total, goal) => total + goal.balanceCents, 0),
+    [goals]
+  );
 
   const slices = useMemo(
     () =>
@@ -138,10 +147,32 @@ export function FinanceDashboardPage({ onNavigate }: { onNavigate: FinanceNaviga
             {/* Saldo e fatura lado a lado, nunca somados: um é dinheiro que
                 existe, o outro é dívida que vai sair dele. O sistema não
                 projeta entradas e saídas futuras. */}
-            <Panel title="Saldo" subtitle="Hoje, nas contas do patrimônio">
+            <Panel title="Saldo" subtitle="Hoje, livre nas contas do patrimônio">
               <strong className={summary.consolidated.currentCents < 0 ? "fin-negative" : ""}>
                 <AnimatedNumber
                   value={summary.consolidated.currentCents / 100}
+                  format={(value) => moneyFromCents(value * 100)}
+                />
+              </strong>
+            </Panel>
+            {/* Total guardado em todas as caixinhas, hoje. A parte marcada
+                dentro das contas já está fora do saldo ao lado. */}
+            <Panel
+              title={
+                <span className="fin-inline">
+                  <PiggyBank size={15} aria-hidden />
+                  Caixinhas
+                </span>
+              }
+              subtitle={
+                summary.consolidated.earmarkedCents !== 0
+                  ? `${moneyFromCents(summary.consolidated.earmarkedCents)} separados nas contas`
+                  : "Total guardado nas caixinhas"
+              }
+            >
+              <strong>
+                <AnimatedNumber
+                  value={goalsTotal / 100}
                   format={(value) => moneyFromCents(value * 100)}
                 />
               </strong>
@@ -163,6 +194,8 @@ export function FinanceDashboardPage({ onNavigate }: { onNavigate: FinanceNaviga
               </strong>
             </Panel>
           </div>
+
+          <AccountStrip accounts={summary.accounts} />
 
           <div className="fin-summary">
             <button

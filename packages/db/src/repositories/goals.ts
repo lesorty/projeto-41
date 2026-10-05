@@ -6,6 +6,7 @@ import type {
 } from "@projeto41/contracts";
 import {
   accrueLots,
+  addDays,
   estimateRedemption,
   goalProgress,
   iofFreeDate,
@@ -54,19 +55,23 @@ export function createGoalsRepository(db: Db) {
    * lançado não vira lote novo (ele já está no saldo e não recomeça a contagem
    * de IR). Saques consomem em FIFO.
    */
-  function lotsOf(goal: GoalRecord): Lot[] {
+  function lotsOf(goal: GoalRecord): (Lot & { isYield?: boolean })[] {
     if (goal.accountId == null) return [];
+    if (goal.mode === "earmark") return earmarkLotsOf(goal);
     const rows = db
       .prepare(
-        `SELECT date, amount_cents AS amountCents, kind FROM entries
-         WHERE account_id = ? ORDER BY date, id`
+        `SELECT date, amount_cents AS amountCents, kind,
+                (kind = 'income' AND description LIKE 'Rendimento CDI%') AS isYield
+         FROM entries WHERE account_id = ? ORDER BY date, id`
       )
-      .all(goal.accountId) as { date: string; amountCents: number; kind: string }[];
+      .all(goal.accountId) as { date: string; amountCents: number; kind: string; isYield: number }[];
 
-    let lots: Lot[] = [];
+    let lots: (Lot & { isYield?: boolean })[] = [];
     for (const row of rows) {
       if (row.amountCents > 0) {
-        lots.push({ principalCents: row.amountCents, startDate: row.date });
+        // O rendimento lançado rende junto (juros compostos), mas não é aporte:
+        // não reinicia o prazo do IOF.
+        lots.push({ principalCents: row.amountCents, startDate: row.date, isYield: row.isYield === 1 });
       } else if (row.amountCents < 0) {
         // Saque consome o dinheiro mais antigo primeiro.
         let remaining = -row.amountCents;
@@ -85,6 +90,22 @@ export function createGoalsRepository(db: Db) {
       }
     }
     return lots;
+  }
+
+  /**
+   * Na marcação, cada alocação é um lote que rende a partir da data do
+   * lançamento a que está presa. Liberar valor já reduz a alocação, então não
+   * há saque para consumir.
+   */
+  function earmarkLotsOf(goal: GoalRecord): Lot[] {
+    return db
+      .prepare(
+        `SELECT e.date AS startDate, ga.amount_cents AS principalCents
+         FROM goal_allocations ga JOIN entries e ON e.id = ga.entry_id
+         WHERE ga.goal_id = ? AND ga.amount_cents > 0
+         ORDER BY e.date, e.id`
+      )
+      .all(goal.id) as Lot[];
   }
 
   /** Saldo: SUM dos lançamentos da conta, ou SUM das alocações na marcação. */
@@ -125,9 +146,6 @@ export function createGoalsRepository(db: Db) {
      */
     create: (input: GoalCreateInput): number =>
       db.transaction(() => {
-        if (input.cdiPercent != null && input.mode !== "account") {
-          throw new LedgerError("Caixinha que rende precisa de conta propria");
-        }
         let accountId = input.accountId ?? null;
 
         if (input.mode === "account") {
@@ -170,9 +188,6 @@ export function createGoalsRepository(db: Db) {
     update: (id: number, input: GoalUpdateInput): number => {
       const goal = repository.get(id);
       if (!goal) throw notFound("Caixinha");
-      if (input.cdiPercent != null && goal.mode !== "account") {
-        throw new LedgerError("Caixinha que rende precisa de conta propria");
-      }
       return db
         .prepare(
           `UPDATE goals SET name=@name, target_amount_cents=@targetAmountCents,
@@ -394,12 +409,27 @@ export function createGoalsRepository(db: Db) {
           .prepare(
             `SELECT COALESCE(SUM(ga.amount_cents), 0) AS total
              FROM goal_allocations ga JOIN goals g ON g.id = ga.goal_id
-             WHERE g.account_id = ?`
+             WHERE g.account_id = ? AND g.archived = 0`
           )
           .get(accountId) as { total: number }
       ).total;
       return (opening ?? 0) + balance - allocated;
     },
+
+    /** Quanto cada conta tem separado em caixinhas de marcação, por id da conta. */
+    earmarkedByAccount: (): Map<number, number> =>
+      new Map(
+        (
+          db
+            .prepare(
+              `SELECT g.account_id AS accountId, COALESCE(SUM(ga.amount_cents), 0) AS total
+               FROM goal_allocations ga JOIN goals g ON g.id = ga.goal_id
+               WHERE g.mode = 'earmark' AND g.account_id IS NOT NULL AND g.archived = 0
+               GROUP BY g.account_id`
+            )
+            .all() as { accountId: number; total: number }[]
+        ).map((row) => [row.accountId, row.total])
+      ),
 
     progress: (id: number, asOf: string = today()): GoalProgress => {
       const goal = repository.get(id);
@@ -438,8 +468,32 @@ export function createGoalsRepository(db: Db) {
         }))
       });
 
-      const newest = lots.at(-1);
+      const newest = lots.filter((lot) => !(lot as { isYield?: boolean }).isYield).at(-1);
       const iofFree = newest ? iofFreeDate(newest.startDate) : null;
+
+      const history = historyOf(goal, balanceCents);
+      const pending = (() => {
+        const next = goal.cdiPercent != null ? nextAccrualDate(goal) : null;
+        const through = next ? addDays(next, -1) : null;
+        if (goal.cdiPercent == null || lots.length === 0) {
+          return { through, projected: 0, projectedThrough: null as string | null };
+        }
+        const from = next ?? lots[0]!.startDate;
+        if (from > asOf) return { through, projected: 0, projectedThrough: null as string | null };
+        const result = accrueLots({
+          lots,
+          rates: ratesBetween(from, asOf),
+          cdiPercent: goal.cdiPercent,
+          from,
+          to: asOf,
+          holidays: holidaySet()
+        });
+        return {
+          through: result.realizedThroughDate ?? through,
+          projected: result.projectedYieldCents + result.realizedYieldCents,
+          projectedThrough: result.projectedThroughDate ?? result.realizedThroughDate
+        };
+      })();
 
       const depositsByMonth = Object.fromEntries(
         (
@@ -469,10 +523,13 @@ export function createGoalsRepository(db: Db) {
         ...goal,
         balanceCents,
         ...base,
-        realizedYieldCents: accrual?.realizedYieldCents ?? 0,
-        realizedThroughDate: accrual?.realizedThroughDate ?? null,
-        projectedYieldCents: accrual?.projectedYieldCents ?? 0,
-        projectedThroughDate: accrual?.projectedThroughDate ?? null,
+        ...history,
+        // O rendimento já está no saldo (lançado ou separado sozinho); aqui só
+        // o que ainda falta: dias sem taxa publicada, nunca somados ao saldo.
+        realizedYieldCents: history.yieldCents,
+        realizedThroughDate: pending.through,
+        projectedYieldCents: pending.projected,
+        projectedThroughDate: pending.projectedThrough,
         grossCents: balanceCents,
         iofCents: redemption.iofCents,
         irCents: redemption.irCents,
@@ -483,67 +540,258 @@ export function createGoalsRepository(db: Db) {
     },
 
     /**
-     * Lança o rendimento realizado como um `income` na conta da caixinha.
+     * Deixa o rendimento da caixinha em dia. Roda sozinho a cada leitura e
+     * no agendador: ninguém precisa lembrar de lançar.
      *
-     * Idempotência sem coluna nova: numa conta de caixinha toda entrada de
-     * dinheiro é `transfer`, logo o **único** `income` possível é rendimento. A
-     * última apuração é o `MAX(date)` desses lançamentos, e só se apura depois
-     * dela. **Nunca lança dia projetado.**
+     * - **Conta própria:** o rendimento é um `income` "Rendimento CDI" na conta
+     *   da caixinha — é dinheiro de verdade no banco. Antes de apurar, refaz o
+     *   que ficou errado: rendimento calculado antes de um depósito que chegou
+     *   depois com data anterior sai, e cada correção volta a fechar no saldo
+     *   real informado.
+     * - **Marcação:** quem paga o CDI é o banco, e o dinheiro chega na conta
+     *   pelo extrato. A caixinha só **separa** a parte dela (alocação), sem
+     *   lançar entrada nenhuma — lançar contaria o rendimento duas vezes.
+     *
+     * Só dia com taxa publicada vira valor; projeção nunca.
      */
-    accrue: (id: number, through: string = today()): { entryId: number | null; cents: number } => {
-      const goal = repository.get(id);
-      if (!goal) throw notFound("Caixinha");
-      if (goal.cdiPercent == null || goal.accountId == null) return { entryId: null, cents: 0 };
+    accrue: (id: number, through: string = today()): { entryId: number | null; cents: number } =>
+      db.transaction((): { entryId: number | null; cents: number } => {
+        const goal = repository.get(id);
+        if (!goal) throw notFound("Caixinha");
+        if (goal.accountId == null) return { entryId: null, cents: 0 };
+        if (goal.mode === "account") reconcileAccountGoal(goal);
+        if (goal.cdiPercent == null) return { entryId: null, cents: 0 };
 
-      const last = (
+        const lots = lotsOf(goal);
+        if (lots.length === 0) return { entryId: null, cents: 0 };
+        const from = nextAccrualDate(goal) ?? lots[0]!.startDate;
+        if (from > through) return { entryId: null, cents: 0 };
+
+        const accrual = accrueLots({
+          lots,
+          rates: ratesBetween(from, through),
+          cdiPercent: goal.cdiPercent,
+          from,
+          to: through,
+          holidays: holidaySet()
+        });
+        if (accrual.realizedYieldCents <= 0 || accrual.realizedThroughDate == null) {
+          return { entryId: null, cents: 0 };
+        }
+
+        if (goal.mode === "earmark") {
+          const anchor = earmarkAnchor(goal.accountId);
+          if (!anchor) return { entryId: null, cents: 0 };
+          db.prepare(
+            `INSERT INTO goal_allocations(goal_id, entry_id, amount_cents) VALUES (?, ?, ?)
+             ON CONFLICT(goal_id, entry_id) DO UPDATE SET amount_cents = amount_cents + excluded.amount_cents`
+          ).run(goal.id, anchor, accrual.realizedYieldCents);
+          db.prepare(
+            `UPDATE goals SET cdi_accrued_through = ?, cdi_yield_cents = cdi_yield_cents + ?
+             WHERE id = ?`
+          ).run(accrual.realizedThroughDate, accrual.realizedYieldCents, goal.id);
+          return { entryId: null, cents: accrual.realizedYieldCents };
+        }
+
+        const category = db
+          .prepare("SELECT id FROM categories WHERE name = 'Rendimentos' AND kind = 'income'")
+          .get() as { id: number } | undefined;
+        const entryId = entries.createInternal({
+          accountId: goal.accountId,
+          date: accrual.realizedThroughDate,
+          amountCents: accrual.realizedYieldCents,
+          kind: "income",
+          status: "cleared",
+          categoryId: category?.id ?? null,
+          description: `Rendimento CDI · ${from} a ${accrual.realizedThroughDate}`,
+          countsTowardTarget: false,
+          tagIds: []
+        });
+        return { entryId, cents: accrual.realizedYieldCents };
+      })(),
+
+    /**
+     * "O saldo real desta caixinha era X no fim do dia D." O rendimento
+     * depois de D é refeito a partir de X.
+     *
+     * - Conta própria: um ajuste na conta da caixinha fecha o saldo em X, e a
+     *   correção guarda X para refazer o ajuste se um depósito com data
+     *   anterior chegar depois. Corrigir o mesmo dia de novo troca o valor.
+     * - Marcação: o separado passa a ser X (separa ou libera a diferença).
+     */
+    correct: (id: number, input: { date: string; valueCents: number }, asOf: string = today()) =>
+      db.transaction(() => {
+        const goal = repository.get(id);
+        if (!goal) throw notFound("Caixinha");
+        if (goal.accountId == null) throw new LedgerError("Caixinha sem conta");
+        if (input.date > asOf) throw new LedgerError("A correcao e de um dia que ja passou ou de hoje");
+        if (!Number.isInteger(input.valueCents) || input.valueCents < 0) {
+          throw new LedgerError("Informe o saldo real da caixinha");
+        }
+
+        if (goal.mode === "earmark") {
+          const delta = input.valueCents - balanceOf(goal, asOf);
+          if (delta !== 0) repository.mark(id, delta);
+          if (goal.cdiPercent != null) {
+            db.prepare("UPDATE goals SET cdi_accrued_through = ? WHERE id = ?").run(input.date, id);
+          }
+        } else {
+          // Rendimento depois do dia corrigido foi calculado sobre o saldo
+          // errado: sai e é refeito a partir do valor real.
+          db.prepare(
+            `DELETE FROM entries WHERE account_id = ? AND kind = 'income'
+               AND description LIKE 'Rendimento CDI%' AND date > ?`
+          ).run(goal.accountId, input.date);
+          const sameDay = db
+            .prepare("SELECT entry_id AS entryId FROM goal_corrections WHERE goal_id = ? AND date = ?")
+            .get(id, input.date) as { entryId: number } | undefined;
+          if (sameDay) db.prepare("DELETE FROM entries WHERE id = ?").run(sameDay.entryId);
+          const entryId = entries.createInternal({
+            accountId: goal.accountId,
+            date: input.date,
+            amountCents: 0,
+            kind: "adjustment",
+            status: "cleared",
+            categoryId: null,
+            description: "Correção: saldo conferido",
+            countsTowardTarget: false,
+            tagIds: []
+          });
+          db.prepare(
+            `INSERT INTO goal_corrections(goal_id, entry_id, date, target_cents, created_at)
+             VALUES (?, ?, ?, ?, ?)`
+          ).run(id, entryId, input.date, input.valueCents, nowIso());
+          reconcileAccountGoal(goal);
+        }
+        repository.accrue(id, asOf);
+        return repository.progress(id, asOf);
+      })()
+  };
+
+  /** Última entrada de dinheiro da conta: onde a marcação se prende. */
+  function earmarkAnchor(accountId: number): number | null {
+    const row = db
+      .prepare(
+        `SELECT id FROM entries
+         WHERE account_id = ? AND amount_cents > 0 AND date <= ?
+           AND status IN ('cleared','reconciled')
+         ORDER BY date DESC, id DESC LIMIT 1`
+      )
+      .get(accountId, today()) as { id: number } | undefined;
+    return row?.id ?? null;
+  }
+
+  /**
+   * Primeiro dia que ainda falta apurar: o dia seguinte ao último rendimento
+   * ou à última correção (que já inclui o que rendeu até ela). `null` quando
+   * nunca rendeu: começa no primeiro aporte.
+   */
+  function nextAccrualDate(goal: GoalRecord): string | null {
+    const next = (date: string | null) => (date ? addDays(date, 1) : null);
+    if (goal.mode === "earmark") {
+      const row = db.prepare("SELECT cdi_accrued_through AS through FROM goals WHERE id = ?").get(goal.id) as
+        | { through: string | null }
+        | undefined;
+      return next(row?.through ?? null);
+    }
+    const last = (
+      db
+        .prepare(
+          `SELECT MAX(date) AS last FROM (
+             SELECT date FROM entries
+             WHERE account_id = ? AND kind = 'income' AND description LIKE 'Rendimento CDI%'
+             UNION ALL
+             SELECT date FROM goal_corrections WHERE goal_id = ?
+           )`
+        )
+        .get(goal.accountId, goal.id) as { last: string | null }
+    ).last;
+    return next(last);
+  }
+
+  /**
+   * Conta própria: tira o rendimento calculado antes de um depósito que chegou
+   * depois com data anterior, e refaz cada correção para fechar no saldo real.
+   */
+  function reconcileAccountGoal(goal: GoalRecord) {
+    if (goal.accountId == null) return;
+    const late = db
+      .prepare(
+        `SELECT MIN(d.date) AS since FROM entries d
+         WHERE d.account_id = @account AND d.kind <> 'adjustment'
+           AND NOT (d.kind = 'income' AND d.description LIKE 'Rendimento CDI%')
+           AND EXISTS (
+             SELECT 1 FROM entries y
+             WHERE y.account_id = @account AND y.kind = 'income'
+               AND y.description LIKE 'Rendimento CDI%'
+               AND y.date >= d.date AND y.created_at < d.created_at
+           )`
+      )
+      .get({ account: goal.accountId }) as { since: string | null };
+    if (late.since) {
+      db.prepare(
+        `DELETE FROM entries WHERE account_id = ? AND kind = 'income'
+           AND description LIKE 'Rendimento CDI%' AND date >= ?`
+      ).run(goal.accountId, late.since);
+    }
+
+    const opening =
+      (
+        db.prepare("SELECT opening_balance_cents AS o FROM accounts WHERE id = ?").get(goal.accountId) as
+          | { o: number }
+          | undefined
+      )?.o ?? 0;
+    const corrections = db
+      .prepare(
+        `SELECT entry_id AS entryId, date, target_cents AS targetCents
+         FROM goal_corrections WHERE goal_id = ? ORDER BY date, id`
+      )
+      .all(goal.id) as { entryId: number; date: string; targetCents: number }[];
+    for (const correction of corrections) {
+      const before = (
         db
           .prepare(
-            `SELECT MAX(date) AS last FROM entries
-             WHERE account_id = ? AND kind = 'income'`
+            `SELECT COALESCE(SUM(amount_cents), 0) AS total FROM entries
+             WHERE account_id = ? AND date <= ? AND id <> ?`
           )
-          .get(goal.accountId) as { last: string | null }
-      ).last;
-
-      const lots = lotsOf(goal);
-      if (lots.length === 0) return { entryId: null, cents: 0 };
-      const from = last ?? lots[0]!.startDate;
-
-      const accrual = accrueLots({
-        lots,
-        rates: ratesBetween(from, through),
-        cdiPercent: goal.cdiPercent,
-        from,
-        to: through,
-        holidays: holidaySet()
-      });
-      // Só o realizado vira lançamento; o projetado nunca.
-      if (accrual.realizedYieldCents <= 0 || accrual.realizedThroughDate == null) {
-        return { entryId: null, cents: 0 };
-      }
-      // Reapurar o mesmo período não duplica: `from` é a data do último
-      // rendimento e ela já foi paga.
-      if (last != null && accrual.realizedThroughDate <= last) {
-        return { entryId: null, cents: 0 };
-      }
-
-      const category = db
-        .prepare("SELECT id FROM categories WHERE name = 'Rendimentos' AND kind = 'income'")
-        .get() as { id: number } | undefined;
-
-      const entryId = entries.createInternal({
-        accountId: goal.accountId,
-        date: accrual.realizedThroughDate,
-        amountCents: accrual.realizedYieldCents,
-        kind: "income",
-        status: "cleared",
-        categoryId: category?.id ?? null,
-        description: `Rendimento CDI · ${from} a ${accrual.realizedThroughDate}`,
-        countsTowardTarget: false,
-        tagIds: []
-      });
-      return { entryId, cents: accrual.realizedYieldCents };
+          .get(goal.accountId, correction.date, correction.entryId) as { total: number }
+      ).total;
+      db.prepare("UPDATE entries SET amount_cents = ?, updated_at = ? WHERE id = ?").run(
+        correction.targetCents - opening - before,
+        nowIso(),
+        correction.entryId
+      );
     }
-  };
+  }
+
+  /**
+   * O extrato resumido: quanto você colocou, quanto rendeu e quanto foi
+   * corrigido. Soma sempre o saldo.
+   */
+  function historyOf(goal: GoalRecord, balanceCents: number) {
+    if (goal.mode === "earmark") {
+      const row = db.prepare("SELECT cdi_yield_cents AS y FROM goals WHERE id = ?").get(goal.id) as
+        | { y: number }
+        | undefined;
+      const yieldCents = Math.min(row?.y ?? 0, Math.max(balanceCents, 0));
+      return { contributedCents: balanceCents - yieldCents, yieldCents, correctionCents: 0 };
+    }
+    const sum = (sql: string, ...params: unknown[]) =>
+      (db.prepare(sql).get(...params) as { total: number }).total;
+    const yieldCents = sum(
+      `SELECT COALESCE(SUM(amount_cents), 0) AS total FROM entries
+       WHERE account_id = ? AND kind = 'income' AND description LIKE 'Rendimento CDI%'`,
+      goal.accountId
+    );
+    const correctionCents = sum(
+      `SELECT COALESCE(SUM(e.amount_cents), 0) AS total FROM entries e
+       JOIN goal_corrections c ON c.entry_id = e.id
+       WHERE e.account_id = ? AND c.goal_id = ?`,
+      goal.accountId,
+      goal.id
+    );
+    return { contributedCents: balanceCents - yieldCents - correctionCents, yieldCents, correctionCents };
+  }
 
   return repository;
 }

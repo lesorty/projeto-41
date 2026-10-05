@@ -66,7 +66,9 @@ export function CategoryGoals({ from, to }: { from: string; to: string }) {
     const base = report.rows.reduce((total, row) => total + Math.max(row.spentCents, 0), 0);
 
     return categories
-      .filter((category) => category.monthlyBudgetCents != null || category.budgetSharePerMille != null)
+      .filter(
+        (category) => category.monthlyBudgetCents != null || category.budgetSharePerMille != null
+      )
       .map((category) => {
         const spent = spentBy.get(category.id)?.spentCents ?? 0;
         const share = category.budgetSharePerMille ?? null;
@@ -94,7 +96,10 @@ export function CategoryGoals({ from, to }: { from: string; to: string }) {
       .sort((a, b) => ratio(b) - ratio(a));
   }, [report, categories, months]);
 
-  const shareSum = categories.reduce((total, category) => total + (category.budgetSharePerMille ?? 0), 0);
+  const shareSum = categories.reduce(
+    (total, category) => total + (category.budgetSharePerMille ?? 0),
+    0
+  );
 
   if (failed) return <p className="fin-muted">Não foi possível carregar os objetivos.</p>;
   if (!report) return null;
@@ -120,55 +125,60 @@ export function CategoryGoals({ from, to }: { from: string; to: string }) {
           barra.
         </p>
       )}
-      {rows.map((row) => {
-        const hasTarget = row.targetCents != null;
-        const over = hasTarget && row.spentCents > row.targetCents!;
-        const percent =
-          hasTarget && row.targetCents! > 0 ? (row.spentCents / row.targetCents!) * 100 : null;
-        return (
-          <div key={row.id} className="fin-target">
-            <div className="fin-target-head">
-              <span className="fin-inline">
-                <span className="fin-dot" style={{ background: row.color }} aria-hidden />
-                {row.name}
-                <small className="fin-muted">· {row.goalLabel}</small>
-              </span>
-              <span className={over ? "fin-negative" : ""}>
-                {moneyFromCents(row.spentCents)}
-                {hasTarget && (
-                  <em className="fin-target-of"> de {moneyFromCents(row.targetCents!)}</em>
-                )}
-              </span>
-            </div>
-            <div
-              className={`fin-target-track ${hasTarget ? "" : "neutral"}`}
-              role="progressbar"
-              aria-valuenow={percent ?? 0}
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-label={`${row.name}: gasto contra o objetivo`}
-            >
-              {hasTarget && (
-                <span
-                  className={`fin-target-fill ${over ? "over" : ""}`}
-                  style={{ width: `${Math.min(Math.max(percent ?? 0, 0), 100)}%` }}
-                />
-              )}
-            </div>
-            <small className="fin-target-foot">
-              {hasTarget ? (
-                <span className={over ? "fin-negative" : "fin-muted"}>
-                  {percent == null ? "objetivo zero" : `${percent.toFixed(0)}% do objetivo`}
-                  {row.sharePerMille != null &&
-                    ` · foi ${perMille(row.actualSharePerMille)} dos gastos`}
+      {/* Três colunas: a lista inteira cabe na tela sem rolar (encolhe no estreito). */}
+      <div className="fin-targets-grid">
+        {rows.map((row) => {
+          const hasTarget = row.targetCents != null;
+          const over = hasTarget && row.spentCents > row.targetCents!;
+          const percent =
+            hasTarget && row.targetCents! > 0 ? (row.spentCents / row.targetCents!) * 100 : null;
+          return (
+            <div key={row.id} className="fin-target">
+              <div className="fin-target-head">
+                <span className="fin-inline">
+                  <span className="fin-dot" style={{ background: row.color }} aria-hidden />
+                  {row.name}
+                  <small className="fin-muted">· {row.goalLabel}</small>
                 </span>
-              ) : (
-                <span className="fin-muted">sem comparação neste recorte</span>
-              )}
-            </small>
-          </div>
-        );
-      })}
+                <span className={over ? "fin-negative" : ""}>
+                  {moneyFromCents(row.spentCents)}
+                  {hasTarget && (
+                    <em className="fin-target-of"> de {moneyFromCents(row.targetCents!)}</em>
+                  )}
+                </span>
+              </div>
+              <div
+                className={`fin-target-track ${hasTarget ? "" : "neutral"}`}
+                role="progressbar"
+                aria-valuenow={percent ?? 0}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label={`${row.name}: gasto contra o objetivo`}
+              >
+                {hasTarget && (
+                  <span
+                    className={`fin-target-fill ${over ? "over" : ""}`}
+                    style={{
+                      width: `${Math.min(Math.max(percent ?? 0, 0), 100)}%`
+                    }}
+                  />
+                )}
+              </div>
+              <small className="fin-target-foot">
+                {hasTarget ? (
+                  <span className={over ? "fin-negative" : "fin-muted"}>
+                    {percent == null ? "objetivo zero" : `${percent.toFixed(0)}% do objetivo`}
+                    {row.sharePerMille != null &&
+                      ` · foi ${perMille(row.actualSharePerMille)} dos gastos`}
+                  </span>
+                ) : (
+                  <span className="fin-muted">sem comparação neste recorte</span>
+                )}
+              </small>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

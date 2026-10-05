@@ -1,5 +1,5 @@
 import type { CategoryDraft, CategoryKind, CategoryRecord } from "@projeto41/contracts";
-import { countReferencing, fromBit, notFound, nowIso, toBit, type Db } from "./shared.js";
+import { countBlockingReferences, fromBit, notFound, nowIso, toBit, type Db } from "./shared.js";
 
 type CategoryRow = {
   id: number;
@@ -50,8 +50,9 @@ export function createCategoriesRepository(db: Db) {
       if (!options.includeArchived) where.push("archived = 0");
       const clause = where.length > 0 ? `WHERE ${where.join(" AND ")}` : "";
       return (
-        db.prepare(`${SELECT} ${clause} ORDER BY kind, sort_order, name`).all(params) as
-          CategoryRow[]
+        db
+          .prepare(`${SELECT} ${clause} ORDER BY kind, sort_order, name`)
+          .all(params) as CategoryRow[]
       ).map(map);
     },
 
@@ -115,7 +116,13 @@ export function createCategoriesRepository(db: Db) {
      */
     setBudget: (
       id: number,
-      budget: number | null | { monthlyBudgetCents?: number | null; budgetSharePerMille?: number | null }
+      budget:
+        | number
+        | null
+        | {
+            monthlyBudgetCents?: number | null;
+            budgetSharePerMille?: number | null;
+          }
     ): number => {
       const normalized =
         typeof budget === "object" && budget !== null
@@ -144,13 +151,7 @@ export function createCategoriesRepository(db: Db) {
      * arquivada, para nao quebrar relatorio antigo. Devolve 0 nesse caso.
      */
     remove: (id: number): number => {
-      const used =
-        countReferencing(db, "SELECT COUNT(*) AS n FROM entries WHERE category_id = ?", id) +
-        countReferencing(
-          db,
-          "SELECT COUNT(*) AS n FROM places WHERE default_category_id = ?",
-          id
-        );
+      const used = countBlockingReferences(db, "categories", id);
       if (used > 0) {
         db.prepare("UPDATE categories SET archived = 1 WHERE id = ?").run(id);
         return 0;

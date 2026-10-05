@@ -213,6 +213,7 @@ export function Donut({
   center?: { label: string; value: string };
 }) {
   const { colors } = useTheme();
+  const hatchId = `donut-hatch-${useId().replace(/:/g, "")}`;
   const layoutCache = useRef<{ key: string; map: Map<number, LabelSpot> }>({ key: "", map: new Map() });
 
   // Ângulo central de cada fatia (sem o paddingAngle, suficiente para posicionar rótulos).
@@ -310,12 +311,42 @@ export function Donut({
   };
 
   const total = data.reduce((sum, item) => sum + item.value, 0) || 1;
+  // Com legenda, a rosca desenha as maiores e junta o resto numa fatia
+  // "Outras" tracejada: ela não é uma categoria. A legenda lista todas.
+  // Fatia própria enquanto a categoria tem ao menos PIE_MIN_SHARE do total
+  // (até PIE_MAX_SLICES); o resto só vira "Outras" se forem duas ou mais.
+  const headCount = legend
+    ? (() => {
+        let count = data.findIndex((item) => item.value / total < PIE_MIN_SHARE);
+        if (count < 0) count = data.length;
+        count = Math.min(count, PIE_MAX_SLICES);
+        return data.length - count < 2 ? data.length : count;
+      })()
+    : data.length;
+  const grouped = headCount < data.length;
+  const pieData: (DonutDatum & { other?: boolean })[] = grouped
+    ? [
+        ...data.slice(0, headCount),
+        {
+          key: "__outras",
+          label: "Outras",
+          value: data.slice(headCount).reduce((sum, item) => sum + item.value, 0),
+          other: true
+        }
+      ]
+    : data;
   const chart = (
     <div className="donut">
       <ResponsiveContainer width="100%" height={height}>
         <PieChart margin={legend ? { top: 4, right: 4, bottom: 4, left: 4 } : { top: 14, right: 14, bottom: 14, left: 14 }}>
+          <defs>
+            <pattern id={hatchId} width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+              <rect width="6" height="6" fill="var(--surface-2, transparent)" />
+              <line x1="0" y1="0" x2="0" y2="6" stroke="var(--text-muted)" strokeWidth="2.2" />
+            </pattern>
+          </defs>
           <Pie
-            data={data}
+            data={pieData}
             dataKey="value"
             innerRadius={legend ? "62%" : "36%"}
             outerRadius={legend ? "96%" : "54%"}
@@ -326,9 +357,19 @@ export function Donut({
             labelLine={false}
             isAnimationActive={false}
           >
-            {data.map((item, index) => (
-              <Cell key={item.key} fill={sliceColor(item, index, colors.series)} />
-            ))}
+            {pieData.map((item, index) =>
+              item.other ? (
+                <Cell
+                  key={item.key}
+                  fill={`url(#${hatchId})`}
+                  stroke="var(--text-muted)"
+                  strokeWidth={1}
+                  strokeDasharray="3 2"
+                />
+              ) : (
+                <Cell key={item.key} fill={sliceColor(item, index, colors.series)} />
+              )
+            )}
           </Pie>
           <Tooltip
             content={({ active, payload }: any) =>
@@ -355,10 +396,17 @@ export function Donut({
   return (
     <div className="donut-split">
       {chart}
-      <ul className="donut-legend">
+      <ul className={`donut-legend${data.length > 6 ? " is-scroll" : ""}`}>
         {data.map((item, index) => (
-          <li key={item.key}>
-            <i style={{ background: sliceColor(item, index, colors.series) }} />
+          <li key={item.key} title={grouped && index >= headCount ? "Na fatia Outras" : undefined}>
+            <i
+              className={grouped && index >= headCount ? "is-other" : undefined}
+              style={
+                grouped && index >= headCount
+                  ? { borderColor: sliceColor(item, index, colors.series) }
+                  : { background: sliceColor(item, index, colors.series) }
+              }
+            />
             <span className="donut-legend-name" title={item.label}>
               {item.label}
             </span>
@@ -384,6 +432,11 @@ type LabelSpot = {
 };
 
 /** Cor da fatia: a do dado quando existir, senao a paleta do tema. */
+/** Até quantas fatias a rosca desenha antes de agrupar o resto em "Outras". */
+const PIE_MAX_SLICES = 14;
+/** Categoria abaixo desta fração do total vai para "Outras". */
+const PIE_MIN_SHARE = 0.02;
+
 function sliceColor(item: DonutDatum | undefined, index: number, series: string[]) {
   return item?.color ?? series[index % series.length];
 }

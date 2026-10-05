@@ -413,7 +413,13 @@ function stored(input: OperationInput): Operation & { accountId: number | null }
  * (ou recebe a venda) na moeda dela. Com conta: transferência direta entre o
  * banco e a ponte, sem passar por caixa.
  */
-function createCashLegs(db: AppDatabase, operationId: number, input: OperationInput) {
+function createCashLegs(
+  db: AppDatabase,
+  operationId: number,
+  input: OperationInput,
+  /** Valor já debitado no banco, mantido numa edição que não mexeu no dinheiro. */
+  keep: LedgerAmount | null = null
+) {
   const buying = input.type === "buy";
   if (input.positionId != null) {
     const position = positionOrFail(db, input.positionId);
@@ -432,7 +438,7 @@ function createCashLegs(db: AppDatabase, operationId: number, input: OperationIn
   }
   if (input.accountId == null) return { transferId: null };
 
-  const amount = toLedgerCents(db, input);
+  const amount = keep ?? toLedgerCents(db, input);
   const bridge = bridgeAccountId(db);
   const { fromEntryId } = db.ledger.entries.createTransfer({
     fromAccountId: buying ? input.accountId : bridge,
@@ -492,14 +498,37 @@ export function updateOperation(
 ): { transferId: number | null } {
   return db.transaction(() => {
     const settings = readCashSettings(db);
+    // Editar só a nota (ou a quantidade) de uma compra em dólar não pode mudar
+    // o que saiu do banco: o débito foi feito na cotação daquele dia. O valor em
+    // reais só é recalculado quando o dinheiro da operação muda.
+    const before = db.operations.list().find((operation) => operation.id === id);
+    const link = db.operationLinks.get(id);
+    const ledgerBefore =
+      link != null
+        ? (db.raw
+            .prepare(
+              `SELECT ABS(e.amount_cents) AS cents, e.notes AS note FROM transfers t
+               JOIN entries e ON e.id = t.from_entry_id WHERE t.id = ?`
+            )
+            .get(link.transferId) as { cents: number; note: string | null } | undefined)
+        : undefined;
+    const sameMoney =
+      before != null &&
+      ledgerBefore != null &&
+      input.positionId == null &&
+      before.total === input.total &&
+      before.currency === input.currency &&
+      before.type === input.type &&
+      before.accountId === (input.accountId ?? null);
+    const keep = sameMoney ? { cents: ledgerBefore.cents, note: ledgerBefore.note } : null;
     // Converter antes de desfazer: sem cotação, nada muda.
-    if (input.accountId != null && input.positionId == null) toLedgerCents(db, input);
+    if (!keep && input.accountId != null && input.positionId == null) toLedgerCents(db, input);
     const hadLegs = removeCashLegs(db, id);
     db.operations.update(id, stored(input));
     const moves =
       input.positionId != null || (input.accountId != null && (hadLegs || settings.autoDebit));
     if (!moves) return { transferId: null };
-    return { transferId: createCashLegs(db, id, input).transferId };
+    return { transferId: createCashLegs(db, id, input, keep).transferId };
   });
 }
 
@@ -538,6 +567,18 @@ export function listOperationsWithLinks(db: AppDatabase, portfolio?: "crypto" | 
         .all() as { operationId: number; positionId: number; name: string }[]
     ).map((row) => [row.operationId, row])
   );
+  // O que saiu (ou entrou) no banco, em reais: é o número que o usuário
+  // digitou e confere no extrato, mesmo com a operação guardada em USD.
+  const ledgerCents = new Map(
+    (
+      db.raw
+        .prepare(
+          `SELECT t.id AS transferId, ABS(e.amount_cents) AS cents
+           FROM transfers t JOIN entries e ON e.id = t.from_entry_id`
+        )
+        .all() as { transferId: number; cents: number }[]
+    ).map((row) => [row.transferId, row.cents])
+  );
   const names = new Map(
     (db.raw.prepare("SELECT id, name FROM accounts").all() as { id: number; name: string }[]).map(
       (row) => [row.id, row.name]
@@ -556,6 +597,7 @@ export function listOperationsWithLinks(db: AppDatabase, portfolio?: "crypto" | 
           ? (names.get(operation.accountId) ?? null)
           : null,
       transferId: link?.transferId ?? null,
+      ledgerCents: link ? (ledgerCents.get(link.transferId) ?? null) : null,
       transferStatus: link?.transferStatus ?? null,
       cashSource: movement ? ("position" as const) : link ? ("bank" as const) : null
     };

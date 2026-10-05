@@ -98,10 +98,16 @@ function readTransaction(node: Node, lineNo: number): ParsedTransaction {
   const trnType = text(node, "TRNTYPE");
   const checkNum = text(node, "CHECKNUM");
   const counterparty = parseCounterparty(rawDescription);
+  // Toda tag de folha da transacao, como veio: e o registro do que o banco
+  // mandou, antes de qualquer interpretacao.
+  const source = Object.fromEntries(
+    Object.entries(node).filter((entry): entry is [string, string] => typeof entry[1] === "string")
+  );
 
   return {
     lineNo,
     date,
+    source,
     ...(time ? { time } : {}),
     amountCents: centsFromOfxAmount(amount),
     rawDescription,

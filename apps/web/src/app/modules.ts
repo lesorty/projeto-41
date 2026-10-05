@@ -8,6 +8,7 @@ import {
   ChartPie,
   Coins,
   CreditCard,
+  FileUp,
   Gauge,
   History,
   Landmark,
@@ -58,7 +59,8 @@ export type Page =
   | "income"
   | "accounts"
   | "categories"
-  | "spending-allocation";
+  | "spending-allocation"
+  | "import";
 
 type Icon = ComponentType<{ size?: number | string }>;
 
@@ -127,7 +129,8 @@ export const modules: AppModule[] = [
           { id: "transactions", label: "Transações", icon: ReceiptText },
           { id: "expenses", label: "Gastos", icon: ArrowDownCircle },
           { id: "income", label: "Entradas", icon: ArrowUpCircle },
-          { id: "invoice", label: "Fatura", icon: CreditCard }
+          { id: "invoice", label: "Fatura", icon: CreditCard },
+          { id: "import", label: "Importar extrato", icon: FileUp }
         ]
       },
       {

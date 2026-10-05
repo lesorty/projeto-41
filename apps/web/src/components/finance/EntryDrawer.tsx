@@ -23,7 +23,8 @@ import {
   ledgerDate,
   moneyFromCents,
   signedMoneyFromCents,
-  todayIso
+  todayIso,
+  weekdayName
 } from "../../lib/format.js";
 import {
   ACCOUNT_KIND_LABEL,
@@ -85,7 +86,13 @@ export function EntryDrawer({
   const [kind, setKind] = useState<FormKind>(entry ? (entry.kind as FormKind) : defaultKind);
   // Um ajuste já gravado é a diferença: o saldo daquele dia já o inclui.
   const [adjustMode, setAdjustMode] = useState<AdjustMode>(entry ? "difference" : "balance");
-  const [amount, setAmount] = useState(entry ? centsToInput(entry.amountCents) : "");
+  // O ajuste é a diferença com sinal; mostrar só o módulo fazia um −R$ 50
+  // virar +R$ 50 ao salvar uma edição da descrição.
+  const [amount, setAmount] = useState(
+    entry
+      ? `${entry.kind === "adjustment" && entry.amountCents < 0 ? "-" : ""}${centsToInput(entry.amountCents)}`
+      : ""
+  );
   const [date, setDate] = useState(entry?.date ?? todayIso());
   const entryAccount = reference.accounts.find((item) => item.id === entry?.accountId);
   const [payWith, setPayWith] = useState<PayWith>(
@@ -291,15 +298,19 @@ export function EntryDrawer({
     adjustByBalance && systemBalance != null && typedSigned != null
       ? typedSigned - systemBalance
       : null;
-  // Entrada direto na conjunta (salário, Pix de fora): a conta é do casal, mas o
-  // dinheiro veio de alguém, e é isso que diz quanto cada um já depositou.
+  // Entrada direto na conjunta (salário, Pix de fora): a conta é do casal, e o
+  // formulário pergunta de quem veio, porque é isso que diz quanto cada um já
+  // depositou. "Conjunto" vale para o que é do casal e de ninguém em
+  // particular: rendimento da conta, reembolso, presente para os dois.
   const accountOwner = reference.people.find((person) => person.id === account?.personId);
   const jointDeposit = kind === "income" && accountOwner?.kind === "joint";
-  const individualIds = new Set(
-    reference.people.filter((person) => person.kind === "individual").map((person) => person.id)
+  const depositorIds = new Set(
+    reference.people
+      .filter((person) => person.kind === "individual" || person.id === accountOwner?.id)
+      .map((person) => person.id)
   );
   const effectivePersonId = jointDeposit
-    ? personId != null && individualIds.has(personId)
+    ? personId != null && depositorIds.has(personId)
       ? personId
       : null
     : (personId ?? account?.personId ?? null);
@@ -338,6 +349,22 @@ export function EntryDrawer({
     await persist("one");
   }
 
+  /**
+   * O lançamento já foi gravado: uma foto que falha vira aviso, não erro. Com
+   * erro, o formulário ficava aberto e salvar de novo criava um segundo
+   * lançamento igual.
+   */
+  async function persistPhotoAfterSave(entryId: number) {
+    try {
+      await persistPhoto(entryId);
+    } catch (error) {
+      toast.notify(
+        `Lançamento salvo, mas a foto não foi enviada: ${error instanceof Error ? error.message : "falha no envio"}`,
+        "error"
+      );
+    }
+  }
+
   async function persist(scope: SeriesScope) {
     setScopeAsk(false);
     if (kind === "adjustment") {
@@ -350,7 +377,7 @@ export function EntryDrawer({
       return;
     }
     if (jointDeposit && effectivePersonId == null) {
-      toast.notify("Diga de quem veio o dinheiro que entrou na conta conjunta", "error");
+      toast.notify("Diga de quem veio o dinheiro, ou escolha Conjunto se for do casal", "error");
       return;
     }
     if (accountId == null) {
@@ -388,7 +415,7 @@ export function EntryDrawer({
         // Editar uma transferência existente é fora do escopo do drawer: as
         // duas pontas precisam mudar juntas, e o repositório já faz isso pelo
         // PUT de qualquer uma delas.
-        if (editing && entry) {
+        if (editing && entry && entry.transferId != null) {
           await ledgerApi.updateEntry(entry.id, {
             accountId,
             date,
@@ -415,7 +442,11 @@ export function EntryDrawer({
             notes: notes || null,
             personId: effectivePersonId
           });
-          await persistPhoto(created.fromEntryId);
+          // Saída ou entrada que vira transferência: a transferência nova, com
+          // as duas pontas, substitui o lançamento. Mudar só o tipo deixava a
+          // conta de destino sem receber.
+          if (editing && entry) await ledgerApi.removeEntry(entry.id);
+          await persistPhotoAfterSave(created.fromEntryId);
         }
       } else if (!editing && isCard && installmentMode === "installments") {
         // Compra parcelada nasce como plano: N lançamentos reais, nunca uma
@@ -460,14 +491,21 @@ export function EntryDrawer({
                 : account?.kind === "meal_voucher"
                   ? "voucher"
                   : "cash",
+          ...(isRefund && entry ? { refundOfEntryId: entry.refundOfEntryId } : {}),
           tagIds
         };
-        if (editing && entry) {
+        if (editing && entry && entry.transferId != null) {
+          // Transferência que vira saída ou entrada: as duas pontas saem e
+          // fica só o lançamento novo.
+          const created = await ledgerApi.createEntry(body);
+          await ledgerApi.removeEntry(entry.id);
+          await persistPhotoAfterSave(created.id);
+        } else if (editing && entry) {
           await ledgerApi.updateEntry(entry.id, body, scope);
           await persistPhoto(entry.id);
         } else {
           const created = await ledgerApi.createEntry(body);
-          await persistPhoto(created.id);
+          await persistPhotoAfterSave(created.id);
         }
       }
       toast.notify("Lançamento salvo");
@@ -702,7 +740,10 @@ export function EntryDrawer({
               required
             />
           </Field>
-          <Field label={isCard && installmentMode === "installments" ? "Data da compra" : "Data"}>
+          <Field
+            label={isCard && installmentMode === "installments" ? "Data da compra" : "Data"}
+            hint={weekdayName(date)}
+          >
             <DateField value={date} onChange={setDate} />
           </Field>
         </div>
@@ -916,12 +957,15 @@ export function EntryDrawer({
               value={effectivePersonId}
               onChange={setPersonId}
               emptyLabel={jointDeposit ? undefined : "Sem pessoa"}
-              placeholder={jointDeposit ? "Escolher quem depositou" : undefined}
+              placeholder={jointDeposit ? "Escolher de quem veio" : undefined}
               options={peopleOptions
-                .filter((person) => !jointDeposit || person.kind === "individual")
+                .filter((person) => !jointDeposit || depositorIds.has(person.id))
                 .map((person) => ({
                   value: person.id,
-                  label: person.name,
+                  label:
+                    jointDeposit && person.id === accountOwner?.id
+                      ? `${person.name} (do casal)`
+                      : person.name,
                   color: person.color
                 }))}
               aria-label={jointDeposit ? "De quem veio" : "Quem pagou"}
@@ -986,7 +1030,7 @@ export function EntryDrawer({
 }
 
 /** Autocomplete de local: resolve pelo nome normalizado no servidor. */
-function PlaceAutocomplete({
+export function PlaceAutocomplete({
   value,
   onChange,
   hint = "Opcional. Reaproveitado entre lançamentos."

@@ -89,17 +89,28 @@ export function centsFromCsvAmount(raw: string, decimalSeparator: "," | "."): nu
   return sign * Number(`${whole === "" ? "0" : whole}${fraction}`);
 }
 
+/** 31/02 casa com o padrão mas não existe: ia para o banco como 2026-02-31. */
+function realDate(iso: string): string | null {
+  const [year, month, day] = iso.split("-").map(Number) as [number, number, number];
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+    ? iso
+    : null;
+}
+
 export function isoDateFromCsv(raw: string, format: ColumnMapping["dateFormat"]): string | null {
   const value = raw.trim();
   if (format === "yyyy-MM-dd") {
-    return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
+    return /^\d{4}-\d{2}-\d{2}$/.test(value) ? realDate(value) : null;
   }
   const match = /^(\d{2})\/(\d{2})\/(\d{2}|\d{4})$/.exec(value);
   if (!match) return null;
   const [, day, month, year] = match as unknown as [string, string, string, string];
   // Extrato de banco nao fala do seculo passado; `26` e 2026.
   const fullYear = year.length === 4 ? year : `20${year}`;
-  return `${fullYear}-${month}-${day}`;
+  return realDate(`${fullYear}-${month}-${day}`);
 }
 
 function detectDateFormat(samples: string[]): ColumnMapping["dateFormat"] {
@@ -211,9 +222,17 @@ export function readCsv(buffer: Buffer, mapping: ColumnMapping): ParsedTransacti
       ? new TextDecoder("windows-1252").decode(buffer)
       : decodeStatement(buffer).text;
 
-  const rows = parseCsvRows(decoded, mapping.delimiter)
-    .filter((row) => row.some((cell) => cell.trim() !== ""))
-    .slice(mapping.skipLines + (mapping.hasHeader ? 1 : 0));
+  const allRows = parseCsvRows(decoded, mapping.delimiter).filter((row) =>
+    row.some((cell) => cell.trim() !== "")
+  );
+  const header = mapping.hasHeader ? (allRows[mapping.skipLines] ?? []) : [];
+  const rows = allRows.slice(mapping.skipLines + (mapping.hasHeader ? 1 : 0));
+  // Coluna -> valor, com o nome do cabecalho: a linha inteira como veio,
+  // inclusive as colunas que o mapeamento ignora.
+  const sourceOf = (row: string[]) =>
+    Object.fromEntries(
+      row.map((cell, index) => [header[index]?.trim() || `coluna ${index + 1}`, cell])
+    );
 
   const dateAt = roleIndex(mapping, "date");
   const descriptionAt = roleIndex(mapping, "description");
@@ -265,6 +284,7 @@ export function readCsv(buffer: Buffer, mapping: ColumnMapping): ParsedTransacti
     transactions.push({
       lineNo,
       date,
+      source: sourceOf(row),
       amountCents,
       rawDescription,
       ...(externalId ? { externalId } : {}),

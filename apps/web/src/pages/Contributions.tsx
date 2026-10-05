@@ -13,7 +13,7 @@ import {
   SectionHeading
 } from "../components/ui.js";
 import { api } from "../lib/api.js";
-import { longDate, money, monthShort } from "../lib/format.js";
+import { longDate, money, monthShort, todayIso } from "../lib/format.js";
 import { useToast } from "../lib/toast.js";
 import type { ContributionRecord } from "@projeto41/contracts";
 
@@ -163,7 +163,7 @@ export function ContributionsPage() {
         >
           <form id="contribution-form" className="stack" onSubmit={submit}>
             <Field label="Data">
-              <input name="date" type="date" required defaultValue={new Date().toISOString().slice(0, 10)} />
+              <input name="date" type="date" required defaultValue={todayIso()} />
             </Field>
             <Field label="Valor (BRL)">
               <NumberInput name="amount" min="0" required autoFocus placeholder="0,00" />

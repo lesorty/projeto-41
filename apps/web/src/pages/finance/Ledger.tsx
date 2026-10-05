@@ -1,11 +1,13 @@
 import { Download, HardDriveDownload, Plus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { EntryRecord } from "@projeto41/contracts";
+import type { EntryRecord, LedgerSummary } from "@projeto41/contracts";
+import { AccountStrip } from "../../components/finance/AccountStrip.js";
 import { CategoryGoals } from "../../components/finance/CategoryGoals.js";
 import { EntryDrawer } from "../../components/finance/EntryDrawer.js";
 import { EntryFilters, type LedgerFilter } from "../../components/finance/EntryFilters.js";
 import { EntryTable } from "../../components/finance/EntryTable.js";
 import { Button, Loading, Panel, SectionHeading } from "../../components/ui.js";
+import { api } from "../../lib/api.js";
 import { moneyFromCents, signedMoneyFromCents } from "../../lib/format.js";
 import { daysBetween } from "@projeto41/finance";
 import { filterToQuery, ledgerApi, useLedgerReference } from "../../lib/ledger.js";
@@ -63,6 +65,23 @@ export function LedgerPage({
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<EntryRecord | null>(null);
   const [creating, setCreating] = useState(false);
+  // Saldo e fatura de cada conta, como no Painel. Só em Transações: é a tela
+  // de conferir contra o banco; Gastos e Entradas têm o próprio resumo.
+  const [accounts, setAccounts] = useState<LedgerSummary["accounts"] | null>(null);
+  const loadAccounts = useCallback(async () => {
+    if (fixedKind) return;
+    try {
+      // Entradas e saídas de cada conta no mesmo período do filtro.
+      const query = filterToQuery({ from: filter.from, to: filter.to });
+      setAccounts((await api<LedgerSummary>(`/ledger/summary${query}`)).accounts);
+    } catch {
+      // O livro continua útil sem a faixa: o erro do livro já aparece sozinho.
+    }
+  }, [fixedKind, filter.from, filter.to]);
+
+  useEffect(() => {
+    void loadAccounts();
+  }, [loadAccounts]);
 
   const effectiveFilter = useMemo(
     () => (fixedKind ? { ...filter, kind: fixedKind } : filter),
@@ -134,6 +153,8 @@ export function LedgerPage({
           Novo lançamento
         </Button>
       </SectionHeading>
+
+      {accounts && <AccountStrip accounts={accounts} />}
 
       <Panel bodyClass="fin-filter-body">
         <EntryFilters
@@ -221,7 +242,7 @@ export function LedgerPage({
           onSaved={async () => {
             setCreating(false);
             setEditing(null);
-            await load();
+            await Promise.all([load(), loadAccounts()]);
             await reference.reload();
           }}
         />

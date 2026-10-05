@@ -68,7 +68,12 @@ const FROM_JOINS = `
 
 type EntryRow = Omit<
   EntryRecord,
-  "countsTowardTarget" | "tags" | "attachments" | "installmentCount" | "counterpartAccountId" | "counterpartAccountName"
+  | "countsTowardTarget"
+  | "tags"
+  | "attachments"
+  | "installmentCount"
+  | "counterpartAccountId"
+  | "counterpartAccountName"
 > & {
   countsTowardTarget: number;
   counterpartEntryId: number | null;
@@ -155,7 +160,10 @@ function buildWhere(filter: Partial<EntryFilter>) {
     params.maxCents = Math.abs(filter.maxCents);
   }
 
-  return { where: clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "", params };
+  return {
+    where: clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "",
+    params
+  };
 }
 
 /**
@@ -239,7 +247,11 @@ export function createEntriesRepository(db: Db) {
    * zera tudo: o ciclo e o do cartao novo.
    */
   function keptStatementMonth(
-    existing: { accountId: number; date: string; statementMonth: string | null },
+    existing: {
+      accountId: number;
+      date: string;
+      statementMonth: string | null;
+    },
     accountId: number
   ): string | null | undefined {
     if (existing.statementMonth == null || existing.accountId !== accountId) return undefined;
@@ -283,6 +295,64 @@ export function createEntriesRepository(db: Db) {
    * Aporte e resgate sao de Investimentos: o livro mostra, mas quem desfaz e
    * a tela que tambem devolve o valor da posicao.
    */
+  /**
+   * O dinheiro separado numa caixinha de marcação fica preso a um lançamento
+   * de entrada (o esquema pede), e a alocação some junto com ele em cascata.
+   * Antes de o lançamento sair da conta (excluído ou movido), a marcação passa
+   * para outra entrada da mesma conta: separar dinheiro não depende de qual
+   * lançamento o trouxe. Sem outra entrada, recusa em vez de zerar a caixinha.
+   */
+  function rehomeAllocations(entryIds: number[]) {
+    for (const entryId of entryIds) {
+      const held = db
+        .prepare(
+          `SELECT ga.goal_id AS goalId, ga.amount_cents AS amountCents, g.account_id AS accountId
+           FROM goal_allocations ga JOIN goals g ON g.id = ga.goal_id
+           WHERE ga.entry_id = ?`
+        )
+        .all(entryId) as {
+        goalId: number;
+        amountCents: number;
+        accountId: number;
+      }[];
+      if (held.length === 0) continue;
+      for (const row of held) {
+        const anchor = db
+          .prepare(
+            `SELECT id FROM entries
+             WHERE account_id = ? AND amount_cents > 0 AND id NOT IN (${entryIds.map(() => "?").join(",")})
+             ORDER BY date DESC, id DESC LIMIT 1`
+          )
+          .get(row.accountId, ...entryIds) as { id: number } | undefined;
+        if (!anchor) {
+          throw new LedgerError(
+            "Este lancamento guarda dinheiro separado em caixinhas: libere o valor da caixinha antes de excluir"
+          );
+        }
+        db.prepare(
+          `INSERT INTO goal_allocations(goal_id, entry_id, amount_cents) VALUES (?, ?, ?)
+           ON CONFLICT(goal_id, entry_id) DO UPDATE SET amount_cents = amount_cents + excluded.amount_cents`
+        ).run(row.goalId, anchor.id, row.amountCents);
+      }
+      db.prepare("DELETE FROM goal_allocations WHERE entry_id = ?").run(entryId);
+    }
+  }
+
+  /** Entrada com categoria de saída (ou o contrário) some dos dois relatórios. */
+  function assertCategoryKind(input: Pick<EntryDraft, "kind" | "categoryId">) {
+    if (input.categoryId == null || (input.kind !== "income" && input.kind !== "expense")) return;
+    const category = db
+      .prepare("SELECT kind FROM categories WHERE id = ?")
+      .get(input.categoryId) as { kind: string } | undefined;
+    if (category && category.kind !== input.kind) {
+      throw new LedgerError(
+        input.kind === "income"
+          ? "Entrada precisa de categoria de entrada"
+          : "Saida precisa de categoria de saida"
+      );
+    }
+  }
+
   function assertNotOperationCash(entryId: number) {
     // Aporte e resgate mudam o valor de uma posicao junto com o banco (010).
     // Apagar so a ponta do livro deixaria a posicao com dinheiro que nao saiu
@@ -304,21 +374,40 @@ export function createEntriesRepository(db: Db) {
   /** Os estornos somados nunca passam do lancamento que estornam (6.6). */
   function assertRefundFits(originalId: number, refundId: number, amountCents: number) {
     const original = db
-      .prepare("SELECT amount_cents AS amountCents FROM entries WHERE id = ?")
-      .get(originalId) as { amountCents: number } | undefined;
+      .prepare(
+        `SELECT e.amount_cents AS amountCents, e.installment_plan_id AS planId,
+                p.total_cents AS planTotal
+         FROM entries e LEFT JOIN installment_plans p ON p.id = e.installment_plan_id
+         WHERE e.id = ?`
+      )
+      .get(originalId) as
+      { amountCents: number; planId: number | null; planTotal: number | null } | undefined;
     if (!original) throw notFound("Lancamento estornado");
     if (Math.sign(amountCents) === Math.sign(original.amountCents)) {
       throw new LedgerError("Estorno tem o sinal oposto ao do lancamento original");
     }
+    // Numa compra parcelada o teto é o total da compra, e conta o estorno de
+    // qualquer parcela: o estorno integral aponta para a primeira, mas devolve
+    // a compra inteira.
     const others = (
-      db
-        .prepare(
-          `SELECT COALESCE(SUM(amount_cents), 0) AS total FROM entries
-           WHERE refund_of_entry_id = ? AND id <> ?`
-        )
-        .get(originalId, refundId) as { total: number }
-    ).total;
-    if (Math.abs(others + amountCents) > Math.abs(original.amountCents)) {
+      original.planId != null
+        ? db
+            .prepare(
+              `SELECT COALESCE(SUM(r.amount_cents), 0) AS total FROM entries r
+               JOIN entries o ON o.id = r.refund_of_entry_id
+               WHERE o.installment_plan_id = ? AND r.id <> ?`
+            )
+            .get(original.planId, refundId)
+        : db
+            .prepare(
+              `SELECT COALESCE(SUM(amount_cents), 0) AS total FROM entries
+               WHERE refund_of_entry_id = ? AND id <> ?`
+            )
+            .get(originalId, refundId)
+    ) as { total: number };
+    const cap =
+      original.planId != null ? (original.planTotal ?? 0) : Math.abs(original.amountCents);
+    if (Math.abs(others.total + amountCents) > cap) {
       throw new LedgerError("Estornos passariam do valor do lancamento original");
     }
   }
@@ -326,9 +415,7 @@ export function createEntriesRepository(db: Db) {
   function replaceTags(entryId: number, tagIds: number[] | undefined) {
     if (!tagIds) return;
     db.prepare("DELETE FROM entry_tags WHERE entry_id = ?").run(entryId);
-    const insert = db.prepare(
-      "INSERT OR IGNORE INTO entry_tags(entry_id, tag_id) VALUES (?, ?)"
-    );
+    const insert = db.prepare("INSERT OR IGNORE INTO entry_tags(entry_id, tag_id) VALUES (?, ?)");
     for (const tagId of tagIds) insert.run(entryId, tagId);
   }
 
@@ -404,12 +491,27 @@ export function createEntriesRepository(db: Db) {
   }
 
   const repository = {
-    create: (input: EntryDraft): number => db.transaction(() => insertRow(input))(),
+    create: (input: EntryDraft): number =>
+      db.transaction(() => {
+        // Transferência tem duas pontas e uma linha em `transfers`: só nasce
+        // por `createTransfer`. Uma ponta solta tirava dinheiro de uma conta
+        // sem pôr na outra.
+        if (input.kind === "transfer") {
+          throw new LedgerError(
+            "Transferencia se cria com origem e destino, nao como lancamento avulso"
+          );
+        }
+        // Estorno avulso passa pela mesma régua da edição: sinal oposto e nunca
+        // mais que o original.
+        if (input.refundOfEntryId != null) {
+          assertRefundFits(input.refundOfEntryId, -1, normalizeAmount(input));
+        }
+        assertCategoryKind(input);
+        return insertRow(input);
+      })(),
 
     /** Usado pelas fases 3 e 6, que precisam gravar campos internos. */
-    createInternal: (
-      input: Parameters<typeof insertRow>[0]
-    ): number => insertRow(input),
+    createInternal: (input: Parameters<typeof insertRow>[0]): number => insertRow(input),
 
     get: (id: number): EntryRecord | undefined => {
       const rows = repository.hydrate(
@@ -466,7 +568,10 @@ export function createEntriesRepository(db: Db) {
              WHERE e.id IN (${counterpartIds.join(",")})`
           )
           .all() as { id: number; accountId: number; accountName: string }[]) {
-          counterparts.set(row.id, { accountId: row.accountId, accountName: row.accountName });
+          counterparts.set(row.id, {
+            accountId: row.accountId,
+            accountName: row.accountName
+          });
         }
       }
 
@@ -487,7 +592,8 @@ export function createEntriesRepository(db: Db) {
 
       return rows.map((row) => {
         const { counterpartEntryId, ...rest } = row;
-        const counterpart = counterpartEntryId != null ? counterparts.get(counterpartEntryId) : undefined;
+        const counterpart =
+          counterpartEntryId != null ? counterparts.get(counterpartEntryId) : undefined;
         return {
           ...rest,
           countsTowardTarget: fromBit(row.countsTowardTarget),
@@ -508,9 +614,7 @@ export function createEntriesRepository(db: Db) {
 
       const total = (
         db
-          .prepare(
-            `SELECT COUNT(*) AS n FROM (SELECT e.id ${FROM_JOINS} ${where} GROUP BY e.id)`
-          )
+          .prepare(`SELECT COUNT(*) AS n FROM (SELECT e.id ${FROM_JOINS} ${where} GROUP BY e.id)`)
           .get(params) as { n: number }
       ).n;
 
@@ -524,7 +628,11 @@ export function createEntriesRepository(db: Db) {
            FROM (SELECT e.id, e.kind, e.amount_cents AS amountCents ${FROM_JOINS} ${where}
                  GROUP BY e.id)`
         )
-        .get(params) as { incomeCents: number; expenseCents: number; netCents: number };
+        .get(params) as {
+        incomeCents: number;
+        expenseCents: number;
+        netCents: number;
+      };
 
       const rows = db
         .prepare(
@@ -533,7 +641,11 @@ export function createEntriesRepository(db: Db) {
            ORDER BY e.date DESC, e.id DESC
            LIMIT @limit OFFSET @offset`
         )
-        .all({ ...params, limit: pageSize, offset: (page - 1) * pageSize }) as EntryRow[];
+        .all({
+          ...params,
+          limit: pageSize,
+          offset: (page - 1) * pageSize
+        }) as EntryRow[];
 
       return { rows: repository.hydrate(rows), total, page, pageSize, totals };
     },
@@ -623,6 +735,26 @@ export function createEntriesRepository(db: Db) {
           | undefined;
         if (!existing) throw notFound("Lancamento");
         assertNotOperationCash(id);
+        // Virar ou deixar de ser transferência numa edição deixaria uma ponta
+        // sem a outra: a conta de destino nunca recebia o dinheiro.
+        if ((existing.transferId != null) !== (input.kind === "transfer")) {
+          throw new LedgerError(
+            existing.transferId != null
+              ? "Transferencia continua transferencia: exclua e lance de novo para mudar o tipo"
+              : "Para virar transferencia, o lancamento precisa de conta de destino"
+          );
+        }
+        if (existing.transferId != null && input.accountId !== existing.accountId) {
+          const otherId = existing.fromEntryId === id ? existing.toEntryId : existing.fromEntryId;
+          const other = db
+            .prepare("SELECT account_id AS accountId FROM entries WHERE id = ?")
+            .get(otherId) as { accountId: number } | undefined;
+          if (other?.accountId === input.accountId) {
+            throw new LedgerError(
+              "Origem e destino da transferencia precisam ser contas diferentes"
+            );
+          }
+        }
         // O desconto de antecipacao e da antecipacao: nasce e morre com ela.
         if (existing.isDiscount) {
           throw new LedgerError(
@@ -643,6 +775,7 @@ export function createEntriesRepository(db: Db) {
 
         const defaults = resolveAccountDefaults(draft);
         const amount = normalizeAmount(draft);
+        if (input.accountId !== existing.accountId || amount <= 0) rehomeAllocations([id]);
 
         // Re-derivar em toda edicao apagaria a excecao manual do usuario numa
         // simples troca de descricao. So o que muda o resultado de 6.4 —
@@ -656,7 +789,8 @@ export function createEntriesRepository(db: Db) {
           transferPurpose: existing.transferPurpose,
           refundOfEntryId
         });
-        const nextFlag = input.countsTowardTarget ?? (flagInputsChanged ? derivedFlag : previousFlag);
+        const nextFlag =
+          input.countsTowardTarget ?? (flagInputsChanged ? derivedFlag : previousFlag);
         const targetFlagReset = flagInputsChanged && nextFlag !== previousFlag;
 
         db.prepare(
@@ -725,9 +859,7 @@ export function createEntriesRepository(db: Db) {
             `SELECT id, from_entry_id AS fromEntryId, to_entry_id AS toEntryId
              FROM transfers WHERE from_entry_id = ? OR to_entry_id = ?`
           )
-          .get(id, id) as
-          | { id: number; fromEntryId: number; toEntryId: number }
-          | undefined;
+          .get(id, id) as { id: number; fromEntryId: number; toEntryId: number } | undefined;
 
         if (transfer) {
           // A transferencia de uma operacao de investimento pertence a operacao:
@@ -740,6 +872,7 @@ export function createEntriesRepository(db: Db) {
               "Transferencia criada por uma operacao de investimento: edite ou exclua a operacao"
             );
           }
+          rehomeAllocations([transfer.fromEntryId, transfer.toEntryId]);
           db.prepare("DELETE FROM transfers WHERE id = ?").run(transfer.id);
           db.prepare("DELETE FROM entries WHERE id IN (?, ?)").run(
             transfer.fromEntryId,
@@ -750,14 +883,15 @@ export function createEntriesRepository(db: Db) {
         // Excluir o original deixando o estorno orfao apagaria o vinculo que
         // explica por que a categoria ficou negativa (6.6).
         const refunds = (
-          db
-            .prepare("SELECT COUNT(*) AS n FROM entries WHERE refund_of_entry_id = ?")
-            .get(id) as { n: number }
+          db.prepare("SELECT COUNT(*) AS n FROM entries WHERE refund_of_entry_id = ?").get(id) as {
+            n: number;
+          }
         ).n;
         if (refunds > 0) {
           throw new LedgerError("Remova antes o estorno deste lancamento");
         }
 
+        rehomeAllocations([id]);
         const changes = db.prepare("DELETE FROM entries WHERE id = ?").run(id).changes;
         if (changes === 0) throw notFound("Lancamento");
         return changes;
@@ -766,12 +900,22 @@ export function createEntriesRepository(db: Db) {
     /** Marca em lote, usado pelos botoes de conciliacao da listagem. */
     setStatus: (ids: number[], status: "pending" | "cleared" | "reconciled"): number => {
       if (ids.length === 0) return 0;
+      // A outra ponta de uma transferência muda junto: com status diferentes,
+      // o dinheiro saía de uma conta (ou voltava) sem a outra acompanhar.
+      const marks = ids.map(() => "?").join(",");
+      const legs = db
+        .prepare(
+          `SELECT from_entry_id AS a, to_entry_id AS b FROM transfers
+           WHERE from_entry_id IN (${marks}) OR to_entry_id IN (${marks})`
+        )
+        .all(...ids, ...ids) as { a: number; b: number }[];
+      const all = [...new Set([...ids, ...legs.flatMap((leg) => [leg.a, leg.b])])];
       return db
         .prepare(
           `UPDATE entries SET status = ?, updated_at = ?
-           WHERE id IN (${ids.map(() => "?").join(",")})`
+           WHERE id IN (${all.map(() => "?").join(",")})`
         )
-        .run(status, nowIso(), ...ids).changes;
+        .run(status, nowIso(), ...all).changes;
     },
 
     /** Linhas cruas de um filtro, sem paginacao — usado pela exportacao CSV. */

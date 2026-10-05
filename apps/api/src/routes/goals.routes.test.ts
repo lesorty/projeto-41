@@ -63,13 +63,13 @@ describe("cadastro", () => {
     expect(response.json().goal.accountId).not.toBeNull();
   });
 
-  it("recusa rendimento em modo marcacao", async () => {
+  it("aceita rendimento em modo marcacao", async () => {
     const response = await create({
       mode: "earmark",
       accountId: checking,
       cdiPercent: 110
     });
-    expect(response.statusCode).toBe(400);
+    expect(response.statusCode).toBe(201);
   });
 
   it("PUT nao troca o modo e responde 200 com o modo original", async () => {

@@ -20,7 +20,7 @@ import {
   Tag
 } from "../components/ui.js";
 import { api } from "../lib/api.js";
-import { currency as fmtCurrency, currencyRaw, decimal, fx, longDate, money, percent } from "../lib/format.js";
+import { currency as fmtCurrency, currencyRaw, decimal, fx, longDate, money, percent, todayIso } from "../lib/format.js";
 import { portfolioIconUrl } from "../lib/icons.js";
 import { useToast } from "../lib/toast.js";
 import type { Asset, CryptoSearchResult, OperationRecord } from "@projeto41/contracts";
@@ -31,6 +31,8 @@ import type { CashSettings } from "../lib/cash.js";
 type OperationRow = OperationRecord & {
   accountName?: string | null;
   transferId?: number | null;
+  /** Valor do lançamento no banco, em centavos de BRL. */
+  ledgerCents?: number | null;
   transferStatus?: string | null;
   /** De onde veio o dinheiro: um caixa de investimento ou uma conta bancária. */
   cashSource?: "position" | "bank" | null;
@@ -317,7 +319,16 @@ export function PortfolioPage({
                     </div>
                   </td>
                   <td className="right num">{decimal(operation.quantity, 8)}</td>
-                  <td className="right num">{fmtCurrency(operation.total, operation.currency)}</td>
+                  <td className="right num">
+                    {operation.currency === "USD" && operation.ledgerCents != null ? (
+                      <span title={`${fmtCurrency(operation.total, "USD")} na carteira`}>
+                        {fmtCurrency(operation.ledgerCents / 100, "BRL")}
+                        <small className="op-usd">{fmtCurrency(operation.total, "USD")}</small>
+                      </span>
+                    ) : (
+                      fmtCurrency(operation.total, operation.currency)
+                    )}
+                  </td>
                   <td>
                     {/* A diferença entre operação antiga e nova fica na cara:
                         nada foi vinculado automaticamente. */}
@@ -392,19 +403,24 @@ function OperationDrawer({
   const [asset, setAsset] = useState(initial?.asset ?? "");
   const [slug, setSlug] = useState("");
   const [assetName, setAssetName] = useState(initial?.asset ?? "");
-  const [date, setDate] = useState(initial && initial.date !== "1900-01-01" ? initial.date : new Date().toISOString().slice(0, 10));
-  const [entryCurrency, setEntryCurrency] = useState<"USD" | "BRL">("USD");
-  const [useFee, setUseFee] = useState(false);
+  const [date, setDate] = useState(initial && initial.date !== "1900-01-01" ? initial.date : todayIso());
   const canUseBrl = isCrypto && usdBrl > 0;
+  // A moeda de digitação é a última usada, também ao editar: reabrir sempre
+  // em USD fazia quem digitou em reais gravar reais como dólares.
+  const [entryCurrency, setEntryCurrency] = useState<"USD" | "BRL">(() =>
+    canUseBrl && readEntryCurrency() !== "USD" ? "BRL" : "USD"
+  );
+  const [useFee, setUseFee] = useState(false);
   const code = isCrypto ? entryCurrency : "BRL";
+  const shown = (usd: number) => (entryCurrency === "BRL" ? Math.round(usd * usdBrl * 100) / 100 : usd);
 
   // Quantidade × Preço = Total. O usuário preenche dois campos quaisquer e o
   // terceiro é resolvido sozinho. `recent` guarda a ordem de edição: o último
   // item é o campo atualmente calculado (o "stale").
   const [fields, setFields] = useState<Record<TradeField, string>>(() => ({
     qty: initialQty ? String(initialQty) : "",
-    unit: initialQty > 0 ? String(round(initialTotal / initialQty)) : "",
-    total: initialTotal ? String(initialTotal) : ""
+    unit: initialQty > 0 ? String(shown(round(initialTotal / initialQty))) : "",
+    total: initialTotal ? String(shown(initialTotal)) : ""
   }));
   const [recent, setRecent] = useState<TradeField[]>(
     initial || isCrypto ? ["qty", "total", "unit"] : ["qty", "unit", "total"]
@@ -437,6 +453,7 @@ function OperationDrawer({
       total: f.total !== "" ? String(round(Number(f.total) * factor)) : ""
     }));
     setEntryCurrency(next);
+    writeEntryCurrency(next);
   }
 
   useEffect(() => {
@@ -635,7 +652,7 @@ function OperationDrawer({
             label="Quantidade"
             value={fields.qty}
             solved={solved === "qty"}
-            step={isCrypto ? "0.001" : "1"}
+            bumpBy={isCrypto ? 0.001 : 1}
             onChange={(value) => editField("qty", value)}
           />
           <span className="trade-op" aria-hidden>×</span>
@@ -644,7 +661,7 @@ function OperationDrawer({
             code={code}
             value={fields.unit}
             solved={solved === "unit"}
-            step="0.01"
+            bumpBy={0.01}
             onChange={(value) => editField("unit", value)}
           />
           <span className="trade-op" aria-hidden>=</span>
@@ -653,7 +670,7 @@ function OperationDrawer({
             code={code}
             value={fields.total}
             solved={solved === "total"}
-            step="0.01"
+            bumpBy={0.01}
             onChange={(value) => editField("total", value)}
           />
         </div>
@@ -702,18 +719,19 @@ function EqTerm({
   code,
   value,
   solved,
-  step = "any",
+  bumpBy = 1,
   onChange
 }: {
   label: string;
   code?: string;
   value: string;
   solved: boolean;
-  step?: string;
+  /** Só as setas usam o passo: o campo aceita qualquer precisão. */
+  bumpBy?: number;
   onChange: (value: string) => void;
 }) {
   function bump(direction: 1 | -1) {
-    const delta = Number(step) || 0;
+    const delta = bumpBy;
     const next = Math.max(0, round((Number(value) || 0) + direction * delta));
     onChange(String(next));
   }
@@ -733,7 +751,6 @@ function EqTerm({
         <NumberInput
           value={value}
           min="0"
-          step={step}
           placeholder="0"
           onChange={(event) => onChange(event.target.value)}
         />
@@ -808,6 +825,24 @@ function InlineMoney({ value, onSave }: { value: number; onSave: (value: number)
       {money(value)}
     </button>
   );
+}
+
+const ENTRY_CURRENCY_KEY = "portfolio.entryCurrency";
+
+function readEntryCurrency(): string | null {
+  try {
+    return localStorage.getItem(ENTRY_CURRENCY_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeEntryCurrency(value: "USD" | "BRL") {
+  try {
+    localStorage.setItem(ENTRY_CURRENCY_KEY, value);
+  } catch {
+    // Sem storage, a moeda só não é lembrada.
+  }
 }
 
 function round(value: number) {

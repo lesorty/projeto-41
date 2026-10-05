@@ -1,5 +1,5 @@
 import type { PersonDraft, PersonRecord } from "@projeto41/contracts";
-import { countReferencing, fromBit, notFound, nowIso, toBit, type Db } from "./shared.js";
+import { countBlockingReferences, fromBit, notFound, nowIso, toBit, type Db } from "./shared.js";
 
 type PersonRow = {
   id: number;
@@ -11,7 +11,10 @@ type PersonRow = {
 
 const SELECT = "SELECT id, name, kind, color, active FROM people";
 
-const map = (row: PersonRow): PersonRecord => ({ ...row, active: fromBit(row.active) });
+const map = (row: PersonRow): PersonRecord => ({
+  ...row,
+  active: fromBit(row.active)
+});
 
 export function createPeopleRepository(db: Db) {
   return {
@@ -68,9 +71,7 @@ export function createPeopleRepository(db: Db) {
 
     /** So apaga de verdade quem nunca foi usado; caso contrario, arquive. */
     remove: (id: number): number => {
-      const used =
-        countReferencing(db, "SELECT COUNT(*) AS n FROM entries WHERE person_id = ?", id) +
-        countReferencing(db, "SELECT COUNT(*) AS n FROM accounts WHERE person_id = ?", id);
+      const used = countBlockingReferences(db, "people", id);
       if (used > 0) {
         db.prepare("UPDATE people SET active = 0 WHERE id = ?").run(id);
         return 0;

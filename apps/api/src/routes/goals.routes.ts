@@ -2,6 +2,7 @@ import {
   entryFilterSchema,
   goalAccrueSchema,
   goalAllocationSchema,
+  goalCorrectionSchema,
   goalCreateSchema,
   goalDepositSchema,
   goalMarkSchema,
@@ -19,7 +20,9 @@ const idParam = z.object({ id: z.coerce.number().int().positive() });
  * como lista de ids: caixinha fora da lista (nova) vai para o fim.
  */
 const ORDER_KEY = "goals.order";
-const orderSchema = z.object({ ids: z.array(z.number().int().positive()).max(500) });
+const orderSchema = z.object({
+  ids: z.array(z.number().int().positive()).max(500)
+});
 
 function today(): string {
   const now = new Date();
@@ -51,7 +54,9 @@ export const registerGoalsRoutes: RoutePlugin = (app, { db, cdiService }) => {
 
   function savedOrder(): number[] {
     try {
-      const parsed = orderSchema.shape.ids.safeParse(JSON.parse(db.settings.get(ORDER_KEY) ?? "[]"));
+      const parsed = orderSchema.shape.ids.safeParse(
+        JSON.parse(db.settings.get(ORDER_KEY) ?? "[]")
+      );
       return parsed.success ? parsed.data : [];
     } catch {
       return [];
@@ -60,13 +65,20 @@ export const registerGoalsRoutes: RoutePlugin = (app, { db, cdiService }) => {
 
   app.get("/api/ledger/goals", async (request) => {
     const { includeArchived } = z
-      .object({ includeArchived: z.coerce.boolean().optional() })
+      .object({
+        includeArchived: z
+          .enum(["true", "false", "1", "0"])
+          .transform((value) => value === "true" || value === "1")
+          .optional()
+      })
       .parse(request.query);
     await warmCdi();
     const position = new Map(savedOrder().map((id, index) => [id, index]));
     const rank = (id: number) => position.get(id) ?? Number.MAX_SAFE_INTEGER;
-    return ledger.goals
-      .list(includeArchived)
+    const goals = ledger.goals.list(includeArchived);
+    // O rendimento entra sozinho: cada leitura deixa as caixinhas em dia.
+    for (const goal of goals) if (!goal.archived) ledger.goals.accrue(goal.id, today());
+    return goals
       .sort((a, b) => rank(a.id) - rank(b.id) || a.id - b.id)
       .map((goal) => ledger.goals.progress(goal.id, today()));
   });
@@ -82,8 +94,10 @@ export const registerGoalsRoutes: RoutePlugin = (app, { db, cdiService }) => {
 
   app.get("/api/ledger/goals/:id", async (request, reply) => {
     const { id } = idParam.parse(request.params);
-    if (!ledger.goals.get(id)) return reply.status(404).send({ error: "Caixinha nao encontrada" });
+    const goal = ledger.goals.get(id);
+    if (!goal) return reply.status(404).send({ error: "Caixinha nao encontrada" });
     await warmCdi();
+    if (!goal.archived) ledger.goals.accrue(id, today());
     return {
       goal: ledger.goals.progress(id, today()),
       cdi: cdiService ? await cdiService.status() : null
@@ -96,14 +110,20 @@ export const registerGoalsRoutes: RoutePlugin = (app, { db, cdiService }) => {
     const goal = ledger.goals.get(id);
     if (!goal) return reply.status(404).send({ error: "Caixinha nao encontrada" });
     const filter = entryFilterSchema.parse(request.query);
-    return ledger.entries.list({ ...filter, goalId: id, accountId: goal.accountId ?? undefined });
+    return ledger.entries.list({
+      ...filter,
+      goalId: id,
+      accountId: goal.accountId ?? undefined
+    });
   });
 
   app.post("/api/ledger/goals", async (request, reply) => {
     const id = ledger.goals.create(goalCreateSchema.parse(request.body));
-    return reply
-      .status(201)
-      .send({ id, goal: ledger.goals.progress(id, today()), balances: balances() });
+    return reply.status(201).send({
+      id,
+      goal: ledger.goals.progress(id, today()),
+      balances: balances()
+    });
   });
 
   app.put("/api/ledger/goals/:id", async (request, reply) => {
@@ -131,18 +151,22 @@ export const registerGoalsRoutes: RoutePlugin = (app, { db, cdiService }) => {
     const { id } = idParam.parse(request.params);
     if (!ledger.goals.get(id)) return reply.status(404).send({ error: "Caixinha nao encontrada" });
     ledger.goals.deposit(id, goalDepositSchema.parse(request.body));
-    return reply
-      .status(201)
-      .send({ ok: true, goal: ledger.goals.progress(id, today()), balances: balances() });
+    return reply.status(201).send({
+      ok: true,
+      goal: ledger.goals.progress(id, today()),
+      balances: balances()
+    });
   });
 
   app.post("/api/ledger/goals/:id/withdraw", async (request, reply) => {
     const { id } = idParam.parse(request.params);
     if (!ledger.goals.get(id)) return reply.status(404).send({ error: "Caixinha nao encontrada" });
     ledger.goals.withdraw(id, goalWithdrawalSchema.parse(request.body));
-    return reply
-      .status(201)
-      .send({ ok: true, goal: ledger.goals.progress(id, today()), balances: balances() });
+    return reply.status(201).send({
+      ok: true,
+      goal: ledger.goals.progress(id, today()),
+      balances: balances()
+    });
   });
 
   app.post("/api/ledger/goals/:id/allocate", async (request, reply) => {
@@ -150,9 +174,7 @@ export const registerGoalsRoutes: RoutePlugin = (app, { db, cdiService }) => {
     const goal = ledger.goals.get(id);
     if (!goal) return reply.status(404).send({ error: "Caixinha nao encontrada" });
     if (goal.mode !== "earmark") {
-      return reply
-        .status(400)
-        .send({ error: "Alocacao so existe em caixinha de marcacao" });
+      return reply.status(400).send({ error: "Alocacao so existe em caixinha de marcacao" });
     }
     const body = goalAllocationSchema.parse(request.body);
     const result = ledger.goals.allocate(id, body.entryId, body.amountCents);
@@ -166,7 +188,11 @@ export const registerGoalsRoutes: RoutePlugin = (app, { db, cdiService }) => {
     if (!goal) return reply.status(404).send({ error: "Caixinha nao encontrada" });
     const { amountCents } = goalMarkSchema.parse(request.body);
     const result = ledger.goals.mark(id, amountCents);
-    return { ...result, goal: ledger.goals.progress(id, today()), balances: balances() };
+    return {
+      ...result,
+      goal: ledger.goals.progress(id, today()),
+      balances: balances()
+    };
   });
 
   app.post("/api/ledger/goals/:id/deallocate", async (request, reply) => {
@@ -188,5 +214,13 @@ export const registerGoalsRoutes: RoutePlugin = (app, { db, cdiService }) => {
     await warmCdi();
     const result = ledger.goals.accrue(id, through ?? today());
     return { ok: true, ...result, goal: ledger.goals.progress(id, today()) };
+  });
+
+  app.post("/api/ledger/goals/:id/correct", async (request, reply) => {
+    const { id } = idParam.parse(request.params);
+    if (!ledger.goals.get(id)) return reply.status(404).send({ error: "Caixinha nao encontrada" });
+    const body = goalCorrectionSchema.parse(request.body);
+    await warmCdi();
+    return { ok: true, goal: ledger.goals.correct(id, body, today()) };
   });
 };

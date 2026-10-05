@@ -71,11 +71,15 @@ export function cycleProgress(
   if (active.status !== "open") return { ratio: 1, daysLeft: 0, label: "ciclo encerrado" };
 
   const end = dayNumber(active.closingDate);
-  // A lista pula meses sem movimento, então a fatura anterior da lista só serve
-  // de início do ciclo quando é mesmo a do mês anterior; senão, calcula.
-  const adjacent = previous && monthsBetween(previous.month, active.month) === 1;
-  const start =
-    dayNumber(adjacent ? previous.closingDate : previousClosing(active.closingDate)) + 1;
+  // O início do ciclo vem do servidor (`periodStart`): recalcular pelo dia de
+  // fechamento atual errava um dia quando o fechamento cai no fim do mês.
+  const start = active.periodStart
+    ? dayNumber(active.periodStart)
+    : dayNumber(
+        previous && monthsBetween(previous.month, active.month) === 1
+          ? previous.closingDate
+          : previousClosing(active.closingDate)
+      ) + 1;
   const now = dayNumber(today);
   if (now < start) {
     const days = end - now;

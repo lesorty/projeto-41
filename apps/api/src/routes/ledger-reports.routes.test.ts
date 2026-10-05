@@ -80,6 +80,43 @@ describe("GET /api/ledger/summary", () => {
     expect(summary.consolidated).not.toHaveProperty("projectedCents");
   });
 
+  it("traz a fatura corrente de cada cartao junto da conta que paga", async () => {
+    const card = db.ledger.accounts.create({
+      name: "Cartao",
+      kind: "credit_card",
+      color: "#8a2be2",
+      personId: steylor,
+      closingDay: 31,
+      dueDay: 8,
+      paymentAccountId: checking
+    });
+    const now = new Date();
+    const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    db.ledger.entries.create({ accountId: card, date: todayIso, amountCents: -4235, kind: "expense" });
+
+    const summary = await app.inject("/api/ledger/summary").then((r) => r.json());
+    const cardRow = summary.accounts.find((a: { id: number }) => a.id === card);
+    expect(cardRow).toMatchObject({ paymentAccountId: checking, statement: { amountCents: 4235 } });
+    expect(cardRow.statement.dueDate).toMatch(/-08$/);
+    expect(cardRow.statement.dueDate > cardRow.statement.closingDate).toBe(true);
+    expect(summary.accounts.find((a: { id: number }) => a.id === checking).statement).toBeNull();
+    expect(cardRow.flows).toEqual({ incomeCents: 0, expenseCents: -4235, netCents: -4235 });
+  });
+
+  it("separa entradas, saidas e liquido por conta no periodo", async () => {
+    seedExpense(50000, mercado);
+    db.ledger.entries.create({
+      accountId: savings,
+      date: "2026-03-05",
+      amountCents: 12000,
+      kind: "income"
+    });
+    const summary = await app.inject(`/api/ledger/summary?period=${PERIOD}`).then((r) => r.json());
+    const flowsOf = (id: number) => summary.accounts.find((a: { id: number }) => a.id === id).flows;
+    expect(flowsOf(checking)).toEqual({ incomeCents: 0, expenseCents: -50000, netCents: -50000 });
+    expect(flowsOf(savings)).toEqual({ incomeCents: 12000, expenseCents: 0, netCents: 12000 });
+  });
+
   it("recusa periodo malformado", async () => {
     expect((await app.inject("/api/ledger/summary?period=2026-13")).statusCode).toBe(400);
   });

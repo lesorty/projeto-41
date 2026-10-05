@@ -17,7 +17,10 @@ const goalBase = z.object({
   icon: z.string().trim().max(40).nullable().optional(),
   targetAmountCents: centsSchema.positive().nullable().optional(),
   targetDate: isoDateSchema.nullable().optional(),
-  /** Percentual do CDI. Só faz sentido em caixinha com conta própria. */
+  /**
+   * Percentual do CDI. Na marcação, o rendimento é creditado na conta marcada
+   * e fica separado na própria caixinha.
+   */
   cdiPercent: z.number().min(1).max(300).nullable().optional()
 });
 
@@ -30,13 +33,6 @@ export const goalCreateSchema = goalBase
     personId: idSchema.nullable().optional()
   })
   .superRefine((value, ctx) => {
-    if (value.cdiPercent != null && value.mode !== "account") {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["cdiPercent"],
-        message: "Caixinha que rende precisa de conta propria: escolha o modo conta"
-      });
-    }
     if (value.mode === "earmark" && value.accountId == null) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -78,6 +74,12 @@ export const goalMarkSchema = z.object({
 
 export const goalAccrueSchema = z.object({ through: isoDateSchema.optional() });
 
+/** "O saldo real era X no fim do dia D": o sistema recalcula dali em diante. */
+export const goalCorrectionSchema = z.object({
+  date: isoDateSchema,
+  valueCents: z.number().int().nonnegative()
+});
+
 export type GoalCreateInput = z.input<typeof goalCreateSchema>;
 export type GoalUpdateInput = z.input<typeof goalUpdateSchema>;
 export type GoalDepositInput = z.infer<typeof goalDepositSchema>;
@@ -106,7 +108,14 @@ export type GoalRecord = {
  * refatoração.
  */
 export type GoalProgress = GoalRecord & {
+  /** Saldo calculado: o que você colocou + o que rendeu + as correções. */
   balanceCents: number;
+  /** Depósitos menos saques: o dinheiro que você pôs. */
+  contributedCents: number;
+  /** Rendimento já no saldo (lançado na conta própria ou separado na marcação). */
+  yieldCents: number;
+  /** Soma das correções de saldo informadas por você. */
+  correctionCents: number;
   targetRatioPerMille: number | null;
   remainingCents: number | null;
   daysToTarget: number | null;

@@ -3,7 +3,14 @@ import type {
   InstallmentPlanRecord,
   UpdateInstallmentPlanInput
 } from "@projeto41/contracts";
-import { installmentDates, splitCents, statementMonthFor } from "@projeto41/finance";
+import {
+  addMonths,
+  formatMonth,
+  installmentDates,
+  parseMonth,
+  splitCents,
+  statementMonthFor
+} from "@projeto41/finance";
 import { createCardsRepository } from "./cards.js";
 import { createEntriesRepository } from "./entries.js";
 import { LedgerError, notFound, nowIso, type Db } from "./shared.js";
@@ -106,6 +113,14 @@ export function createInstallmentPlansRepository(db: Db) {
         // primeira parcela (6.3). Nao reimplementar aqui.
         const amounts = splitCents(input.totalCents, count);
         const dates = installmentDates(input.purchaseDate, count);
+        // Uma parcela por fatura, a partir da fatura da compra. Recalcular o
+        // mês pela data de cada parcela falhava com fechamento no dia 28-31:
+        // a data encurtada no mês curto caía antes do fechamento, e duas
+        // parcelas iam para a mesma fatura, pulando o mês seguinte.
+        const firstMonth = parseMonth(
+          statementMonthFor(input.purchaseDate, cycle.closingDay, cycle.dueDay)
+        );
+        const months = dates.map((_, index) => formatMonth(addMonths(firstMonth, index)));
 
         const planId = Number(
           db
@@ -145,7 +160,7 @@ export function createInstallmentPlansRepository(db: Db) {
             installmentNumber: index + 1,
             // Parcela nao e excecao da regra de fatura: cada uma passa pelo
             // caminho normal, com o ciclo deste cartao.
-            statementMonth: statementMonthFor(dates[index]!, cycle.closingDay, cycle.dueDay),
+            statementMonth: months[index]!,
             tagIds: []
           });
         }

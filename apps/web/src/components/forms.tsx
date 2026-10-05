@@ -255,7 +255,11 @@ export function Dropdown<T extends string | number>(props: SingleProps<T> | Mult
       </button>
 
       {open && (
-        <div className="dropdown-panel">
+        // O Field e um <label>, e clicar em algo dentro de um label repassa o
+        // clique ao primeiro controle dele: o botao deste dropdown. Sem cancelar
+        // esse repasse, escolher uma opcao fechava a lista e o botao a abria de
+        // novo na mesma hora.
+        <div className="dropdown-panel" onClick={(event) => event.preventDefault()}>
           {showSearch && (
             <label className="dropdown-search">
               <Search size={14} aria-hidden />

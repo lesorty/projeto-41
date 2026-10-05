@@ -100,6 +100,20 @@ describe("cadastros do livro", () => {
     const list = await app.inject("/api/ledger/places?search=ASSAI").then((r) => r.json());
     expect(list).toHaveLength(1);
   });
+
+  // O formulário de lançamento cria o local pelo nome digitado: um nome que já
+  // existe derrubava o lançamento com "Erro interno".
+  it("criar local ou etiqueta com nome existente devolve o existente", async () => {
+    const first = (await post("/api/ledger/places", { name: "Assaí" })).json();
+    const again = await post("/api/ledger/places", { name: " ASSAÍ " });
+    expect(again.statusCode).toBe(200);
+    expect(again.json().id).toBe(first.id);
+
+    const tag = (await post("/api/ledger/tags", { name: "Viagem", color: "#ff0000" })).json();
+    const tagAgain = await post("/api/ledger/tags", { name: "viagem", color: "#00ff00" });
+    expect(tagAgain.statusCode).toBe(200);
+    expect(tagAgain.json().id).toBe(tag.id);
+  });
 });
 
 describe("lancamentos", () => {

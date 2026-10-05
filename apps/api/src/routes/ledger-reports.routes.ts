@@ -19,6 +19,7 @@ import {
   previousRange,
   previousRangeToDate,
   startOfMonth,
+  statementCycleFor,
   topSlices,
   type Range
 } from "@projeto41/finance";
@@ -59,7 +60,9 @@ function buildCategoryReport(
   const rows = categoryTotals(db.ledger.reports.totalsByCategory(range, { kind: options.kind }), {
     range
   });
-  const slices = topSlices(rows);
+  // Todas as categorias: a legenda rola e lista cada uma. Quem agrupa as
+  // fatias pequenas em "Outras" e a rosca, so no desenho.
+  const slices = topSlices(rows, Number.POSITIVE_INFINITY);
 
   // A participacao das LINHAS da tabela e sobre todas as categorias positivas,
   // independente do corte da rosca — a tabela mostra tudo.
@@ -180,15 +183,33 @@ export const registerLedgerReportsRoutes: RoutePlugin = (app, { db }) => {
       ? resolveRange(reportRangeSchema.parse(query))
       : { from: startOfMonth(currentPeriod()), to: endOfMonth(currentPeriod()) };
     const period = range.from.slice(0, 7);
-    const previous = previousRange(range);
+    // Mês em andamento contra o anterior até o mesmo dia: contra o mês inteiro,
+    // dia 1 sempre parecia "gastou 97% menos".
+    const previous = previousRangeToDate(range, { today: today() }) ?? previousRange(range);
 
     // Reaproveita o calculo de saldo da fase 1 — nada e reescrito aqui (6.1).
     const balances = db.ledger.balances.consolidated({ asOf: today() });
+    const flows = new Map(
+      db.ledger.reports.monthSummaryByAccount(range).map((row) => [row.accountId, row])
+    );
+
+    // Dinheiro marcado em caixinha continua na conta, mas nao esta livre: o
+    // saldo mostrado desconta, e o separado vem a parte.
+    const earmarked = db.ledger.goals.earmarkedByAccount();
+    const counted = new Set(
+      balances.accounts
+        .filter((account) => !account.archived && account.includeInNetWorth && account.kind !== "credit_card")
+        .map((account) => account.id)
+    );
+    const earmarkedTotal = [...earmarked.entries()]
+      .filter(([accountId]) => counted.has(accountId))
+      .reduce((total, [, cents]) => total + cents, 0);
 
     const summary: LedgerSummary = {
       period,
       consolidated: {
-        currentCents: balances.consolidatedCents,
+        currentCents: balances.consolidatedCents - earmarkedTotal,
+        earmarkedCents: earmarkedTotal,
         cardStatementCents: balances.creditCardStatementCents
       },
       accounts: balances.accounts.map((account) => ({
@@ -198,7 +219,26 @@ export const registerLedgerReportsRoutes: RoutePlugin = (app, { db }) => {
         kind: account.kind,
         personId: account.personId ?? null,
         personName: account.personName,
-        currentBalanceCents: account.currentBalanceCents
+        currentBalanceCents: account.currentBalanceCents - (earmarked.get(account.id) ?? 0),
+        earmarkedCents: earmarked.get(account.id) ?? 0,
+        paymentAccountId: account.paymentAccountId ?? null,
+        // O mesmo ciclo que `balances` usou para `currentStatementCents`.
+        statement:
+          account.kind === "credit_card" && account.closingDay != null && account.dueDay != null
+            ? (() => {
+                const cycle = statementCycleFor(today(), account.closingDay, account.dueDay);
+                return {
+                  amountCents: account.currentStatementCents ?? 0,
+                  closingDate: cycle.closingDate,
+                  dueDate: cycle.dueDate
+                };
+              })()
+            : null,
+        flows: {
+          incomeCents: flows.get(account.id)?.incomeCents ?? 0,
+          expenseCents: flows.get(account.id)?.expenseCents ?? 0,
+          netCents: flows.get(account.id)?.netCents ?? 0
+        }
       })),
       month: db.ledger.reports.monthSummary(range),
       previousMonth: db.ledger.reports.monthSummary(previous)

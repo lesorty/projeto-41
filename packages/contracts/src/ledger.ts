@@ -41,7 +41,8 @@ export const isoDateSchema = z.string().date();
 /** Mes de fatura, no formato YYYY-MM (plano mestre 6.2). */
 export const monthSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "Mes precisa ser YYYY-MM");
 /** Dinheiro e sempre centavos inteiros (D19), nunca z.number() solto. */
-export const centsSchema = z.number().int();
+// Até R$ 1 trilhão: valor maior é erro de digitação e perderia precisão no REAL.
+export const centsSchema = z.number().int().min(-100_000_000_000_000).max(100_000_000_000_000);
 export const idSchema = z.number().int().positive();
 
 const optionalText = z.string().trim().max(500).optional().nullable();

@@ -278,9 +278,14 @@ export function isWholeMonth(range: Range): boolean {
  * com a mesma quantidade de dias imediatamente antes de `from`.
  */
 export function previousRange(range: Range): Range {
-  if (isWholeMonth(range)) {
-    const month = formatMonth(addMonths(parseMonth(monthOf(range.from)), -1));
-    return { from: startOfMonth(month), to: endOfMonth(month) };
+  // N meses inteiros contra os N meses anteriores: o ano contra o ano, o
+  // trimestre contra o trimestre. Contar dias deslocava um dia por ano bissexto
+  // e por mês de 31.
+  const months = wholeMonthsIn(range);
+  if (months != null) {
+    const first = addMonths(parseMonth(monthOf(range.from)), -months);
+    const last = addMonths(parseMonth(monthOf(range.from)), -1);
+    return { from: startOfMonth(formatMonth(first)), to: endOfMonth(formatMonth(last)) };
   }
   const span = daysBetween(range.from, range.to);
   return { from: addDays(range.from, -(span + 1)), to: addDays(range.from, -1) };

@@ -42,3 +42,4 @@ export { registerInvestmentCashRoutes } from "./investment-cash.routes.js";
 export { registerCdiRoutes } from "./cdi.routes.js";
 export { registerGoalsRoutes } from "./goals.routes.js";
 export { registerAttachmentsRoutes } from "./attachments.routes.js";
+export { registerLedgerImportRoutes } from "./ledger-import.routes.js";

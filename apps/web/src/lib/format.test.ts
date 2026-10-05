@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  weekdayName,
   budgetPair,
   centsToInput,
   currencyRaw,
@@ -80,5 +81,13 @@ describe("preços", () => {
     expect(nbsp(currencyRaw(0.5, "USD"))).toBe("US$ 0,50");
     expect(nbsp(currencyRaw(0.0421, "BRL"))).toBe("R$ 0,0421");
     expect(priceFractionDigits(350)).toBe(2);
+  });
+});
+
+describe("weekdayName", () => {
+  it("da o dia da semana por extenso e curto", () => {
+    expect(weekdayName("2026-09-25")).toBe("Sexta-feira");
+    expect(weekdayName("2026-09-27", "short")).toBe("dom");
+    expect(weekdayName("")).toBe("");
   });
 });

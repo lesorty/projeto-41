@@ -190,6 +190,17 @@ export function ledgerDate(value: string) {
   });
 }
 
+/**
+ * Dia da semana de uma data `YYYY-MM-DD`: "Quinta-feira" ou, curto, "qui".
+ * Meio-dia local para o fuso nunca empurrar a data para o dia anterior.
+ */
+export function weekdayName(value: string, style: "long" | "short" = "long") {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return "";
+  const name = new Date(`${value}T12:00:00`).toLocaleDateString("pt-BR", { weekday: style });
+  if (style === "short") return name.replace(".", "");
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
 /** Rótulo de um mês `YYYY-MM`, como "Maio de 2026". */
 export function monthLabel(month: string) {
   const [year, index] = month.split("-");

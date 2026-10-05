@@ -107,7 +107,7 @@ function CategoryPill({ entry }: { entry: EntryRecord }) {
   }
   if (!entry.categoryName) {
     return (
-      <span className="fin-cat-pill empty">
+      <span className="fin-cat-pill blank">
         <span>{entry.kind === "income" ? "Entrada" : entry.kind === "adjustment" ? "Ajuste" : "Sem categoria"}</span>
       </span>
     );

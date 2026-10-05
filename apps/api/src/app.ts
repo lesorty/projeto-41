@@ -16,6 +16,7 @@ import {
   registerIconsRoutes,
   registerImportExportRoutes,
   registerLedgerReportsRoutes,
+  registerLedgerImportRoutes,
   registerLedgerRoutes,
   registerOperationsRoutes,
   registerPortfolioRoutes,
@@ -77,6 +78,20 @@ export function buildApp({
     ) {
       return reply.status(error.statusCode).send({ error: error.message });
     }
+    // Restrição do banco é regra de negócio violada, não falha do servidor:
+    // devolve 409 com uma mensagem que diz o que aconteceu.
+    const code = error instanceof Error && "code" in error ? String(error.code) : "";
+    if (code === "SQLITE_CONSTRAINT_UNIQUE" || code === "SQLITE_CONSTRAINT_PRIMARYKEY") {
+      return reply.status(409).send({ error: "Ja existe um registro com esses dados" });
+    }
+    if (code === "SQLITE_CONSTRAINT_FOREIGNKEY") {
+      return reply
+        .status(409)
+        .send({ error: "Registro ligado a outro que nao existe ou ainda esta em uso" });
+    }
+    if (code === "SQLITE_CONSTRAINT_CHECK" || code === "SQLITE_CONSTRAINT_NOTNULL") {
+      return reply.status(400).send({ error: "Dados invalidos para o banco" });
+    }
     app.log.error(error);
     return reply.status(500).send({ error: "Erro interno" });
   });
@@ -103,6 +118,7 @@ export function buildApp({
   registerCdiRoutes(app, deps);
   registerGoalsRoutes(app, deps);
   registerAttachmentsRoutes(app, deps);
+  registerLedgerImportRoutes(app, deps);
   registerImportExportRoutes(app, deps);
 
   return app;

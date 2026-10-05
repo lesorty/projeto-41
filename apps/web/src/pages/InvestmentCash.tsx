@@ -12,7 +12,7 @@ import {
   Wallet
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import type { Dashboard, ManualPositionRecord } from "@projeto41/contracts";
+import type { Dashboard, ManualPositionRecord, PositionRecord } from "@projeto41/contracts";
 import { Drawer, useConfirm } from "../components/dialog.js";
 import { PositionMoveDrawer, type MoveMode } from "../components/PositionMoveDrawer.js";
 import {
@@ -30,6 +30,7 @@ import { api } from "../lib/api.js";
 import {
   POSITION_CATEGORY_LABEL,
   isLiquid,
+  MOVE_LABEL,
   useInvestmentCash,
   type CashSettings,
   type PositionMovement
@@ -48,14 +49,6 @@ import { useToast } from "../lib/toast.js";
 
 type PayMode = "position" | "bank" | "none";
 
-const MOVE_LABEL: Record<PositionMovement["kind"], string> = {
-  deposit: "Aporte",
-  withdrawal: "Resgate",
-  move_in: "Entrada",
-  move_out: "Saída",
-  buy: "Compra",
-  sell: "Venda"
-};
 
 export function InvestmentCashPage({
   dashboard,
@@ -190,11 +183,17 @@ export function InvestmentCashPage({
                 <span className="fin-inline">
                   {position.name}
                   <Tag tone="info">{POSITION_CATEGORY_LABEL[position.category]}</Tag>
+                  {position.yield && <Tag tone="positive">{position.cdiPercent}% do CDI</Tag>}
                 </span>
               }
               subtitle={position.category === "reserve" ? "Reserva: fora da meta de alocação" : "Disponível para alocar"}
             >
               <strong className="cash-broker-value">{currency(position.currentValue, position.currency)}</strong>
+              {position.history.yieldTotal > 0 && (
+                <small className="positive-text">
+                  {currency(position.history.yieldTotal, position.currency)} de rendimento já no valor
+                </small>
+              )}
               <div className="cash-broker-actions">
                 <Button
                   variant="soft"
@@ -281,7 +280,7 @@ export function InvestmentCashPage({
                   <small>
                     {movement.kind === "deposit" && `de ${movement.accountName ?? "conta"}`}
                     {movement.kind === "withdrawal" && `para ${movement.accountName ?? "conta"}`}
-                    {(movement.kind === "move_in" || movement.kind === "move_out" || movement.kind === "buy" || movement.kind === "sell") &&
+                    {movement.kind !== "deposit" && movement.kind !== "withdrawal" &&
                       (movement.description ?? "")}
                   </small>
                 </span>
@@ -434,7 +433,7 @@ function PaymentSettings({
   onSaved
 }: {
   settings: CashSettings;
-  caixas: ManualPositionRecord[];
+  caixas: PositionRecord[];
   banks: { id: number; name: string }[];
   onSaved: () => Promise<void>;
 }) {

@@ -68,6 +68,12 @@ export const parsedTransactionSchema = z.object({
   trnType: z.string().optional(),
   checkNum: z.string().optional(),
   counterparty: counterpartySchema.optional(),
+  /**
+   * A linha exatamente como veio no arquivo: coluna -> valor no CSV, tag ->
+   * valor no OFX. Guardada em `import_rows.raw_json` para auditoria e para
+   * reconhecer a mesma linha quando o arquivo voltar.
+   */
+  source: z.record(z.string(), z.string()).optional(),
   installment: z
     .object({
       number: z.number().int().positive(),
@@ -272,3 +278,131 @@ export type RuleDraft = z.input<typeof ruleDraftSchema>;
 export type ImportCommit = z.infer<typeof importCommitSchema>;
 export type AccountIdentity = z.infer<typeof accountIdentitySchema>;
 export type AccountIdentityDraft = z.input<typeof accountIdentityDraftSchema>;
+
+// Revisao lancamento a lancamento ------------------------------------------
+
+/**
+ * O que o usuario decide sobre o destinatario ao confirmar uma linha.
+ *
+ * - `auto`: as proximas linhas dele entram prontas, sem perguntar.
+ * - `ask`: as proximas vem pre-preenchidas, mas sempre passam pelo popup.
+ * - `none`: nao grava nada sobre o destinatario.
+ * - `ignore`: as proximas linhas dele nem entram na revisao.
+ */
+export const payeeRememberSchema = z.enum(["none", "auto", "ask", "ignore"]);
+
+/** Corpo da confirmacao de uma linha no popup. */
+export const importRowConfirmSchema = z
+  .object({
+    /** `create` grava um lancamento; `link` liga a linha ao que ja existe; `skip` ignora. */
+    action: z.enum(["create", "link", "skip"]),
+    kind: z.enum(["expense", "income", "transfer"]).default("expense"),
+    /** Na transferencia, a outra conta: o sinal da linha diz quem e origem. */
+    toAccountId: idSchema.nullable().optional(),
+    categoryId: idSchema.nullable().optional(),
+    placeName: z.string().trim().max(120).nullable().optional(),
+    description: z.string().trim().max(200).nullable().optional(),
+    notes: z.string().trim().max(2000).nullable().optional(),
+    personId: idSchema.nullable().optional(),
+    tagIds: z.array(idSchema).default([]),
+    /** Lancamento a vincular; ausente usa o que a dedupe apontou. */
+    linkEntryId: idSchema.nullable().optional(),
+    remember: payeeRememberSchema.default("none")
+  })
+  .superRefine((value, ctx) => {
+    if (value.action === "create" && value.kind === "transfer" && value.toAccountId == null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["toAccountId"],
+        message: "Escolha a outra conta da transferencia"
+      });
+    }
+    if (value.kind === "transfer" && value.categoryId != null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["categoryId"],
+        message: "Transferencia nao tem categoria"
+      });
+    }
+    if (value.remember === "ignore" && value.action !== "skip") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["remember"],
+        message: "Ignorar sempre so combina com pular a linha"
+      });
+    }
+  });
+
+export type PayeeRemember = z.infer<typeof payeeRememberSchema>;
+export type ImportRowConfirm = z.input<typeof importRowConfirmSchema>;
+
+/**
+ * O que o arquivo e: extrato da conta (entradas e saidas do banco) ou fatura
+ * do cartao (so compras, positivas no CSV do Nubank). Decide a conta aceita.
+ */
+export const statementKindSchema = z.enum(["bank", "card"]);
+export type StatementKind = z.infer<typeof statementKindSchema>;
+
+/** Linha do lote como a tela de revisao enxerga. */
+export type ImportRowView = {
+  id: number;
+  lineNo: number;
+  status: ImportRowStatus;
+  date: string;
+  /** `HH:MM` quando o arquivo traz (OFX); o CSV do Nubank nao tem hora. */
+  time: string | null;
+  amountCents: number;
+  rawDescription: string;
+  paymentMethod: "pix" | "debit" | null;
+  /** `Parcela 2/4` da fatura. */
+  installment: { number: number; total: number } | null;
+  /** So cartao: a fatura (`YYYY-MM` do vencimento) em que a linha cai. */
+  statementMonth: string | null;
+  payee: {
+    /** Chave estavel: `doc:<digitos>`, `name:<normalizado>` ou `raw:<normalizado>`. */
+    key: string;
+    display: string;
+    document: string | null;
+  };
+  /** O que o popup abre preenchido: regra do destinatario ou deducao do descritor. */
+  suggestion: {
+    kind: "expense" | "income";
+    categoryId: number | null;
+    placeName: string | null;
+    description: string | null;
+    personId: number | null;
+  };
+  rule: { id: number; mode: RuleMode; ignore: boolean } | null;
+  duplicate: {
+    entryId: number;
+    reason: MatchReason;
+    date: string;
+    amountCents: number;
+    description: string | null;
+    placeName: string | null;
+    categoryName: string | null;
+    reconciled: boolean;
+  } | null;
+  entryId: number | null;
+  /** Pulada sozinha: a mesma linha foi pulada (ou teve o lancamento apagado) antes. */
+  skippedBefore: boolean;
+};
+
+export type ImportBatchView = {
+  batch: ImportBatch & { accountName: string; statementKind: StatementKind };
+  /** Mesmo arquivo ja enviado antes: so aviso, nunca bloqueio. */
+  previousImportAt: string | null;
+  rows: ImportRowView[];
+  counts: {
+    review: number;
+    ready: number;
+    duplicate: number;
+    ignored: number;
+    committed: number;
+  };
+};
+
+export type ImportBatchSummary = ImportBatch & {
+  accountName: string;
+  pendingCount: number;
+};

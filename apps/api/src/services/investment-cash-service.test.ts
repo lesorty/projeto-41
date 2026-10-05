@@ -380,3 +380,21 @@ describe("toLedgerCents", () => {
     expect(toLedgerCents(db, { ...BUY, total: 10.005 }).cents).toBe(1001);
   });
 });
+
+describe("edicao de operacao em dolar", () => {
+  // O débito no banco foi feito na cotação do dia da compra. Editar a nota ou
+  // a quantidade semanas depois não pode refazer a conta com o dólar de hoje.
+  it("mantem o valor em reais quando o dinheiro da operacao nao mudou", () => {
+    setUsd(5);
+    const usdBuy = { ...BUY, total: 100, currency: "USD" as const, accountId: checking };
+    const { id } = registerOperation(db, usdBuy);
+    expect(balanceOf(checking)).toBe(1_000_00 - 500_00);
+
+    setUsd(6);
+    updateOperation(db, id, { ...usdBuy, quantity: 0.02, notes: "conferido" });
+    expect(balanceOf(checking)).toBe(1_000_00 - 500_00);
+
+    updateOperation(db, id, { ...usdBuy, total: 50 });
+    expect(balanceOf(checking)).toBe(1_000_00 - 300_00);
+  });
+});

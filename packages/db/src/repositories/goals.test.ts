@@ -39,10 +39,9 @@ describe("criacao", () => {
     ).toBe("goal");
   });
 
-  it("recusa rendimento em caixinha de marcacao", () => {
-    expect(() =>
-      createGoal({ mode: "earmark", accountId: checking, cdiPercent: 110 })
-    ).toThrow(/conta propria/i);
+  it("aceita rendimento em caixinha de marcacao", () => {
+    const id = createGoal({ mode: "earmark", accountId: checking, cdiPercent: 110 });
+    expect(ledger.goals.get(id)?.cdiPercent).toBe(110);
   });
 
   it("modo marcacao nao cria conta nenhuma", () => {
@@ -243,6 +242,32 @@ describe("rendimento", () => {
     expect(again.entryId).toBeNull();
   });
 
+  it("marcacao rende separando, sem lancar entrada na conta marcada", () => {
+    const id = createGoal({ mode: "earmark", accountId: checking, cdiPercent: 100 });
+    const entryId = ledger.entries.create({
+      accountId: checking,
+      date: "2026-09-16",
+      amountCents: 500_000,
+      kind: "income"
+    });
+    ledger.goals.allocate(id, entryId, 500_000);
+    const checkingBefore = ledger.balances.forAccount(checking, { asOf: "2026-09-18" })?.currentBalanceCents;
+
+    const first = ledger.goals.accrue(id, "2026-09-18");
+    expect(first.cents).toBeGreaterThan(0);
+    // Quem paga o CDI é o banco: a conta não ganha uma entrada inventada.
+    expect(first.entryId).toBeNull();
+    expect(ledger.balances.forAccount(checking, { asOf: "2026-09-18" })?.currentBalanceCents).toBe(
+      checkingBefore
+    );
+    const progress = ledger.goals.progress(id, "2026-09-18");
+    expect(progress.balanceCents).toBe(500_000 + first.cents);
+    expect(progress.yieldCents).toBe(first.cents);
+    expect(progress.contributedCents).toBe(500_000);
+
+    expect(ledger.goals.accrue(id, "2026-09-18").cents).toBe(0);
+  });
+
   it("caixinha sem cdi_percent nao rende nada", () => {
     const id = createGoal();
     ledger.goals.deposit(id, {
@@ -263,11 +288,18 @@ describe("progresso", () => {
       fromAccountId: checking
     });
 
+    // Antes de apurar, o rendimento é só o que falta: nada no saldo ainda.
+    const before = ledger.goals.progress(id, "2026-09-18");
+    expect(before.balanceCents).toBe(1_000_000);
+    expect(before.realizedYieldCents).toBe(0);
+    expect(before.projectedYieldCents).toBeGreaterThan(0);
+
+    const { cents } = ledger.goals.accrue(id, "2026-09-18");
     const progress = ledger.goals.progress(id, "2026-09-18");
-    expect(progress.balanceCents).toBe(1_000_000);
-    expect(progress.targetRatioPerMille).toBe(200);
-    expect(progress.remainingCents).toBe(4_000_000);
-    expect(progress.realizedYieldCents).toBeGreaterThan(0);
+    expect(progress.balanceCents).toBe(1_000_000 + cents);
+    expect(progress.contributedCents).toBe(1_000_000);
+    expect(progress.yieldCents).toBe(cents);
+    expect(progress.targetRatioPerMille).toBe(Math.floor(((1_000_000 + cents) / 5_000_000) * 1000));
     // Aporte novo: o IOF ainda incide, e a data em que ele zera é informada.
     expect(progress.iofCents).toBeGreaterThan(0);
     expect(progress.iofFreeFrom).toBe("2026-10-16");
@@ -296,5 +328,58 @@ describe("exclusao", () => {
     });
     expect(ledger.goals.remove(used)).toEqual({ removed: false });
     expect(ledger.goals.get(used)?.archived).toBe(true);
+  });
+});
+
+describe("guiada pelo que entrou e pelo rendimento", () => {
+  it("apurar em dois dias seguidos nao conta o mesmo dia duas vezes", () => {
+    const once = createGoal({ name: "Uma vez", cdiPercent: 100 });
+    const twice = createGoal({ name: "Duas vezes", cdiPercent: 100 });
+    for (const id of [once, twice]) {
+      ledger.goals.deposit(id, { amountCents: 1_000_000, date: "2026-09-01", fromAccountId: checking });
+    }
+    ledger.goals.accrue(once, "2026-09-16");
+    ledger.goals.accrue(twice, "2026-09-10");
+    ledger.goals.accrue(twice, "2026-09-16");
+    const a = ledger.goals.progress(once, "2026-09-16").yieldCents;
+    const b = ledger.goals.progress(twice, "2026-09-16").yieldCents;
+    // Duas apurações compõem o rendimento da primeira: no máximo um centavo a mais.
+    expect(Math.abs(a - b)).toBeLessThanOrEqual(1);
+  });
+
+  it("corrigir o saldo fecha no valor real e o rendimento segue dele", () => {
+    const id = createGoal({ cdiPercent: 100 });
+    ledger.goals.deposit(id, { amountCents: 1_000_000, date: "2026-09-01", fromAccountId: checking });
+    ledger.goals.accrue(id, "2026-09-16");
+
+    const corrected = ledger.goals.correct(id, { date: "2026-09-10", valueCents: 1_234_500 }, "2026-09-10");
+    expect(corrected.balanceCents).toBe(1_234_500);
+    expect(corrected.contributedCents).toBe(1_000_000);
+
+    ledger.goals.accrue(id, "2026-09-16");
+    expect(ledger.goals.progress(id, "2026-09-16").balanceCents).toBeGreaterThan(1_234_500);
+  });
+
+  it("deposito com data anterior lancado depois refaz o rendimento e a correcao", () => {
+    const id = createGoal({ cdiPercent: 100 });
+    ledger.goals.deposit(id, { amountCents: 1_000_000, date: "2026-09-01", fromAccountId: checking });
+    ledger.goals.correct(id, { date: "2026-09-10", valueCents: 1_234_500 }, "2026-09-10");
+    // O saldo real em 10/09 já incluía este depósito: não pode contar de novo.
+    ledger.goals.deposit(id, { amountCents: 50_000, date: "2026-09-05", fromAccountId: checking });
+    ledger.goals.accrue(id, "2026-09-10");
+    expect(ledger.goals.progress(id, "2026-09-10").balanceCents).toBe(1_234_500);
+  });
+
+  it("marcacao corrigida passa a separar o valor real", () => {
+    const entryId = ledger.entries.create({
+      accountId: checking,
+      date: "2026-09-01",
+      amountCents: 500_000,
+      kind: "income"
+    });
+    const id = createGoal({ mode: "earmark", accountId: checking });
+    ledger.goals.allocate(id, entryId, 100_000);
+    const corrected = ledger.goals.correct(id, { date: "2026-09-10", valueCents: 150_000 }, "2026-09-10");
+    expect(corrected.balanceCents).toBe(150_000);
   });
 });

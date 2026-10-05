@@ -175,9 +175,15 @@ describe("readCsv em outros bancos", () => {
   });
 
   it("explica qual linha esta errada em vez de gravar valor torto", () => {
-    const file = Buffer.from("Data,Descricao,Valor\n31/02/2026,X,abc\n", "utf8");
+    const file = Buffer.from("Data,Descricao,Valor\n28/02/2026,X,abc\n", "utf8");
     const shape = inspectCsv(file);
     expect(() => readCsv(file, shape.mapping)).toThrow(/Linha 1: valor/);
+  });
+
+  it("recusa data que nao existe no calendario", () => {
+    const file = Buffer.from("Data,Descricao,Valor\n31/02/2026,X,10\n", "utf8");
+    const shape = inspectCsv(file);
+    expect(() => readCsv(file, shape.mapping)).toThrow(/Linha 1/);
   });
 
   it("recusa mapeamento sem coluna de data dizendo o que falta", () => {

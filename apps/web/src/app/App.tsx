@@ -13,6 +13,7 @@ import { CategoriesPage } from "../pages/finance/Categories.js";
 import { FinanceDashboardPage } from "../pages/finance/FinanceDashboard.js";
 import { InvoicePage } from "../pages/finance/Invoice.js";
 import { GoalsPage } from "../pages/finance/Goals.js";
+import { ImportPage } from "../pages/finance/Import.js";
 import { NetWorthPage } from "../pages/finance/NetWorth.js";
 import { ReportsPage } from "../pages/finance/Reports.js";
 import { SpendingAllocationPage } from "../pages/finance/SpendingAllocation.js";
@@ -387,6 +388,7 @@ export function App() {
             {page === "reports" && <ReportsPage />}
             {page === "invoice" && <InvoicePage />}
             {page === "goals" && <GoalsPage />}
+            {page === "import" && <ImportPage />}
             {page === "networth" && (
               <NetWorthPage dashboard={dashboard} onChanged={loadDashboard} />
             )}

@@ -86,6 +86,30 @@ export type Dashboard = {
 export type OperationRecord = Operation & { id: number };
 export type ManualPositionRecord = ManualPosition & { id: number };
 /**
+ * Rendimento CDI de uma posição. O realizado já é lançado no extrato sozinho;
+ * aqui fica só o que ainda não virou linha: o realizado de hoje (raro, entre
+ * a publicação da taxa e a próxima leitura) e a projeção dos dias sem taxa.
+ */
+export type PositionYield = {
+  pendingYield: number;
+  realizedThroughDate: string | null;
+  projectedYield: number;
+  projectedThroughDate: string | null;
+};
+/** O extrato resumido: quanto entrou, quanto rendeu, quanto foi corrigido. */
+export type PositionHistory = {
+  /** Aportes menos resgates, movimentos e compras: o dinheiro que você pôs. */
+  contributed: number;
+  yieldTotal: number;
+  adjustTotal: number;
+  lastYieldDate: string | null;
+  lastAdjust: { date: string; value: number | null } | null;
+};
+export type PositionRecord = ManualPositionRecord & {
+  yield: PositionYield | null;
+  history: PositionHistory;
+};
+/**
  * Aporte no acompanhamento anual. `manual` é o digitado na tela de Aportes;
  * `ledger` vem do livro: dinheiro que saiu de uma conta para os investimentos
  * (positivo) ou voltou deles (resgate, negativo). O do livro não se apaga aqui

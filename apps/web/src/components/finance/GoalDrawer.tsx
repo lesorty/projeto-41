@@ -13,7 +13,7 @@ import { useToast } from "../../lib/toast.js";
 import { MoneyInput } from "../forms.js";
 
 /**
- * Os dois tipos lado a lado. A diferença decide onde o dinheiro está e se ele
+ * Os dois tipos lado a lado. A diferença decide onde o dinheiro está e como ele
  * rende, então cada cartão diz o que é, o que acontece e quando usar.
  */
 const GOAL_MODES: {
@@ -40,7 +40,7 @@ const GOAL_MODES: {
     what: "Uma etiqueta sobre parte do saldo de uma conta que já existe.",
     facts: [
       "Nada se move: o dinheiro continua na conta",
-      "Não rende",
+      "Pode render pelo CDI que a conta paga",
       "Separa, por exemplo, R$ 1.500 da Nubank para a viagem"
     ],
     when: "Use quando o dinheiro fica na conta corrente e você só quer separá-lo."
@@ -86,7 +86,7 @@ export function GoalDrawer({
         color,
         targetAmountCents: target,
         targetDate: targetDate || null,
-        cdiPercent: mode === "account" && cdiPercent ? Number(cdiPercent) : null
+        cdiPercent: cdiPercent ? Number(cdiPercent) : null
       };
       if (editing) {
         await api(`/ledger/goals/${goal.id}`, { method: "PUT", body: JSON.stringify(body) });
@@ -220,22 +220,24 @@ export function GoalDrawer({
           </Field>
         </div>
 
-        {mode === "account" && (
-          <Field
-            label="Percentual do CDI"
-            hint="Vazio significa que a caixinha não rende."
-          >
-            <input
-              type="number"
-              min={1}
-              max={300}
-              step="1"
-              value={cdiPercent}
-              onChange={(event) => setCdiPercent(event.target.value)}
-              placeholder="Ex.: 110"
-            />
-          </Field>
-        )}
+        <Field
+          label="Percentual do CDI"
+          hint={
+            mode === "earmark"
+              ? "Quanto a conta paga sobre o valor separado. Vazio: não rende."
+              : "Vazio significa que a caixinha não rende."
+          }
+        >
+          <input
+            type="number"
+            min={1}
+            max={300}
+            step="1"
+            value={cdiPercent}
+            onChange={(event) => setCdiPercent(event.target.value)}
+            placeholder="Ex.: 110"
+          />
+        </Field>
 
         <ColorPicker value={color} onChange={setColor} />
       </form>

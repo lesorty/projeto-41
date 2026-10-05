@@ -71,7 +71,11 @@ export type PositionMovementKind =
   | "move_in"
   | "move_out"
   | "buy"
-  | "sell";
+  | "sell"
+  /** Rendimento CDI lançado pelo sistema. */
+  | "yield"
+  /** Correção do usuário: o valor real naquele dia. */
+  | "adjust";
 
 export type PositionMovementRow = {
   id: number;
@@ -214,16 +218,17 @@ export function createDatabase(path: string) {
         raw
           .prepare(
             `SELECT id, category, name, invested, current_value AS currentValue,
-             currency, notes FROM manual_positions ORDER BY category, id`
+             currency, notes, cdi_percent AS cdiPercent, cdi_since AS cdiSince FROM manual_positions ORDER BY category, id`
           )
           .all() as (ManualPosition & { id: number })[],
       upsert: (position: ManualPosition) => {
-        const values = { notes: null, ...position };
+        const values = { notes: null, cdiPercent: null, cdiSince: null, ...position };
         if (position.id) {
           raw
             .prepare(
               `UPDATE manual_positions SET category=@category, name=@name, invested=@invested,
-               current_value=@currentValue, currency=@currency, notes=@notes WHERE id=@id`
+               current_value=@currentValue, currency=@currency, notes=@notes,
+               cdi_percent=@cdiPercent, cdi_since=@cdiSince WHERE id=@id`
             )
             .run(values);
           return position.id;
@@ -231,8 +236,9 @@ export function createDatabase(path: string) {
         const result = raw
           .prepare(
             `INSERT INTO manual_positions
-             (category, name, invested, current_value, currency, notes)
-             VALUES (@category, @name, @invested, @currentValue, @currency, @notes)`
+             (category, name, invested, current_value, currency, notes, cdi_percent, cdi_since)
+             VALUES (@category, @name, @invested, @currentValue, @currency, @notes, @cdiPercent,
+                     @cdiSince)`
           )
           .run(values);
         return Number(result.lastInsertRowid);
@@ -243,9 +249,12 @@ export function createDatabase(path: string) {
         raw
           .prepare(
             `SELECT id, category, name, invested, current_value AS currentValue,
-             currency, notes FROM manual_positions WHERE id = ?`
+             currency, notes, cdi_percent AS cdiPercent, cdi_since AS cdiSince FROM manual_positions WHERE id = ?`
           )
           .get(id) as (ManualPosition & { id: number }) | undefined,
+      /** Rendimento incorporado: o valor novo passa a render a partir de `since`. */
+      setCdiSince: (id: number, since: string) =>
+        raw.prepare("UPDATE manual_positions SET cdi_since = ? WHERE id = ?").run(since, id).changes,
       /** Soma ao valor atual e ao investido: é assim que um movimento mexe na posição. */
       applyDelta: (id: number, amount: number, investedDelta: number) =>
         raw

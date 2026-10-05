@@ -63,6 +63,12 @@ export function GoalCard({
 
       <div className="fin-goal-value">
         <AnimatedNumber value={goal.balanceCents / 100} format={(v) => moneyFromCents(v * 100)} />
+        {/* O saldo é calculado: o que entrou mais o que rendeu. */}
+        <small className="fin-muted">
+          você colocou {moneyFromCents(goal.contributedCents)}
+          {yields && goal.yieldCents !== 0 && ` · rendeu ${moneyFromCents(goal.yieldCents)}`}
+          {goal.correctionCents !== 0 && ` · correções ${moneyFromCents(goal.correctionCents)}`}
+        </small>
         {yields && (
           <small className="fin-muted">
             líquido se sacar hoje {moneyFromCents(goal.netCents)}
@@ -104,11 +110,11 @@ export function GoalCard({
       {yields && (
         <dl className="fin-goal-yield">
           <div>
-            <dt>Rendimento</dt>
+            <dt>Rendimento no saldo</dt>
             <dd className="fin-positive">{moneyFromCents(goal.realizedYieldCents)}</dd>
           </div>
           <div>
-            <dt className="fin-muted">Projeção</dt>
+            <dt className="fin-muted">A entrar</dt>
             {/* Tom apagado e sufixo explícito: projeção nunca se confunde com
                 realizado, e nunca é somada a ele. */}
             <dd className="fin-muted">

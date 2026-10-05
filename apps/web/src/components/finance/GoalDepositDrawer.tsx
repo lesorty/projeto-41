@@ -11,7 +11,7 @@ import { moneyFromCents, todayIso } from "../../lib/format.js";
 import { useToast } from "../../lib/toast.js";
 import { MoneyInput } from "../forms.js";
 
-type Direction = "deposit" | "withdraw";
+type Direction = "deposit" | "withdraw" | "correct";
 
 
 export function GoalDepositDrawer({
@@ -43,6 +43,26 @@ export function GoalDepositDrawer({
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     const cents = parseCurrencyInput(amount);
+    if (direction === "correct") {
+      if (cents == null || cents < 0) {
+        toast.notify("Informe o saldo real", "error");
+        return;
+      }
+      setSaving(true);
+      try {
+        await api(`/ledger/goals/${goal.id}/correct`, {
+          method: "POST",
+          body: JSON.stringify({ date, valueCents: cents })
+        });
+        toast.notify("Saldo corrigido: o rendimento foi refeito a partir dele");
+        await onDone();
+      } catch (error) {
+        toast.notify(error instanceof Error ? error.message : "Falha ao salvar", "error");
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
     if (cents == null || cents <= 0) {
       toast.notify("Informe um valor válido", "error");
       return;
@@ -104,6 +124,28 @@ export function GoalDepositDrawer({
         </>
       }
     >
+      <dl className="position-summary">
+        <div>
+          <dt>Você colocou</dt>
+          <dd>{moneyFromCents(goal.contributedCents)}</dd>
+        </div>
+        {goal.cdiPercent != null && (
+          <div>
+            <dt>Rendeu</dt>
+            <dd className="positive-text">{moneyFromCents(goal.yieldCents)}</dd>
+          </div>
+        )}
+        {goal.correctionCents !== 0 && (
+          <div title="Diferença entre o calculado e o saldo real que você informou">
+            <dt>Correções</dt>
+            <dd>{moneyFromCents(goal.correctionCents)}</dd>
+          </div>
+        )}
+        <div className="position-summary-total">
+          <dt>Saldo hoje</dt>
+          <dd>{moneyFromCents(goal.balanceCents)}</dd>
+        </div>
+      </dl>
       <form id="goal-move" className="stack" onSubmit={submit}>
         <Segmented<Direction>
           value={direction}
@@ -112,16 +154,25 @@ export function GoalDepositDrawer({
             earmark
               ? [
                   { value: "deposit", label: "Separar" },
-                  { value: "withdraw", label: "Liberar" }
+                  { value: "withdraw", label: "Liberar" },
+                  { value: "correct", label: "Corrigir saldo" }
                 ]
               : [
                   { value: "deposit", label: "Depositar" },
-                  { value: "withdraw", label: "Sacar" }
+                  { value: "withdraw", label: "Sacar" },
+                  { value: "correct", label: "Corrigir saldo" }
                 ]
           }
         />
 
-        {earmark && (
+        {direction === "correct" && (
+          <p className="fin-muted">
+            O saldo que o banco mostrava para esta caixinha no fim de um dia. O sistema passa a
+            calcular a partir dele: o rendimento depois desse dia é refeito.
+          </p>
+        )}
+
+        {earmark && direction !== "correct" && (
           <p className="fin-muted">
             {direction === "deposit"
               ? `Separa parte do saldo de ${goal.accountName ?? "conta"} para esta caixinha. O dinheiro continua na conta.`
@@ -130,7 +181,7 @@ export function GoalDepositDrawer({
         )}
 
         <div className="field-row">
-          <Field label="Valor">
+          <Field label={direction === "correct" ? "Saldo real" : "Valor"}>
             <MoneyInput
               value={amount}
               onChange={setAmount}
@@ -139,14 +190,14 @@ export function GoalDepositDrawer({
               placeholder="0,00"
             />
           </Field>
-          {!earmark && (
-            <Field label="Data">
+          {(!earmark || direction === "correct") && (
+            <Field label={direction === "correct" ? "No fim do dia" : "Data"}>
               <DateField value={date} onChange={setDate} />
             </Field>
           )}
         </div>
 
-        {!earmark && (
+        {!earmark && direction !== "correct" && (
           <Field label={direction === "deposit" ? "Sai da conta" : "Volta para a conta"}>
             <AccountSelect
               value={accountId}
@@ -169,7 +220,7 @@ export function GoalDepositDrawer({
           </div>
         )}
 
-        {!earmark && (
+        {!earmark && direction !== "correct" && (
           <Field label="Descrição" hint="Opcional">
             <input
               value={description}

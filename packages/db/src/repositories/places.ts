@@ -1,6 +1,6 @@
 import type { PlaceDraft, PlaceRecord } from "@projeto41/contracts";
 import { normalizeName } from "@projeto41/finance";
-import { countReferencing, notFound, nowIso, type Db } from "./shared.js";
+import { countBlockingReferences, notFound, nowIso, type Db } from "./shared.js";
 
 const SELECT = `
   SELECT id, name, normalized_name AS normalizedName,
@@ -25,8 +25,7 @@ export function createPlacesRepository(db: Db) {
 
     getByName: (name: string): PlaceRecord | undefined =>
       db.prepare(`${SELECT} WHERE normalized_name = ?`).get(normalizeName(name)) as
-        | PlaceRecord
-        | undefined,
+        PlaceRecord | undefined,
 
     create: (place: PlaceDraft): number => {
       const normalized = normalizeName(place.name);
@@ -55,7 +54,10 @@ export function createPlacesRepository(db: Db) {
     findOrCreate: (name: string, defaultCategoryId?: number | null): number => {
       const existing = repository.getByName(name);
       if (existing) return existing.id;
-      return repository.create({ name: name.trim(), defaultCategoryId: defaultCategoryId ?? null });
+      return repository.create({
+        name: name.trim(),
+        defaultCategoryId: defaultCategoryId ?? null
+      });
     },
 
     update: (id: number, place: PlaceDraft): number => {
@@ -77,7 +79,7 @@ export function createPlacesRepository(db: Db) {
 
     /** Local em uso nao e removido: ele e a ponte com o historico e a importacao. */
     remove: (id: number): number => {
-      const used = countReferencing(db, "SELECT COUNT(*) AS n FROM entries WHERE place_id = ?", id);
+      const used = countBlockingReferences(db, "places", id);
       if (used > 0) return 0;
       const changes = db.prepare("DELETE FROM places WHERE id = ?").run(id).changes;
       if (changes === 0) throw notFound("Local");

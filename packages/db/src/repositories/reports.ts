@@ -42,7 +42,10 @@ export function createReportsRepository(db: Db) {
              c.color,
              c.monthly_budget_cents AS monthlyBudgetCents,
              c.budget_share_per_mille AS budgetSharePerMille,
-             -SUM(e.amount_cents) AS totalCents
+             -- Saída é negativa no livro e entrada positiva: o total sai sempre
+             -- positivo, ou o relatório de entradas viria todo negativo.
+             CASE WHEN @kind = 'income' THEN SUM(e.amount_cents) ELSE -SUM(e.amount_cents) END
+               AS totalCents
            FROM entries e
            LEFT JOIN categories c ON c.id = e.category_id
            WHERE e.kind = @kind AND e.date >= @from AND e.date <= @to
@@ -64,6 +67,27 @@ export function createReportsRepository(db: Db) {
            WHERE date >= @from AND date <= @to`
         )
         .get(range) as { incomeCents: number; expenseCents: number; netCents: number },
+
+    /** O mesmo `monthSummary`, separado por conta. Conta sem lancamento nao vem. */
+    monthSummaryByAccount: (range: PeriodRange) =>
+      db
+        .prepare(
+          `SELECT
+             account_id AS accountId,
+             COALESCE(SUM(CASE WHEN kind = 'income' THEN amount_cents END), 0) AS incomeCents,
+             COALESCE(SUM(CASE WHEN kind = 'expense' THEN amount_cents END), 0) AS expenseCents,
+             COALESCE(SUM(CASE WHEN kind IN ('income','expense') THEN amount_cents END), 0)
+               AS netCents
+           FROM entries
+           WHERE date >= @from AND date <= @to
+           GROUP BY account_id`
+        )
+        .all(range) as {
+        accountId: number;
+        incomeCents: number;
+        expenseCents: number;
+        netCents: number;
+      }[],
 
     /**
      * Serie mensal por categoria.

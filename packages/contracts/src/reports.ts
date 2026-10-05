@@ -171,7 +171,11 @@ export type CategoryTrend = {
 export type LedgerSummary = {
   period: string;
   /** Saldo e fatura, lado a lado e nunca somados: um e dinheiro, o outro divida. */
-  consolidated: { currentCents: number; cardStatementCents: number };
+  /**
+   * `currentCents` e o saldo livre: ja desconta o que esta separado nas
+   * caixinhas de marcacao, que vem a parte em `earmarkedCents`.
+   */
+  consolidated: { currentCents: number; earmarkedCents: number; cardStatementCents: number };
   accounts: {
     id: number;
     name: string;
@@ -179,7 +183,19 @@ export type LedgerSummary = {
     kind: string;
     personId: number | null;
     personName: string | null;
+    /** Saldo livre: o saldo da conta menos o que esta marcado em caixinhas. */
     currentBalanceCents: number;
+    /** Separado em caixinhas de marcacao nesta conta. */
+    earmarkedCents: number;
+    /** Conta que paga a fatura, para o Painel mostrar o cartao junto dela. */
+    paymentAccountId: number | null;
+    /**
+     * So cartao: a fatura corrente, no ciclo do proprio cartao. Valor positivo
+     * e divida. `null` quando o cartao nao tem fechamento e vencimento.
+     */
+    statement: { amountCents: number; closingDate: string; dueDate: string } | null;
+    /** Entradas, saidas e liquido da conta no periodo pedido, mesma regra de `month`. */
+    flows: { incomeCents: number; expenseCents: number; netCents: number };
   }[];
   month: { incomeCents: number; expenseCents: number; netCents: number };
   previousMonth: { incomeCents: number; expenseCents: number; netCents: number };

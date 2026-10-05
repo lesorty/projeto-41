@@ -5,7 +5,7 @@ import { DateField } from "../datepicker.js";
 import { Drawer } from "../dialog.js";
 import { Button, Field } from "../ui.js";
 import { api } from "../../lib/api.js";
-import { moneyFromCents } from "../../lib/format.js";
+import { moneyFromCents, todayIso } from "../../lib/format.js";
 import { useToast } from "../../lib/toast.js";
 
 /**
@@ -36,7 +36,14 @@ export function InvoicePaymentDrawer({
   const [fromAccountId, setFromAccountId] = useState<number | null>(
     card.paymentAccountId ?? accounts.find((account) => account.kind !== "credit_card")?.id ?? null
   );
-  const [date, setDate] = useState(dueDate);
+  // O padrão é hoje: quem registra o pagamento quase sempre acabou de pagar.
+  // Abrir no vencimento lançava o débito no futuro, e o saldo da conta ficava
+  // acima do banco até lá. Registro atrasado (depois do vencimento) usa o
+  // vencimento, que é quando o banco debitou.
+  const [date, setDate] = useState(() => {
+    const today = todayIso();
+    return today <= dueDate ? today : dueDate;
+  });
   const [saving, setSaving] = useState(false);
 
   // Uma fatura não se paga com outro cartão.
@@ -95,7 +102,10 @@ export function InvoicePaymentDrawer({
             ))}
           </select>
         </Field>
-        <Field label="Data do pagamento">
+        <Field
+          label="Data do pagamento"
+          hint={`O dia em que o dinheiro saiu da conta. Débito automático: use o vencimento, ${dueDate.split("-").reverse().join("/")}.`}
+        >
           <DateField value={date} onChange={setDate} />
         </Field>
         <p className="fin-muted">
