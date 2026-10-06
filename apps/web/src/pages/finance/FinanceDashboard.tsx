@@ -87,7 +87,7 @@ export function FinanceDashboardPage({ onNavigate }: { onNavigate: FinanceNaviga
     if (!summary) return [];
     const groups = new Map<string, LedgerSummary["accounts"]>();
     // A conta-ponte dos investimentos só soma o que foi aportado, não o valor
-    // da carteira, e já fica fora do saldo acima: aqui ela só confundiria.
+    // da carteira: aqui ela só confundiria.
     for (const account of summary.accounts.filter((item) => item.kind !== "investment")) {
       const key = account.personName ?? "Sem pessoa";
       groups.set(key, [...(groups.get(key) ?? []), account]);
@@ -147,7 +147,7 @@ export function FinanceDashboardPage({ onNavigate }: { onNavigate: FinanceNaviga
             {/* Saldo e fatura lado a lado, nunca somados: um é dinheiro que
                 existe, o outro é dívida que vai sair dele. O sistema não
                 projeta entradas e saídas futuras. */}
-            <Panel title="Saldo" subtitle="Hoje, livre nas contas do patrimônio">
+            <Panel title="Saldo" subtitle="Hoje, nas contas do patrimônio">
               <strong className={summary.consolidated.currentCents < 0 ? "fin-negative" : ""}>
                 <AnimatedNumber
                   value={summary.consolidated.currentCents / 100}
@@ -156,7 +156,7 @@ export function FinanceDashboardPage({ onNavigate }: { onNavigate: FinanceNaviga
               </strong>
             </Panel>
             {/* Total guardado em todas as caixinhas, hoje. A parte marcada
-                dentro das contas já está fora do saldo ao lado. */}
+                dentro das contas já está dentro do saldo ao lado. */}
             <Panel
               title={
                 <span className="fin-inline">
@@ -166,7 +166,7 @@ export function FinanceDashboardPage({ onNavigate }: { onNavigate: FinanceNaviga
               }
               subtitle={
                 summary.consolidated.earmarkedCents !== 0
-                  ? `${moneyFromCents(summary.consolidated.earmarkedCents)} separados nas contas`
+                  ? `${moneyFromCents(summary.consolidated.earmarkedCents)} dentro do saldo das contas`
                   : "Total guardado nas caixinhas"
               }
             >

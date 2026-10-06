@@ -172,8 +172,8 @@ export type LedgerSummary = {
   period: string;
   /** Saldo e fatura, lado a lado e nunca somados: um e dinheiro, o outro divida. */
   /**
-   * `currentCents` e o saldo livre: ja desconta o que esta separado nas
-   * caixinhas de marcacao, que vem a parte em `earmarkedCents`.
+   * `currentCents` e o saldo das contas, inteiro. `earmarkedCents` e quanto
+   * dele esta separado em caixinhas de marcacao: ja esta dentro, nao se soma.
    */
   consolidated: { currentCents: number; earmarkedCents: number; cardStatementCents: number };
   accounts: {
@@ -183,9 +183,9 @@ export type LedgerSummary = {
     kind: string;
     personId: number | null;
     personName: string | null;
-    /** Saldo livre: o saldo da conta menos o que esta marcado em caixinhas. */
+    /** Saldo da conta, inteiro: o que o banco mostra, caixinhas incluidas. */
     currentBalanceCents: number;
-    /** Separado em caixinhas de marcacao nesta conta. */
+    /** Quanto do saldo esta separado em caixinhas de marcacao (ja incluido nele). */
     earmarkedCents: number;
     /** Conta que paga a fatura, para o Painel mostrar o cartao junto dela. */
     paymentAccountId: number | null;

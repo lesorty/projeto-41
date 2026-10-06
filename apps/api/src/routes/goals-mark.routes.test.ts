@@ -49,6 +49,20 @@ afterEach(async () => {
   await app.close();
 });
 
+describe("saldo mostrado com dinheiro em caixinha", () => {
+  it("é o da conta inteira: o separado já está dentro, não sai do saldo", async () => {
+    expect((await post(`/api/ledger/goals/${goal}/mark`, { amountCents: 300_00 })).statusCode).toBe(200);
+
+    const summary = await app.inject("/api/ledger/summary").then((r) => r.json());
+    const account = summary.accounts.find((a: { id: number }) => a.id === checking);
+    // R$ 1.000 na conta, R$ 300 separados: o saldo continua R$ 1.000.
+    expect(account.currentBalanceCents).toBe(1000_00);
+    expect(account.earmarkedCents).toBe(300_00);
+    expect(summary.consolidated.currentCents).toBe(1000_00);
+    expect(summary.consolidated.earmarkedCents).toBe(300_00);
+  });
+});
+
 describe("POST /api/ledger/goals/:id/mark", () => {
   it("separa e libera parte do saldo sem escolher lançamento", async () => {
     expect((await post(`/api/ledger/goals/${goal}/mark`, { amountCents: 300_00 })).statusCode).toBe(200);

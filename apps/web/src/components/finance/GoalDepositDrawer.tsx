@@ -176,7 +176,7 @@ export function GoalDepositDrawer({
           <p className="fin-muted">
             {direction === "deposit"
               ? `Separa parte do saldo de ${goal.accountName ?? "conta"} para esta caixinha. O dinheiro continua na conta.`
-              : `Devolve parte do que está separado ao saldo livre de ${goal.accountName ?? "conta"}.`}
+              : `Libera parte do que está separado em ${goal.accountName ?? "conta"}.`}
           </p>
         )}
 

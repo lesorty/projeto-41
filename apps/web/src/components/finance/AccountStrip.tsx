@@ -129,8 +129,8 @@ function Flows({
           );
         })
       )}
-      <div className="fin-strip-flows-earmark" title="Separado em caixinhas, fora do saldo acima">
-        <dt>Caixinhas</dt>
+      <div className="fin-strip-flows-earmark" title="Parte do saldo acima que está separada em caixinhas">
+        <dt>Em caixinhas</dt>
         <dd>{moneyFromCents(earmarkedCents)}</dd>
       </div>
     </dl>

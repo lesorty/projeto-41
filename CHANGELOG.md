@@ -46,6 +46,9 @@ um novo `[Unreleased]` vazio no topo.
 
 ### Changed
 
+- O saldo das contas (faixa de contas e Painel) é o saldo inteiro, o que o banco
+  mostra: o dinheiro separado em caixinhas continua dentro dele e aparece à
+  parte como "Em caixinhas", em vez de ser descontado do saldo.
 - Contas e pessoas, em Finanças, não mostra mais a conta "Investimentos": o
   módulo de finanças não precisa saber quanto foi aportado.
 - Migrações agora são versionadas, com transação por versão e suporte a
