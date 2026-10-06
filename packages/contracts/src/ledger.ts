@@ -311,11 +311,6 @@ export type AccountRecord = Account & {
   id: number;
   personName: string | null;
   currentBalanceCents: number;
-  /**
-   * Quanto do saldo esta separado em caixinhas de marcacao. O saldo acima
-   * continua bruto (inclui esse valor); o livre e a diferenca.
-   */
-  earmarkedCents?: number;
   /** So cartao: fatura do mes corrente e total devido (plano mestre 6.1). */
   currentStatementCents?: number;
   totalDueCents?: number;

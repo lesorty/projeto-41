@@ -330,16 +330,6 @@ export const registerLedgerRoutes: RoutePlugin = (app, { db, attachmentService }
         includeArchived: queryBoolean.optional()
       })
       .parse(request.query);
-    const result = ledger.balances.consolidated(query);
-    // O ajuste de saldo compara com o livre: o que está marcado em caixinha
-    // fica por cima do saldo que o usuário digita.
-    const earmarked = ledger.goals.earmarkedByAccount();
-    return {
-      ...result,
-      accounts: result.accounts.map((account) => ({
-        ...account,
-        earmarkedCents: earmarked.get(account.id) ?? 0
-      }))
-    };
+    return ledger.balances.consolidated(query);
   });
 };

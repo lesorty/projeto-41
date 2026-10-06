@@ -45,9 +45,6 @@ um novo `[Unreleased]` vazio no topo.
 
 ### Changed
 
-- O ajuste de saldo por "Saldo do banco" compara com o saldo **livre**: o
-  valor digitado é o que está solto na conta, e o que está separado em
-  caixinhas fica por cima, em vez de ser comido pelo ajuste.
 - Migrações agora são versionadas, com transação por versão e suporte a
   reconstrução de tabela para ampliar `CHECK`.
 - `apps/web` consome os tipos de `@projeto41/contracts`; `src/lib/types.ts`

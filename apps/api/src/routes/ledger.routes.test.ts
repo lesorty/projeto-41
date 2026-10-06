@@ -84,7 +84,7 @@ describe("cadastros do livro", () => {
     expect(response.json().balances.consolidatedCents).toBe(150_00);
   });
 
-  it("saldos trazem o que esta marcado em caixinha, para o ajuste comparar com o livre", async () => {
+  it("o saldo da conta continua inteiro com dinheiro marcado em caixinha (base do ajuste de saldo)", async () => {
     await post("/api/ledger/entries", {
       accountId: checking,
       date: "2026-01-05",
@@ -97,10 +97,11 @@ describe("cadastros do livro", () => {
     ).json().id;
     expect((await post(`/api/ledger/goals/${goal}/mark`, { amountCents: 30_00 })).statusCode).toBe(200);
 
+    // O ajuste compara o que o usuário digita com este número: marcar em
+    // caixinha não tira dinheiro da conta, então não pode tirar do saldo.
     const balances = await app.inject("/api/ledger/balances").then((r) => r.json());
     const nubank = balances.accounts.find((a: { id: number }) => a.id === checking);
     expect(nubank.currentBalanceCents).toBe(150_00);
-    expect(nubank.earmarkedCents).toBe(30_00);
   });
 
   it("exige ciclo ao criar cartao (D04)", async () => {
