@@ -111,8 +111,11 @@ export function AccountsPage({ onOpenCash }: { onOpenCash?: () => void }) {
    * quem falta configurar. Contas sem dona ficam num grupo no fim.
    */
   const groups = useMemo(() => {
+    // Caixinha e a ponte dos investimentos não são contas de quem usa o app:
+    // o módulo de finanças não precisa saber quanto foi aportado.
     const accounts = (balances?.accounts ?? []).filter(
-      (account) => account.kind !== "goal" && (showArchived || !account.archived)
+      (account) =>
+        account.kind !== "goal" && account.kind !== "investment" && (showArchived || !account.archived)
     );
     const visiblePeople = people.filter((person) => showArchived || person.active);
     const byPerson: { key: string; person: PersonRecord | null; accounts: AccountRecord[] }[] =
@@ -130,8 +133,9 @@ export function AccountsPage({ onOpenCash }: { onOpenCash?: () => void }) {
   }, [balances, people, showArchived]);
 
   const archivedCount =
-    (balances?.accounts ?? []).filter((account) => account.archived && account.kind !== "goal")
-      .length +
+    (balances?.accounts ?? []).filter(
+      (account) => account.archived && account.kind !== "goal" && account.kind !== "investment"
+    ).length +
     people.filter((person) => !person.active).length;
 
   async function restoreAccount(account: AccountRecord) {

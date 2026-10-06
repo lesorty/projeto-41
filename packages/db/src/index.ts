@@ -70,6 +70,68 @@ export type CryptoAsset = {
 
 export type AppDatabase = ReturnType<typeof createDatabase>;
 
+type InvestmentAccountRow = {
+  id: number;
+  name: string;
+  personId: number | null;
+  sortOrder: number;
+};
+
+/**
+ * Uma conta de investimento por pessoa individual ativa.
+ *
+ * Quem já tinha conta continua com ela: a ligação é por nome (foi assim que
+ * "Steylor" e "Bianca" nasceram) e, na falta de nome igual, a conta Principal
+ * de um banco antigo vira a da primeira pessoa. Pessoa nova ganha conta vazia
+ * com as metas de alocação da primeira. O nome da conta segue o da pessoa.
+ */
+function syncInvestmentAccounts(raw: Database.Database) {
+  const people = raw
+    .prepare("SELECT id, name FROM people WHERE kind = 'individual' AND active = 1 ORDER BY id")
+    .all() as { id: number; name: string }[];
+  if (people.length === 0) return;
+  const norm = (value: string) => value.trim().toLowerCase();
+
+  raw.transaction(() => {
+    const accounts = raw
+      .prepare("SELECT id, name, person_id AS personId FROM investment_accounts ORDER BY sort_order, id")
+      .all() as { id: number; name: string; personId: number | null }[];
+    const taken = new Set(accounts.filter((a) => a.personId != null).map((a) => a.id));
+    const update = raw.prepare("UPDATE investment_accounts SET person_id = ?, name = ? WHERE id = ?");
+
+    for (const person of people) {
+      let account = accounts.find((a) => a.personId === person.id);
+      account ??= accounts.find((a) => !taken.has(a.id) && norm(a.name) === norm(person.name));
+      account ??= accounts.find(
+        (a) => !taken.has(a.id) && a.id === PRINCIPAL_INVESTMENT_ACCOUNT && norm(a.name) === "principal"
+      );
+      if (account) {
+        taken.add(account.id);
+        if (account.personId !== person.id || account.name !== person.name) {
+          update.run(person.id, person.name, account.id);
+        }
+        continue;
+      }
+      const id = Number(
+        raw
+          .prepare(
+            `INSERT INTO investment_accounts(name, person_id, sort_order, created_at)
+             VALUES (?, ?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM investment_accounts), ?)`
+          )
+          .run(person.name, person.id, new Date().toISOString()).lastInsertRowid
+      );
+      raw
+        .prepare(
+          `INSERT INTO allocation_targets(investment_account_id, category, weight)
+           SELECT ?, category, weight FROM allocation_targets WHERE investment_account_id = ?`
+        )
+        .run(id, PRINCIPAL_INVESTMENT_ACCOUNT);
+      accounts.push({ id, name: person.name, personId: person.id });
+      taken.add(id);
+    }
+  })();
+}
+
 /** Escopo do histórico que soma todas as contas de investimento (migração 017). */
 const ALL_ACCOUNTS_SNAPSHOT = 0;
 
@@ -165,6 +227,7 @@ export function createDatabase(path: string) {
   // runner versionado (D26) cuida de tudo que veio depois da fase 0.
   migrate(raw);
   runMigrations(raw, migrations);
+  syncInvestmentAccounts(raw);
 
   return {
     raw,
@@ -173,39 +236,27 @@ export function createDatabase(path: string) {
     // Modulo de financas (centavos inteiros), separado das tabelas legadas de
     // investimento que seguem em REAL logo abaixo (D19).
     ledger: createLedgerRepositories(raw),
+    // As contas de investimento são as pessoas do módulo de finanças: a lista
+    // se acerta com elas, e ninguém cria conta à mão.
     investmentAccounts: {
+      /** Contas das pessoas ativas, mais as sem dona (a Principal de bancos antigos). */
       list: () =>
         raw
           .prepare(
-            `SELECT id, name, sort_order AS sortOrder FROM investment_accounts
-             ORDER BY sort_order, id`
+            `SELECT a.id, a.name, a.person_id AS personId, a.sort_order AS sortOrder
+             FROM investment_accounts a LEFT JOIN people p ON p.id = a.person_id
+             WHERE a.person_id IS NULL OR p.active = 1
+             ORDER BY a.sort_order, a.id`
           )
-          .all() as { id: number; name: string; sortOrder: number }[],
+          .all() as InvestmentAccountRow[],
       get: (id: number) =>
         raw
-          .prepare("SELECT id, name, sort_order AS sortOrder FROM investment_accounts WHERE id = ?")
-          .get(id) as { id: number; name: string; sortOrder: number } | undefined,
-      /** Conta nova começa vazia, com as metas de alocação da Principal. */
-      create: (name: string) =>
-        raw.transaction(() => {
-          const id = Number(
-            raw
-              .prepare(
-                `INSERT INTO investment_accounts(name, sort_order, created_at)
-                 VALUES (?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM investment_accounts), ?)`
-              )
-              .run(name, new Date().toISOString()).lastInsertRowid
-          );
-          raw
-            .prepare(
-              `INSERT INTO allocation_targets(investment_account_id, category, weight)
-               SELECT ?, category, weight FROM allocation_targets WHERE investment_account_id = ?`
-            )
-            .run(id, PRINCIPAL_INVESTMENT_ACCOUNT);
-          return id;
-        })(),
-      rename: (id: number, name: string) =>
-        raw.prepare("UPDATE investment_accounts SET name = ? WHERE id = ?").run(name, id).changes
+          .prepare(
+            `SELECT id, name, person_id AS personId, sort_order AS sortOrder
+             FROM investment_accounts WHERE id = ?`
+          )
+          .get(id) as InvestmentAccountRow | undefined,
+      sync: () => syncInvestmentAccounts(raw)
     },
     operations: {
       /**

@@ -30,12 +30,13 @@ um novo `[Unreleased]` vazio no topo.
     números separados (fatura atual e total devido), limite usado e disponível,
     parcelamento com plano persistido, estorno e antecipação de parcelas.
 - Backup do banco pela API `backup()` do SQLite, com botão visível no livro.
-- **Contas no módulo de investimentos**: seletor no menu lateral para escolher,
-  criar e renomear contas. Cada conta tem os próprios registros — operações,
-  caixas e renda fixa, aportes, proventos, metas de alocação, planejamento e
-  histórico. O que já existia ficou na conta "Principal", que continua
-  mostrando o patrimônio com as contas do banco; o Patrimônio do módulo de
-  finanças soma todas.
+- **Contas no módulo de investimentos**: uma por pessoa de Finanças (Steylor,
+  Bianca…), escolhida num seletor no menu lateral. Cada conta tem os próprios
+  registros — operações, caixas e renda fixa, aportes, proventos, metas de
+  alocação, planejamento e histórico. Pessoa nova ganha conta sozinha, e o
+  nome acompanha o da pessoa. O que já existia ficou na primeira conta, que
+  continua mostrando o patrimônio com as contas do banco; o Patrimônio do
+  módulo de finanças soma todas.
 - **Fatura**: clicar numa compra abre o lançamento para editar ali mesmo (e, nas
   parcelas, perguntar se vale só para ela, para ela e as futuras ou para todas);
   atalhos levam à compra nas Transações ou a todas as parcelas dela; e uma lista
@@ -45,6 +46,8 @@ um novo `[Unreleased]` vazio no topo.
 
 ### Changed
 
+- Contas e pessoas, em Finanças, não mostra mais a conta "Investimentos": o
+  módulo de finanças não precisa saber quanto foi aportado.
 - Migrações agora são versionadas, com transação por versão e suporte a
   reconstrução de tabela para ampliar `CHECK`.
 - `apps/web` consome os tipos de `@projeto41/contracts`; `src/lib/types.ts`

@@ -20,25 +20,47 @@ afterEach(async () => {
 
 const as = (account: number | "all") => ({ "x-investment-account": String(account) });
 
+/** A conta de investimento de uma pessoa do módulo de finanças, pelo nome. */
 async function createAccount(name: string): Promise<number> {
-  const response = await app.inject({ method: "POST", url: "/api/investment-accounts", payload: { name } });
-  expect(response.statusCode).toBe(201);
-  return response.json().id;
+  const list = await app.inject("/api/investment-accounts").then((r) => r.json());
+  return list.find((account: { name: string }) => account.name === name).id;
 }
 
 describe("contas de investimento", () => {
-  it("começa com a Principal e cria e renomeia contas", async () => {
-    expect(await app.inject("/api/investment-accounts").then((r) => r.json())).toEqual([
-      { id: 1, name: "Principal", sortOrder: 0 }
+  it("as contas são as pessoas de Finanças: a Principal vira a primeira, e cada pessoa ganha a sua", async () => {
+    const list = await app.inject("/api/investment-accounts").then((r) => r.json());
+    // Steylor e Bianca; o "Conjunto" não investe.
+    expect(list.map((a: { name: string; personId: number }) => [a.id, a.name, a.personId])).toEqual([
+      [1, "Steylor", 1],
+      [2, "Bianca", 2]
     ]);
-    const id = await createAccount("Bianca");
-    const renamed = await app.inject({
-      method: "PUT",
-      url: `/api/investment-accounts/${id}`,
-      payload: { name: "Bianca XP" }
+  });
+
+  it("acompanha as pessoas: renomear muda a conta, pessoa nova ganha uma e arquivada some", async () => {
+    await app.inject("/api/investment-accounts");
+    db.raw.prepare("UPDATE people SET name = 'Bia' WHERE id = 2").run();
+    db.raw
+      .prepare("INSERT INTO people(name, kind, color, active, created_at) VALUES ('Carol', 'individual', '#123456', 1, ?)")
+      .run(new Date().toISOString());
+    let list = await app.inject("/api/investment-accounts").then((r) => r.json());
+    expect(list.map((a: { id: number; name: string }) => [a.id, a.name])).toEqual([
+      [1, "Steylor"],
+      [2, "Bia"],
+      [3, "Carol"]
+    ]);
+
+    db.raw.prepare("UPDATE people SET active = 0 WHERE id = 2").run();
+    list = await app.inject("/api/investment-accounts").then((r) => r.json());
+    expect(list.map((a: { name: string }) => a.name)).toEqual(["Steylor", "Carol"]);
+  });
+
+  it("não há como criar conta de investimento à mão", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/investment-accounts",
+      payload: { name: "Outra" }
     });
-    expect(renamed.json()).toMatchObject({ id, name: "Bianca XP" });
-    expect((await app.inject("/api/investment-accounts").then((r) => r.json())).length).toBe(2);
+    expect(response.statusCode).toBe(404);
   });
 
   it("cada conta vê só as próprias posições, operações e aportes", async () => {

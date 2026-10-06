@@ -138,7 +138,10 @@ export function App() {
       chooseInvestmentAccount(PRINCIPAL_INVESTMENT_ACCOUNT);
     }
   }, [chooseInvestmentAccount]);
-  useEffect(() => void loadInvestmentAccounts().catch(() => undefined), [loadInvestmentAccounts]);
+  // Recarrega ao entrar no módulo: uma pessoa nova de Finanças já aparece.
+  useEffect(() => {
+    void loadInvestmentAccounts().catch(() => undefined);
+  }, [loadInvestmentAccounts, investing]);
 
   // O Patrimônio do módulo de finanças soma todas as contas de investimento;
   // as telas de investimento veem só a conta escolhida.
@@ -281,10 +284,6 @@ export function App() {
             accounts={investmentAccounts}
             value={investmentAccountId}
             onChange={chooseInvestmentAccount}
-            onSaved={(account, created) => {
-              void loadInvestmentAccounts();
-              if (created) chooseInvestmentAccount(account.id);
-            }}
           />
         )}
 

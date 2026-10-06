@@ -45,12 +45,13 @@ export const contributionSchema = z.object({
   notes: z.string().trim().optional()
 });
 
-/** Conta do módulo de investimentos: cada uma com os próprios registros. */
-export const investmentAccountSchema = z.object({
-  name: z.string().trim().min(1).max(60)
-});
-
-export type InvestmentAccount = { id: number; name: string; sortOrder: number };
+/** Conta do módulo de investimentos: uma por pessoa do módulo de finanças. */
+export type InvestmentAccount = {
+  id: number;
+  name: string;
+  personId: number | null;
+  sortOrder: number;
+};
 
 export type Operation = z.infer<typeof operationSchema>;
 export type ManualPosition = z.infer<typeof manualPositionSchema>;
