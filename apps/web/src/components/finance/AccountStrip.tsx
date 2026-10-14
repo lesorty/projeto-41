@@ -37,7 +37,7 @@ export function AccountStrip({ accounts }: { accounts: SummaryAccount[] }) {
           <strong className={account.currentBalanceCents < 0 ? "fin-negative" : ""}>
             {moneyFromCents(account.currentBalanceCents)}
           </strong>
-          <Flows flows={account.flows} earmarkedCents={account.earmarkedCents} cards={cardsOf(account.id)} />
+          <Flows flows={account.flows} goalsCents={account.goalsCents} cards={cardsOf(account.id)} />
         </div>
       ))}
       {orphans.map((card) => (
@@ -80,11 +80,11 @@ function CardLine({ card, standalone = false }: { card: SummaryAccount; standalo
  */
 function Flows({
   flows,
-  earmarkedCents,
+  goalsCents,
   cards
 }: {
   flows: SummaryAccount["flows"];
-  earmarkedCents: number;
+  goalsCents: number;
   cards: SummaryAccount[];
 }) {
   return (
@@ -129,9 +129,12 @@ function Flows({
           );
         })
       )}
-      <div className="fin-strip-flows-earmark" title="Parte do saldo acima que está separada em caixinhas">
+      <div
+        className="fin-strip-flows-earmark"
+        title="Guardado nas caixinhas atreladas a esta conta, fora do saldo acima"
+      >
         <dt>Em caixinhas</dt>
-        <dd>{moneyFromCents(earmarkedCents)}</dd>
+        <dd>{moneyFromCents(goalsCents)}</dd>
       </div>
     </dl>
   );

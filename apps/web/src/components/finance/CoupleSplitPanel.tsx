@@ -8,8 +8,8 @@ const percent = (perMille: number) => `${(perMille / 10).toFixed(1).replace(".",
  * quanto deposita na conjunta, quanto fica para gastar e o que sobra.
  *
  * `deposited` é o que já entrou na conjunta no período, por pessoa: as
- * transferências das contas de cada um e os depósitos diretos marcados com
- * "de quem veio". `null` enquanto carrega.
+ * transferências das contas de cada um para a conjunta. `null` enquanto
+ * carrega.
  */
 export function CoupleSplitPanel({
   split,
@@ -110,8 +110,9 @@ export function CoupleSplitPanel({
 
       {unattributedCents > 0 && (
         <p className="fin-muted">
-          {moneyFromCents(unattributedCents)} entraram na conjunta sem dizer de quem vieram. Abra
-          esses lançamentos no livro e escolha em "De quem veio".
+          {moneyFromCents(unattributedCents)} entraram na conjunta como entrada, sem uma
+          transferência da conta de quem depositou. Para contar como depósito de alguém, lance
+          como transferência da conta dessa pessoa.
         </p>
       )}
     </section>

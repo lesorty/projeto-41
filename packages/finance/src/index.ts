@@ -111,5 +111,6 @@ export * from "./business-days.js";
 export * from "./cdi.js";
 export * from "./taxes.js";
 export * from "./goals.js";
+export * from "./goal-profit.js";
 export * from "./anticipation.js";
 export * from "./couple-split.js";

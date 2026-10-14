@@ -69,6 +69,14 @@ export function percent(value: number) {
   return pctFmt.format(value || 0);
 }
 
+export function percentValue(value: number, digits = 2) {
+  const text = new Intl.NumberFormat("pt-BR", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits
+  }).format(value || 0);
+  return `${text}%`;
+}
+
 export function signedPercent(value: number) {
   const text = percent(value);
   return value > 0 ? `+${text}` : text;

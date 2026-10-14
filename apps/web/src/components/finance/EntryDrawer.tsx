@@ -1,4 +1,4 @@
-import { CreditCard, Save, Trash2, Undo2 } from "lucide-react";
+import { CreditCard, PiggyBank, Save, Trash2, Undo2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   AttachmentRecord,
@@ -41,10 +41,14 @@ import { useToast } from "../../lib/toast.js";
 
 /**
  * Tipos oferecidos no formulário. Aporte é uma transferência da conta para uma
- * posição de investimento: o saldo cai, mas não é gasto. Ajuste corrige o
- * saldo para bater com o banco, sem ser entrada nem saída nos relatórios.
+ * posição de investimento: o saldo cai, mas não é gasto. Caixinha guarda ou
+ * resgata dinheiro de uma caixinha, pela conta atrelada a ela. Ajuste corrige
+ * o saldo para bater com o banco, sem ser entrada nem saída nos relatórios.
  */
-type FormKind = "expense" | "income" | "transfer" | "investment" | "adjustment";
+type FormKind = "expense" | "income" | "transfer" | "investment" | "goal" | "adjustment";
+
+/** Guardar tira da conta atrelada; resgatar devolve para ela. */
+type GoalMove = "deposit" | "withdraw";
 
 /** Ajuste pelo saldo que o banco mostra (o sistema acha a diferença) ou pela diferença direto. */
 type AdjustMode = "balance" | "difference";
@@ -138,6 +142,14 @@ export function EntryDrawer({
   const [scopeAsk, setScopeAsk] = useState(false);
   const [positions, setPositions] = useState<ManualPositionRecord[] | null>(null);
   const [positionId, setPositionId] = useState<number | null>(null);
+  const goalOptions = useMemo(() => reference.goals.filter((goal) => !goal.archived), [reference.goals]);
+  const [goalId, setGoalId] = useState<number | null>(goalOptions[0]?.id ?? null);
+  const [goalMove, setGoalMove] = useState<GoalMove>("deposit");
+  const goal = goalOptions.find((item) => item.id === goalId) ?? null;
+  // A lista de caixinhas pode chegar depois do drawer abrir.
+  useEffect(() => {
+    if (goalId == null && goalOptions[0]) setGoalId(goalOptions[0].id);
+  }, [goalId, goalOptions]);
 
   // As posições só são buscadas quando o aporte é escolhido.
   useEffect(() => {
@@ -267,9 +279,8 @@ export function EntryDrawer({
 
   /**
    * Saldo da conta no fim do dia escolhido, sem este ajuste (na edição), para
-   * mostrar a diferença antes de gravar. É o saldo de verdade da conta, o que
-   * o banco mostra: o dinheiro marcado em caixinhas continua dentro dele, e o
-   * valor digitado vira o saldo da conta, não "o que sobra fora das caixinhas".
+   * mostrar a diferença antes de gravar. É o saldo da conta como o banco
+   * mostra: as caixinhas têm saldo próprio e ficam fora dele.
    */
   const [systemBalance, setSystemBalance] = useState<number | null>(null);
   useEffect(() => {
@@ -303,22 +314,16 @@ export function EntryDrawer({
     adjustByBalance && systemBalance != null && typedSigned != null
       ? typedSigned - systemBalance
       : null;
-  // Entrada direto na conjunta (salário, Pix de fora): a conta é do casal, e o
-  // formulário pergunta de quem veio, porque é isso que diz quanto cada um já
-  // depositou. "Conjunto" vale para o que é do casal e de ninguém em
-  // particular: rendimento da conta, reembolso, presente para os dois.
-  const accountOwner = reference.people.find((person) => person.id === account?.personId);
-  const jointDeposit = kind === "income" && accountOwner?.kind === "joint";
-  const depositorIds = new Set(
-    reference.people
-      .filter((person) => person.kind === "individual" || person.id === accountOwner?.id)
-      .map((person) => person.id)
-  );
-  const effectivePersonId = jointDeposit
-    ? personId != null && depositorIds.has(personId)
-      ? personId
-      : null
-    : (personId ?? account?.personId ?? null);
+  // Entrada só diz em que conta caiu: quem depositou na conjunta é uma
+  // transferência entre contas, e o dono da conta de origem é quem depositou.
+  // A pessoa da entrada é a dona da conta; uma entrada antiga que já tinha
+  // outra pessoa a mantém enquanto a conta não mudar.
+  const effectivePersonId =
+    kind === "income"
+      ? entry?.kind === "income" && entry.accountId === accountId
+        ? entry.personId
+        : (account?.personId ?? null)
+      : (personId ?? account?.personId ?? null);
   const isCard = account?.kind === "credit_card";
   const typedCents = Math.abs(parseCurrencyInput(amount) ?? 0);
   const totalCents =
@@ -381,8 +386,8 @@ export function EntryDrawer({
       toast.notify("Informe um valor válido", "error");
       return;
     }
-    if (jointDeposit && effectivePersonId == null) {
-      toast.notify("Diga de quem veio o dinheiro, ou escolha Conjunto se for do casal", "error");
+    if (kind === "goal") {
+      await persistGoalMove(Math.abs(cents));
       return;
     }
     if (accountId == null) {
@@ -522,6 +527,36 @@ export function EntryDrawer({
     }
   }
 
+  /**
+   * Guardar ou resgatar pela caixinha: a transferência sai da conta atrelada
+   * (ou volta para ela), e o extrato mostra para qual caixinha foi.
+   */
+  async function persistGoalMove(cents: number) {
+    if (!goal) {
+      toast.notify("Escolha a caixinha", "error");
+      return;
+    }
+    if (goal.parentAccountId == null) {
+      toast.notify("Atrele a caixinha a uma conta em Caixinhas › Editar", "error");
+      return;
+    }
+    setSaving(true);
+    try {
+      await api(`/ledger/goals/${goal.id}/${goalMove}`, {
+        method: "POST",
+        body: JSON.stringify({ amountCents: cents, date, description: description || null })
+      });
+      // Uma saída ou entrada que vira movimento de caixinha é substituída.
+      if (editing && entry) await ledgerApi.removeEntry(entry.id);
+      toast.notify(goalMove === "deposit" ? `Guardado em ${goal.name}` : `Resgatado de ${goal.name}`);
+      await onSaved();
+    } catch (error) {
+      toast.notify(error instanceof Error ? error.message : "Falha ao salvar", "error");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   /** Ajuste: um lançamento só, com o sinal da diferença, fora de entradas e saídas. */
   async function persistAdjustment() {
     if (accountId == null) {
@@ -628,7 +663,7 @@ export function EntryDrawer({
   return (
     <Drawer
       title={editing ? "Editar lançamento" : "Novo lançamento"}
-      subtitle={account?.name}
+      subtitle={kind === "goal" ? (goal?.parentAccountName ?? undefined) : account?.name}
       onClose={onClose}
       footer={
         <>
@@ -638,6 +673,7 @@ export function EntryDrawer({
             entry.kind !== "adjustment" &&
             entry.refundOfEntryId == null &&
             kind !== "investment" &&
+            kind !== "goal" &&
             kind !== "adjustment" && (
             <Button variant="ghost" icon={Undo2} onClick={() => setRefunding(true)}>
               Estornar
@@ -653,7 +689,15 @@ export function EntryDrawer({
           </Button>
           {!isInvestmentLeg && (
             <Button icon={Save} type="submit" form="entry-form" disabled={saving || uploading}>
-              {saving ? "Salvando…" : kind === "investment" ? "Aportar" : "Salvar"}
+              {saving
+                ? "Salvando…"
+                : kind === "investment"
+                  ? "Aportar"
+                  : kind === "goal"
+                    ? goalMove === "deposit"
+                      ? "Guardar"
+                      : "Resgatar"
+                    : "Salvar"}
             </Button>
           )}
         </>
@@ -672,7 +716,9 @@ export function EntryDrawer({
           </p>
         ) : isTransfer ? (
           <p className="fin-muted">
-            Transferência: as duas pontas mudam juntas. Para trocar as contas, exclua e crie de novo.
+            {entry?.goalName
+              ? `Movimento da caixinha ${entry.goalName}: as duas pontas mudam juntas. Para trocar a caixinha, exclua e lance de novo.`
+              : "Transferência: as duas pontas mudam juntas. Para trocar as contas, exclua e crie de novo."}
           </p>
         ) : (
           <Segmented<FormKind>
@@ -683,6 +729,7 @@ export function EntryDrawer({
               { value: "income", label: "Entrada" },
               { value: "transfer", label: "Transferência" },
               { value: "investment", label: "Aporte" },
+              { value: "goal", label: "Caixinha" },
               { value: "adjustment", label: "Ajuste" }
             ]}
           />
@@ -716,6 +763,39 @@ export function EntryDrawer({
             )}
           </>
         )}
+
+        {kind === "goal" &&
+          (goalOptions.length === 0 ? (
+            <p className="fin-callout">Nenhuma caixinha ainda. Crie uma na tela Caixinhas.</p>
+          ) : (
+            <div className="field-row">
+              <Field label="Caixinha">
+                <Dropdown<number>
+                  value={goalId}
+                  onChange={setGoalId}
+                  options={goalOptions.map((item) => ({
+                    value: item.id,
+                    label: item.name,
+                    color: item.color,
+                    icon: <PiggyBank size={14} aria-hidden />,
+                    hint: item.parentAccountName ?? "sem conta atrelada"
+                  }))}
+                  placeholder="Escolher caixinha"
+                  aria-label="Caixinha"
+                />
+              </Field>
+              <Field label="Movimento">
+                <Segmented<GoalMove>
+                  value={goalMove}
+                  onChange={setGoalMove}
+                  options={[
+                    { value: "deposit", label: "Guardar" },
+                    { value: "withdraw", label: "Resgatar" }
+                  ]}
+                />
+              </Field>
+            </div>
+          ))}
 
         {kind === "investment" && editing && (
           <p className="fin-muted">
@@ -752,6 +832,16 @@ export function EntryDrawer({
             <DateField value={date} onChange={setDate} />
           </Field>
         </div>
+
+        {kind === "goal" && goal && (
+          <p className="fin-callout">
+            {goal.parentAccountName == null
+              ? `${goal.name} ainda não tem conta atrelada: escolha uma em Caixinhas › Editar.`
+              : goalMove === "deposit"
+                ? `Sai do saldo de ${goal.parentAccountName} e entra na caixinha ${goal.name}. Não conta como gasto.`
+                : `Sai da caixinha ${goal.name} e volta para o saldo de ${goal.parentAccountName}.`}
+          </p>
+        )}
 
         {adjustByBalance && (
           <p className="fin-callout">
@@ -833,7 +923,7 @@ export function EntryDrawer({
               />
             )
           )
-        ) : kind === "adjustment" || (kind === "expense" && !isRefund) ? null : (
+        ) : kind === "adjustment" || kind === "goal" || (kind === "expense" && !isRefund) ? null : (
           <div className={kind === "transfer" || kind === "investment" ? "field-row" : ""}>
             <Field
               label={
@@ -893,7 +983,7 @@ export function EntryDrawer({
 
         {/* Transferência nunca tem categoria (D21); aporte é transferência, e
             ajuste não é gasto nem ganho. */}
-        {kind !== "transfer" && kind !== "investment" && kind !== "adjustment" && (
+        {kind !== "transfer" && kind !== "investment" && kind !== "goal" && kind !== "adjustment" && (
           <div className="field-row">
             <Field label="Categoria">
               <Dropdown<number>
@@ -927,15 +1017,17 @@ export function EntryDrawer({
         {/* O aporte se descreve sozinho ("Aporte · posição"): o resto é do gasto. */}
         {kind !== "investment" && (
         <>
-        <div className={reference.tags.length > 0 ? "field-row" : ""}>
+        <div className={reference.tags.length > 0 && kind !== "goal" ? "field-row" : ""}>
           <Field label="Descrição">
             <input
               value={description}
               onChange={(event) => setDescription(event.target.value)}
-              placeholder="Opcional · ex.: compra da semana"
+              placeholder="Opcional · ex.: compra"
+              // A lista de histórico do navegador abria por cima do formulário.
+              autoComplete="off"
             />
           </Field>
-          {reference.tags.length > 0 && (
+          {reference.tags.length > 0 && kind !== "goal" && (
             <Field label="Etiquetas">
               <Dropdown<number>
                 multiple
@@ -953,29 +1045,23 @@ export function EntryDrawer({
           )}
         </div>
 
-        {kind !== "adjustment" && (
+        {kind !== "adjustment" && kind !== "goal" && (
         <div className="field-row">
-          <Field
-            label={jointDeposit ? "De quem veio" : kind === "income" ? "Quem recebeu" : "Quem pagou"}
-          >
-            <Dropdown<number>
-              value={effectivePersonId}
-              onChange={setPersonId}
-              emptyLabel={jointDeposit ? undefined : "Sem pessoa"}
-              placeholder={jointDeposit ? "Escolher de quem veio" : undefined}
-              options={peopleOptions
-                .filter((person) => !jointDeposit || depositorIds.has(person.id))
-                .map((person) => ({
+          {kind !== "income" && (
+            <Field label="Quem pagou">
+              <Dropdown<number>
+                value={effectivePersonId}
+                onChange={setPersonId}
+                emptyLabel="Sem pessoa"
+                options={peopleOptions.map((person) => ({
                   value: person.id,
-                  label:
-                    jointDeposit && person.id === accountOwner?.id
-                      ? `${person.name} (do casal)`
-                      : person.name,
+                  label: person.name,
                   color: person.color
                 }))}
-              aria-label={jointDeposit ? "De quem veio" : "Quem pagou"}
-            />
-          </Field>
+                aria-label="Quem pagou"
+              />
+            </Field>
+          )}
           <Field label="Status">
             <Dropdown<EntryStatus>
               value={status}
@@ -990,7 +1076,7 @@ export function EntryDrawer({
         </div>
         )}
 
-        {kind !== "adjustment" && (
+        {kind !== "adjustment" && kind !== "goal" && (
         <PhotoField
           attachments={attachments}
           pending={pendingPhoto}

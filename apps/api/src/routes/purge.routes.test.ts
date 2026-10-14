@@ -198,7 +198,13 @@ describe("excluir de vez", () => {
 
   it("caixinha com conta própria vai junto com a conta e o depósito", async () => {
     const goal = (
-      await post("/api/ledger/goals", { name: "Viagem", color: "#2a9d8f", mode: "account", personId: person })
+      await post("/api/ledger/goals", {
+        name: "Viagem",
+        color: "#2a9d8f",
+        mode: "account",
+        personId: person,
+        parentAccountId: checking
+      })
     ).json();
     const goalAccount = goal.goal.accountId ?? goal.goal.account?.id;
     await post(`/api/ledger/goals/${goal.id}/deposit`, {

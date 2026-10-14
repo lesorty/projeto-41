@@ -10,23 +10,42 @@ import {
   estimateRedemption,
   goalProgress,
   iofFreeDate,
+  profitMetrics,
   projectCompletion,
   type CdiRate,
-  type Lot
+  type Lot,
+  type ProfitEvent
 } from "@projeto41/finance";
 import { createEntriesRepository } from "./entries.js";
 import { LedgerError, fromBit, notFound, nowIso, today, type Db } from "./shared.js";
 
 const SELECT_GOAL = `
   SELECT g.id, g.name, g.mode, g.account_id AS accountId, a.name AS accountName,
+         g.parent_account_id AS parentAccountId, pa.name AS parentAccountName,
          g.target_amount_cents AS targetAmountCents, g.target_date AS targetDate,
-         g.cdi_percent AS cdiPercent, g.color, g.icon, g.archived,
+         g.cdi_percent AS cdiPercent, g.profit_mode AS profitMode, g.color, g.icon, g.archived,
          g.created_at AS createdAt
   FROM goals g
   LEFT JOIN accounts a ON a.id = g.account_id
+  LEFT JOIN accounts pa ON pa.id = g.parent_account_id
 `;
 
 type GoalRow = Omit<GoalRecord, "archived"> & { archived: number };
+
+/**
+ * Como cada lançamento da conta da caixinha se reconhece. O texto é o que
+ * separa o lucro do dinheiro que o usuário pôs: rendimento do CDI, lucro que
+ * ele lançou e o ajuste do lucro são lucro; o resto é aporte e saque.
+ */
+const YIELD_TEXT = "Rendimento CDI%";
+const PROFIT_TEXT = "Lucro%";
+const PROFIT_ADJUST_TEXT = "Ajuste de lucro%";
+
+/** SQL: o lançamento `e` é lucro (rendimento, lucro lançado ou ajuste de lucro). */
+const IS_PROFIT_SQL = `(
+  (e.kind = 'income' AND (e.description LIKE '${YIELD_TEXT}' OR e.description LIKE '${PROFIT_TEXT}'))
+  OR (e.kind = 'adjustment' AND e.description LIKE '${PROFIT_ADJUST_TEXT}')
+)`;
 
 const map = (row: GoalRow): GoalRecord => ({ ...row, archived: fromBit(row.archived) });
 
@@ -61,8 +80,11 @@ export function createGoalsRepository(db: Db) {
     const rows = db
       .prepare(
         `SELECT date, amount_cents AS amountCents, kind,
-                (kind = 'income' AND description LIKE 'Rendimento CDI%') AS isYield
-         FROM entries WHERE account_id = ? ORDER BY date, id`
+                (kind = 'income' AND (description LIKE 'Rendimento CDI%' OR description LIKE 'Lucro%')) AS isYield
+         FROM entries
+         WHERE account_id = ?
+           AND NOT (kind = 'adjustment' AND description LIKE 'Ajuste de lucro%')
+         ORDER BY date, id`
       )
       .all(goal.accountId) as { date: string; amountCents: number; kind: string; isYield: number }[];
 
@@ -142,13 +164,30 @@ export function createGoalsRepository(db: Db) {
 
     /**
      * No modo conta, a conta `kind='goal'` nasce na **mesma** transação: nunca
-     * deixar caixinha sem conta pela metade.
+     * deixar caixinha sem conta pela metade. Ela é de quem é dono da conta
+     * atrelada, a menos que a pessoa venha escolhida.
      */
     create: (input: GoalCreateInput): number =>
       db.transaction(() => {
+        const mode = input.mode ?? "account";
         let accountId = input.accountId ?? null;
+        const parentAccountId = mode === "account" ? (input.parentAccountId ?? null) : null;
+        if (parentAccountId != null) assertParent(parentAccountId);
+        const profitMode = input.profitMode ?? (input.cdiPercent != null ? "auto" : "manual");
+        if (profitMode === "auto" && input.cdiPercent == null) {
+          throw new LedgerError("Lucro automático precisa do percentual do CDI");
+        }
 
-        if (input.mode === "account") {
+        if (mode === "account") {
+          const owner =
+            input.personId ??
+            (parentAccountId == null
+              ? null
+              : ((
+                  db.prepare("SELECT person_id AS personId FROM accounts WHERE id = ?").get(parentAccountId) as
+                    | { personId: number | null }
+                    | undefined
+                )?.personId ?? null));
           accountId = Number(
             db
               .prepare(
@@ -157,7 +196,7 @@ export function createGoalsRepository(db: Db) {
                   archived, sort_order, created_at)
                  VALUES (?, ?, 'goal', ?, 0, 1, 0, 50, ?)`
               )
-              .run(input.personId ?? null, input.name, input.color, nowIso()).lastInsertRowid
+              .run(owner, input.name, input.color, nowIso()).lastInsertRowid
           );
         }
 
@@ -165,18 +204,20 @@ export function createGoalsRepository(db: Db) {
           db
             .prepare(
               `INSERT INTO goals
-               (name, mode, account_id, target_amount_cents, target_date, cdi_percent,
-                color, icon, archived, created_at)
-               VALUES (@name, @mode, @accountId, @targetAmountCents, @targetDate, @cdiPercent,
-                       @color, @icon, 0, @createdAt)`
+               (name, mode, account_id, parent_account_id, target_amount_cents, target_date,
+                cdi_percent, profit_mode, color, icon, archived, created_at)
+               VALUES (@name, @mode, @accountId, @parentAccountId, @targetAmountCents, @targetDate,
+                       @cdiPercent, @profitMode, @color, @icon, 0, @createdAt)`
             )
             .run({
               name: input.name,
-              mode: input.mode,
+              mode,
               accountId,
+              parentAccountId,
               targetAmountCents: input.targetAmountCents ?? null,
               targetDate: input.targetDate ?? null,
               cdiPercent: input.cdiPercent ?? null,
+              profitMode,
               color: input.color,
               icon: input.icon ?? null,
               createdAt: nowIso()
@@ -184,18 +225,46 @@ export function createGoalsRepository(db: Db) {
         );
       })(),
 
-    /** `mode` e `account_id` são ignorados mesmo que cheguem no objeto. */
+    /**
+     * `mode` e `account_id` são ignorados mesmo que cheguem no objeto. A conta
+     * atrelada pode mudar e vale para os próximos movimentos. Nome e cor
+     * acompanham a conta da caixinha, que é o que o extrato mostra como destino.
+     */
     update: (id: number, input: GoalUpdateInput): number => {
       const goal = repository.get(id);
       if (!goal) throw notFound("Caixinha");
+      const parentAccountId =
+        goal.mode === "account" ? (input.parentAccountId ?? goal.parentAccountId) : null;
+      if (parentAccountId != null && parentAccountId !== goal.parentAccountId) {
+        assertParent(parentAccountId);
+      }
+      // Sem % do CDI não há de onde tirar rendimento: o lucro vira manual, a menos
+      // que o usuário tenha pedido automático de propósito (aí é erro).
+      let profitMode = input.profitMode ?? goal.profitMode;
+      if (profitMode === "auto" && input.cdiPercent == null) {
+        if (input.profitMode === "auto") {
+          throw new LedgerError("Lucro automático precisa do percentual do CDI");
+        }
+        profitMode = "manual";
+      }
+      if (goal.mode === "account" && goal.accountId != null) {
+        db.prepare("UPDATE accounts SET name = ?, color = ? WHERE id = ?").run(
+          input.name,
+          input.color,
+          goal.accountId
+        );
+      }
       return db
         .prepare(
           `UPDATE goals SET name=@name, target_amount_cents=@targetAmountCents,
-           target_date=@targetDate, cdi_percent=@cdiPercent, color=@color, icon=@icon
+           target_date=@targetDate, cdi_percent=@cdiPercent, profit_mode=@profitMode,
+           color=@color, icon=@icon, parent_account_id=@parentAccountId
            WHERE id=@id`
         )
         .run({
           id,
+          parentAccountId,
+          profitMode,
           name: input.name,
           targetAmountCents: input.targetAmountCents ?? null,
           targetDate: input.targetDate ?? null,
@@ -239,44 +308,120 @@ export function createGoalsRepository(db: Db) {
       })();
     },
 
-    /** Depósito é transferência com `purpose='goal_deposit'` (D20, D21). */
+    /**
+     * Guardar é transferência com `purpose='goal_deposit'` (D20, D21): sai da
+     * conta atrelada (ou da escolhida) e entra na caixinha.
+     */
     deposit: (
       id: number,
-      input: { amountCents: number; date: string; fromAccountId: number; description?: string | null }
+      input: { amountCents: number; date: string; fromAccountId?: number; description?: string | null }
     ) => {
       const goal = repository.get(id);
       if (!goal) throw notFound("Caixinha");
       if (goal.mode !== "account" || goal.accountId == null) {
         throw new LedgerError("Deposito so existe em caixinha com conta propria");
       }
+      const fromAccountId = input.fromAccountId ?? goal.parentAccountId;
+      if (fromAccountId == null) throw new LedgerError("Atrele a caixinha a uma conta antes de guardar");
       return entries.createTransfer({
-        fromAccountId: input.fromAccountId,
+        fromAccountId,
         toAccountId: goal.accountId,
         date: input.date,
         amountCents: input.amountCents,
         purpose: "goal_deposit",
-        description: input.description ?? `Depósito · ${goal.name}`
+        description: input.description || `Guardado · ${goal.name}`
       });
     },
 
     withdraw: (
       id: number,
-      input: { amountCents: number; date: string; toAccountId: number; description?: string | null }
+      input: { amountCents: number; date: string; toAccountId?: number; description?: string | null }
     ) => {
       const goal = repository.get(id);
       if (!goal) throw notFound("Caixinha");
       if (goal.mode !== "account" || goal.accountId == null) {
         throw new LedgerError("Saque so existe em caixinha com conta propria");
       }
+      const toAccountId = input.toAccountId ?? goal.parentAccountId;
+      if (toAccountId == null) throw new LedgerError("Atrele a caixinha a uma conta antes de resgatar");
       return entries.createTransfer({
         fromAccountId: goal.accountId,
-        toAccountId: input.toAccountId,
+        toAccountId,
         date: input.date,
         amountCents: input.amountCents,
         purpose: "goal_withdrawal",
-        description: input.description ?? `Saque · ${goal.name}`
+        description: input.description || `Resgate · ${goal.name}`
       });
     },
+
+    /**
+     * Lucro lançado pelo usuário, quando quiser. Entra no saldo como lucro: não
+     * conta como dinheiro que ele pôs, e o percentual da caixinha o inclui.
+     */
+    addProfit: (
+      id: number,
+      input: { amountCents: number; date: string; description?: string | null }
+    ) =>
+      db.transaction(() => {
+        const goal = repository.get(id);
+        if (!goal) throw notFound("Caixinha");
+        if (goal.mode !== "account" || goal.accountId == null) {
+          throw new LedgerError("Lucro so existe em caixinha com conta propria");
+        }
+        if (!Number.isInteger(input.amountCents) || input.amountCents <= 0) {
+          throw new LedgerError("Informe um lucro maior que zero; para diminuir, ajuste o lucro");
+        }
+        if (input.date > today()) {
+          throw new LedgerError("O lucro é de um dia que já passou ou de hoje");
+        }
+        const category = db
+          .prepare("SELECT id FROM categories WHERE name = 'Rendimentos' AND kind = 'income'")
+          .get() as { id: number } | undefined;
+        const note = input.description?.trim();
+        const entryId = entries.createInternal({
+          accountId: goal.accountId,
+          date: input.date,
+          amountCents: input.amountCents,
+          kind: "income",
+          status: "cleared",
+          categoryId: category?.id ?? null,
+          description: note ? `Lucro · ${note}` : "Lucro lançado",
+          countsTowardTarget: false,
+          tagIds: []
+        });
+        return { entryId };
+      })(),
+
+    /**
+     * "O lucro total desta caixinha é X." Lança a diferença como ajuste de lucro,
+     * para mais ou para menos, e o saldo passa a ser o que o banco mostra.
+     * Repetir com o mesmo valor não faz nada.
+     */
+    adjustProfit: (id: number, input: { totalCents: number; date?: string }, asOf: string = today()) =>
+      db.transaction(() => {
+        const goal = repository.get(id);
+        if (!goal) throw notFound("Caixinha");
+        if (goal.mode !== "account" || goal.accountId == null) {
+          throw new LedgerError("Lucro so existe em caixinha com conta propria");
+        }
+        if (!Number.isInteger(input.totalCents)) throw new LedgerError("Informe o lucro total");
+        const date = input.date ?? asOf;
+        if (date > asOf) throw new LedgerError("O ajuste é de um dia que já passou ou de hoje");
+        const delta = input.totalCents - profitTotal(goal, asOf);
+        if (delta === 0) return { entryId: null as number | null, deltaCents: 0 };
+        const entryId = entries.createInternal({
+          accountId: goal.accountId,
+          date,
+          amountCents: delta,
+          kind: "adjustment",
+          status: "cleared",
+          categoryId: null,
+          description: "Ajuste de lucro",
+          countsTowardTarget: false,
+          tagIds: []
+        });
+        return { entryId: entryId as number | null, deltaCents: delta };
+      })(),
 
     /**
      * Marcação: amarra a caixinha a um lançamento.
@@ -431,6 +576,25 @@ export function createGoalsRepository(db: Db) {
         ).map((row) => [row.accountId, row.total])
       ),
 
+    /**
+     * Quanto está guardado nas caixinhas atreladas a cada conta, por id da
+     * conta. Fica fora do saldo dela: é o "Em caixinhas" ao lado do saldo.
+     */
+    savedByParentAccount: (asOf: string = today()): Map<number, number> =>
+      new Map(
+        (
+          db
+            .prepare(
+              `SELECT g.parent_account_id AS accountId, COALESCE(SUM(e.amount_cents), 0) AS total
+               FROM goals g JOIN entries e ON e.account_id = g.account_id
+               WHERE g.mode = 'account' AND g.parent_account_id IS NOT NULL AND g.archived = 0
+                 AND e.date <= ? AND e.status IN ('cleared','reconciled')
+               GROUP BY g.parent_account_id`
+            )
+            .all(asOf) as { accountId: number; total: number }[]
+        ).map((row) => [row.accountId, row.total])
+      ),
+
     progress: (id: number, asOf: string = today()): GoalProgress => {
       const goal = repository.get(id);
       if (!goal) throw notFound("Caixinha");
@@ -524,6 +688,7 @@ export function createGoalsRepository(db: Db) {
         balanceCents,
         ...base,
         ...history,
+        profit: profitOf(goal, history, asOf),
         // O rendimento já está no saldo (lançado ou separado sozinho); aqui só
         // o que ainda falta: dias sem taxa publicada, nunca somados ao saldo.
         realizedYieldCents: history.yieldCents,
@@ -560,7 +725,8 @@ export function createGoalsRepository(db: Db) {
         if (!goal) throw notFound("Caixinha");
         if (goal.accountId == null) return { entryId: null, cents: 0 };
         if (goal.mode === "account") reconcileAccountGoal(goal);
-        if (goal.cdiPercent == null) return { entryId: null, cents: 0 };
+        // Manual: o lucro entra quando o usuário lança, nunca sozinho.
+        if (goal.cdiPercent == null || goal.profitMode === "manual") return { entryId: null, cents: 0 };
 
         const lots = lotsOf(goal);
         if (lots.length === 0) return { entryId: null, cents: 0 };
@@ -668,6 +834,17 @@ export function createGoalsRepository(db: Db) {
       })()
   };
 
+  /** A conta atrelada guarda dinheiro do dia a dia: nunca cartão, caixinha ou a ponte. */
+  function assertParent(accountId: number) {
+    const row = db.prepare("SELECT kind FROM accounts WHERE id = ?").get(accountId) as
+      | { kind: string }
+      | undefined;
+    if (!row) throw notFound("Conta atrelada");
+    if (row.kind === "credit_card" || row.kind === "goal" || row.kind === "investment") {
+      throw new LedgerError("A caixinha so pode ficar atrelada a uma conta de dinheiro");
+    }
+  }
+
   /** Última entrada de dinheiro da conta: onde a marcação se prende. */
   function earmarkAnchor(accountId: number): number | null {
     const row = db
@@ -720,6 +897,7 @@ export function createGoalsRepository(db: Db) {
         `SELECT MIN(d.date) AS since FROM entries d
          WHERE d.account_id = @account AND d.kind <> 'adjustment'
            AND NOT (d.kind = 'income' AND d.description LIKE 'Rendimento CDI%')
+           AND NOT (d.kind = 'income' AND d.description LIKE 'Lucro%')
            AND EXISTS (
              SELECT 1 FROM entries y
              WHERE y.account_id = @account AND y.kind = 'income'
@@ -764,6 +942,62 @@ export function createGoalsRepository(db: Db) {
     }
   }
 
+  /** Lucro total no saldo até a data: rendimento, lucro lançado, ajustes e correções. */
+  function profitTotal(goal: GoalRecord, asOf: string): number {
+    if (goal.accountId == null) return 0;
+    return (
+      db
+        .prepare(
+          `SELECT COALESCE(SUM(e.amount_cents), 0) AS total FROM entries e
+           WHERE e.account_id = @account AND e.date <= @asOf
+             AND e.status IN ('cleared','reconciled')
+             AND (${IS_PROFIT_SQL}
+                  OR e.id IN (SELECT entry_id FROM goal_corrections WHERE goal_id = @goal))`
+        )
+        .get({ account: goal.accountId, asOf, goal: goal.id }) as { total: number }
+    ).total;
+  }
+
+  /** Lucro em reais, em % até agora e em % ao ano projetado (função pura em finance). */
+  function profitOf(
+    goal: GoalRecord,
+    history: { yieldCents: number; correctionCents: number },
+    asOf: string
+  ) {
+    const shape = (metrics: ReturnType<typeof profitMetrics>) => ({
+      cents: metrics.profitCents,
+      depositedCents: metrics.depositedCents,
+      averageCapitalCents: metrics.averageCapitalCents,
+      days: metrics.days,
+      percent: metrics.periodPercent,
+      annualPercent: metrics.annualPercent,
+      shortHistory: metrics.shortHistory
+    });
+    if (goal.mode !== "account" || goal.accountId == null) {
+      // Marcação (só dado antigo): o rendimento separado, sem base de capital.
+      return shape({
+        ...profitMetrics({ events: [], asOf }),
+        profitCents: history.yieldCents + history.correctionCents
+      });
+    }
+    const rows = db
+      .prepare(
+        `SELECT e.date, e.amount_cents AS cents,
+                (${IS_PROFIT_SQL}
+                 OR e.id IN (SELECT entry_id FROM goal_corrections WHERE goal_id = ?)) AS profit
+         FROM entries e
+         WHERE e.account_id = ? AND e.status IN ('cleared','reconciled')
+         ORDER BY e.date, e.id`
+      )
+      .all(goal.id, goal.accountId) as { date: string; cents: number; profit: number }[];
+    const events: ProfitEvent[] = rows.map((row) => ({
+      date: row.date,
+      cents: row.cents,
+      profit: row.profit === 1
+    }));
+    return shape(profitMetrics({ events, asOf }));
+  }
+
   /**
    * O extrato resumido: quanto você colocou, quanto rendeu e quanto foi
    * corrigido. Soma sempre o saldo.
@@ -779,8 +1013,8 @@ export function createGoalsRepository(db: Db) {
     const sum = (sql: string, ...params: unknown[]) =>
       (db.prepare(sql).get(...params) as { total: number }).total;
     const yieldCents = sum(
-      `SELECT COALESCE(SUM(amount_cents), 0) AS total FROM entries
-       WHERE account_id = ? AND kind = 'income' AND description LIKE 'Rendimento CDI%'`,
+      `SELECT COALESCE(SUM(e.amount_cents), 0) AS total FROM entries e
+       WHERE e.account_id = ? AND ${IS_PROFIT_SQL}`,
       goal.accountId
     );
     const correctionCents = sum(

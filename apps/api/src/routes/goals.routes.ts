@@ -6,6 +6,8 @@ import {
   goalCreateSchema,
   goalDepositSchema,
   goalMarkSchema,
+  goalProfitAdjustSchema,
+  goalProfitSchema,
   goalUpdateSchema,
   goalWithdrawalSchema
 } from "@projeto41/contracts";
@@ -167,6 +169,35 @@ export const registerGoalsRoutes: RoutePlugin = (app, { db, cdiService }) => {
       goal: ledger.goals.progress(id, today()),
       balances: balances()
     });
+  });
+
+  /**
+   * Lucro lançado pelo usuário, quando quiser. Vale em qualquer modo: no
+   * automático ele soma ao rendimento do CDI; no manual é a única forma de o
+   * lucro entrar.
+   */
+  app.post("/api/ledger/goals/:id/profit", async (request, reply) => {
+    const { id } = idParam.parse(request.params);
+    if (!ledger.goals.get(id)) return reply.status(404).send({ error: "Caixinha nao encontrada" });
+    ledger.goals.addProfit(id, goalProfitSchema.parse(request.body));
+    return reply.status(201).send({
+      ok: true,
+      goal: ledger.goals.progress(id, today()),
+      balances: balances()
+    });
+  });
+
+  /** "O lucro total é X": lança a diferença como ajuste de lucro. */
+  app.post("/api/ledger/goals/:id/profit/adjust", async (request, reply) => {
+    const { id } = idParam.parse(request.params);
+    if (!ledger.goals.get(id)) return reply.status(404).send({ error: "Caixinha nao encontrada" });
+    const result = ledger.goals.adjustProfit(id, goalProfitAdjustSchema.parse(request.body), today());
+    return {
+      ok: true,
+      ...result,
+      goal: ledger.goals.progress(id, today()),
+      balances: balances()
+    };
   });
 
   app.post("/api/ledger/goals/:id/allocate", async (request, reply) => {

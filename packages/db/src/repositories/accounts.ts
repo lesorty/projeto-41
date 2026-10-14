@@ -16,7 +16,7 @@ export function createAccountsRepository(db: Db) {
     entries: "SELECT COUNT(*) AS n FROM entries WHERE account_id = ?",
     installmentPlans: "SELECT COUNT(*) AS n FROM installment_plans WHERE account_id = ?",
     paidCards: "SELECT COUNT(*) AS n FROM accounts WHERE payment_account_id = ?",
-    goals: "SELECT COUNT(*) AS n FROM goals WHERE account_id = ?",
+    goals: "SELECT COUNT(*) AS n FROM goals WHERE ? IN (account_id, parent_account_id)",
     operations: "SELECT COUNT(*) AS n FROM operations WHERE account_id = ?",
     importBatches: "SELECT COUNT(*) AS n FROM import_batches WHERE account_id = ?",
     importCounterparts: "SELECT COUNT(*) AS n FROM import_rows WHERE counterparty_account_id = ?"

@@ -1,11 +1,10 @@
 import { PiggyBank, Plus, Sparkles, TrendingUp, Wallet } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { CdiStatus, EntryListResult, GoalProgress } from "@projeto41/contracts";
-import { EntryTable } from "../../components/finance/EntryTable.js";
+import type { CdiStatus, EntryListResult, EntryRecord, GoalProgress } from "@projeto41/contracts";
 import { GoalCard } from "../../components/finance/GoalCard.js";
-import { GoalDepositDrawer } from "../../components/finance/GoalDepositDrawer.js";
+import { GoalDepositDrawer, type GoalDirection } from "../../components/finance/GoalDepositDrawer.js";
+import { GoalDetail } from "../../components/finance/GoalDetail.js";
 import { GoalDrawer } from "../../components/finance/GoalDrawer.js";
-import { Modal } from "../../components/dialog.js";
 import { Button, Empty, Kpi, Loading, SectionHeading } from "../../components/ui.js";
 import { api } from "../../lib/api.js";
 import { longDate, moneyFromCents } from "../../lib/format.js";
@@ -18,10 +17,12 @@ export function GoalsPage() {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<GoalProgress | null>(null);
   const [creating, setCreating] = useState(false);
-  const [moving, setMoving] = useState<GoalProgress | null>(null);
-  const [statement, setStatement] = useState<{ goal: GoalProgress; rows: EntryListResult } | null>(
-    null
-  );
+  const [moving, setMoving] = useState<{ goal: GoalProgress; direction: GoalDirection } | null>(null);
+  // O detalhe guarda só o id: depois de guardar ou resgatar, ele mostra a
+  // caixinha recarregada, não a cópia de quando abriu.
+  const [openId, setOpenId] = useState<number | null>(null);
+  const [statement, setStatement] = useState<EntryRecord[] | null>(null);
+  const [version, setVersion] = useState(0);
 
   const load = useCallback(async () => {
     try {
@@ -31,6 +32,7 @@ export function GoalsPage() {
       ]);
       setGoals(nextGoals);
       setCdi(nextCdi);
+      setVersion((current) => current + 1);
     } catch (error) {
       toast.notify(error instanceof Error ? error.message : "Falha ao carregar", "error");
     } finally {
@@ -41,6 +43,19 @@ export function GoalsPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (openId == null) return;
+    let alive = true;
+    api<EntryListResult>(`/ledger/goals/${openId}/entries?pageSize=200`)
+      .then((result) => alive && setStatement(result.rows))
+      .catch(() => alive && setStatement([]));
+    return () => {
+      alive = false;
+    };
+  }, [openId, version]);
+
+  const opened = goals.find((goal) => goal.id === openId) ?? null;
 
   const totals = useMemo(
     () => ({
@@ -73,11 +88,6 @@ export function GoalsPage() {
       toast.notify(error instanceof Error ? error.message : "Falha ao salvar a ordem", "error");
       await load();
     }
-  }
-
-  async function openStatement(goal: GoalProgress) {
-    const rows = await api<EntryListResult>(`/ledger/goals/${goal.id}/entries?pageSize=200`);
-    setStatement({ goal, rows });
   }
 
   if (loading) return <Loading />;
@@ -127,7 +137,7 @@ export function GoalsPage() {
             <GoalCard
               key={goal.id}
               goal={goal}
-              onMove={
+              onReorder={
                 goals.length > 1
                   ? {
                       back: index > 0 ? () => void move(index, -1) : undefined,
@@ -135,10 +145,11 @@ export function GoalsPage() {
                     }
                   : undefined
               }
-              cdiThrough={cdi?.lastDate ?? null}
-              onOpen={() => void openStatement(goal)}
-              onDeposit={() => setMoving(goal)}
-              onEdit={() => setEditing(goal)}
+              onOpen={() => {
+                setStatement(null);
+                setOpenId(goal.id);
+              }}
+              onMove={(direction) => setMoving({ goal, direction })}
             />
           ))}
         </div>
@@ -147,7 +158,6 @@ export function GoalsPage() {
       {(creating || editing) && (
         <GoalDrawer
           goal={editing}
-          personId={null}
           onClose={() => {
             setCreating(false);
             setEditing(null);
@@ -160,27 +170,27 @@ export function GoalsPage() {
         />
       )}
 
+      {opened && (
+        <GoalDetail
+          goal={opened}
+          rows={statement}
+          cdiThrough={cdi?.lastDate ?? null}
+          onAction={(direction) => setMoving({ goal: opened, direction })}
+          onEdit={() => setEditing(opened)}
+          onClose={() => setOpenId(null)}
+        />
+      )}
+
       {moving && (
         <GoalDepositDrawer
-          goal={moving}
+          goal={moving.goal}
+          initialDirection={moving.direction}
           onClose={() => setMoving(null)}
           onDone={async () => {
             setMoving(null);
             await load();
           }}
         />
-      )}
-
-      {statement && (
-        <Modal title={`Extrato · ${statement.goal.name}`} onClose={() => setStatement(null)} width={900}>
-          <div className="fin-goal-statement">
-            <EntryTable
-              rows={statement.rows.rows}
-              onSelect={() => undefined}
-              emptyText="Nenhum movimento nesta caixinha."
-            />
-          </div>
-        </Modal>
       )}
     </>
   );

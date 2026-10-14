@@ -155,8 +155,8 @@ export function FinanceDashboardPage({ onNavigate }: { onNavigate: FinanceNaviga
                 />
               </strong>
             </Panel>
-            {/* Total guardado em todas as caixinhas, hoje. A parte marcada
-                dentro das contas já está dentro do saldo ao lado. */}
+            {/* Total guardado em todas as caixinhas, hoje. Elas são contas do
+                patrimônio, então já estão somadas no saldo ao lado. */}
             <Panel
               title={
                 <span className="fin-inline">
@@ -164,11 +164,7 @@ export function FinanceDashboardPage({ onNavigate }: { onNavigate: FinanceNaviga
                   Caixinhas
                 </span>
               }
-              subtitle={
-                summary.consolidated.earmarkedCents !== 0
-                  ? `${moneyFromCents(summary.consolidated.earmarkedCents)} dentro do saldo das contas`
-                  : "Total guardado nas caixinhas"
-              }
+              subtitle="Total guardado, já somado ao saldo"
             >
               <strong>
                 <AnimatedNumber

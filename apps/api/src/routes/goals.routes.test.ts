@@ -52,6 +52,7 @@ const create = (payload: Record<string, unknown> = {}) =>
     mode: "account",
     color: "#00a86b",
     personId: steylor,
+    parentAccountId: checking,
     ...payload
   });
 
@@ -61,6 +62,58 @@ describe("cadastro", () => {
     expect(response.statusCode).toBe(201);
     expect(response.json().goal.mode).toBe("account");
     expect(response.json().goal.accountId).not.toBeNull();
+    expect(response.json().goal.parentAccountId).toBe(checking);
+    expect(response.json().goal.parentAccountName).toBe("Nubank");
+  });
+
+  it("sem modo, nasce com conta própria; sem conta atrelada, recusa", async () => {
+    const created = await post("/api/ledger/goals", {
+      name: "Casa",
+      color: "#00a86b",
+      parentAccountId: checking
+    });
+    expect(created.statusCode).toBe(201);
+    expect(created.json().goal.mode).toBe("account");
+    // A conta da caixinha é de quem é dono da conta atrelada.
+    const account = db.ledger.accounts.get(created.json().goal.accountId);
+    expect(account?.personId).toBe(steylor);
+
+    const missing = await post("/api/ledger/goals", { name: "Casa", color: "#00a86b" });
+    expect(missing.statusCode).toBe(400);
+  });
+
+  it("não atrela a cartão nem a outra caixinha", async () => {
+    const card = db.ledger.accounts.create({
+      name: "Cartão",
+      kind: "credit_card",
+      color: "#000000",
+      closingDay: 1,
+      dueDay: 10
+    });
+    expect((await create({ parentAccountId: card })).statusCode).toBe(400);
+    const other = (await create({ name: "Outra" })).json().goal.accountId;
+    expect((await create({ parentAccountId: other })).statusCode).toBe(400);
+  });
+
+  it("PUT troca a conta atrelada e renomeia a conta da caixinha", async () => {
+    const id = (await create()).json().id;
+    const savings = db.ledger.accounts.create({ name: "BTG", kind: "checking", color: "#123456" });
+    const response = await app.inject({
+      method: "PUT",
+      url: `/api/ledger/goals/${id}`,
+      payload: { name: "Viagem 2027", color: "#00a86b", parentAccountId: savings }
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json().goal.parentAccountName).toBe("BTG");
+    expect(db.ledger.accounts.get(response.json().goal.accountId)?.name).toBe("Viagem 2027");
+
+    // Sem o campo, a conta atrelada fica a mesma.
+    const kept = await app.inject({
+      method: "PUT",
+      url: `/api/ledger/goals/${id}`,
+      payload: { name: "Viagem 2027", color: "#00a86b" }
+    });
+    expect(kept.json().goal.parentAccountId).toBe(savings);
   });
 
   it("aceita rendimento em modo marcacao", async () => {
@@ -102,6 +155,39 @@ describe("deposito e saque", () => {
     expect(
       db.ledger.balances.forAccount(checking, { asOf: "2026-09-18" })?.currentBalanceCents
     ).toBe(800_000);
+  });
+
+  it("sem conta escolhida, guardar tira da conta atrelada e resgatar devolve para ela", async () => {
+    const id = (await create()).json().id;
+    const balance = () =>
+      db.ledger.balances.forAccount(checking, { asOf: "2026-09-30" })?.currentBalanceCents;
+
+    const saved = await post(`/api/ledger/goals/${id}/deposit`, { amountCents: 300_000, date: "2026-09-16" });
+    expect(saved.statusCode).toBe(201);
+    expect(saved.json().goal.balanceCents).toBe(300_000);
+    expect(balance()).toBe(700_000);
+
+    const back = await post(`/api/ledger/goals/${id}/withdraw`, { amountCents: 100_000, date: "2026-09-20" });
+    expect(back.statusCode).toBe(201);
+    expect(back.json().goal.balanceCents).toBe(200_000);
+    expect(balance()).toBe(800_000);
+
+    // No livro da conta, cada movimento diz para qual caixinha foi.
+    const ledger = await app
+      .inject(`/api/ledger/entries?accountId=${checking}&from=2026-09-01&to=2026-09-30`)
+      .then((r) => r.json());
+    const moves = ledger.rows.map((row: { amountCents: number; goalName: string; description: string }) => [
+      row.amountCents,
+      row.goalName,
+      row.description
+    ]);
+    expect(moves).toContainEqual([-300_000, "Viagem", "Guardado · Viagem"]);
+    expect(moves).toContainEqual([100_000, "Viagem", "Resgate · Viagem"]);
+
+    // O saldo guardado aparece ao lado da conta, fora do saldo dela.
+    const summary = await app.inject("/api/ledger/summary").then((r) => r.json());
+    const account = summary.accounts.find((row: { id: number }) => row.id === checking);
+    expect(account.goalsCents).toBe(200_000);
   });
 });
 

@@ -19,7 +19,7 @@ function monthEnd(period: string): string {
 
 /**
  * O que já entrou nas contas do casal no mês, por pessoa. Transferência conta
- * para o dono da conta de origem; depósito direto, para "de quem veio".
+ * para o dono da conta de origem; entrada direta não é de ninguém em particular.
  */
 async function jointDeposits(
   period: string,

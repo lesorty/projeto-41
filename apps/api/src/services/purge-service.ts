@@ -179,6 +179,9 @@ export function purgeAccount(db: AppDatabase, id: number) {
     raw.prepare(`DELETE FROM entries WHERE account_id IN (${list})`).run(...family);
     raw.prepare(`DELETE FROM installment_plans WHERE account_id IN (${list})`).run(...family);
     raw.prepare(`DELETE FROM goals WHERE account_id IN (${list})`).run(...family);
+    // A caixinha atrelada a esta conta continua com o saldo dela, à espera de
+    // outra conta.
+    raw.prepare(`UPDATE goals SET parent_account_id = NULL WHERE parent_account_id IN (${list})`).run(...family);
     // Cartões antes do banco: eles apontam para ele.
     for (const cardId of family.slice(1)) raw.prepare("DELETE FROM accounts WHERE id = ?").run(cardId);
     raw.prepare("DELETE FROM accounts WHERE id = ?").run(id);

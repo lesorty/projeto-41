@@ -50,16 +50,21 @@ afterEach(async () => {
 });
 
 describe("saldo mostrado com dinheiro em caixinha", () => {
-  it("é o da conta inteira: o separado já está dentro, não sai do saldo", async () => {
-    expect((await post(`/api/ledger/goals/${goal}/mark`, { amountCents: 300_00 })).statusCode).toBe(200);
+  it("guardar tira do saldo da conta atrelada; o total continua o mesmo", async () => {
+    const saved = (
+      await post("/api/ledger/goals", { name: "Carro", color: "#123456", parentAccountId: checking })
+    ).json().id;
+    expect(
+      (await post(`/api/ledger/goals/${saved}/deposit`, { amountCents: 300_00, date: "2026-01-06" })).statusCode
+    ).toBe(201);
 
     const summary = await app.inject("/api/ledger/summary").then((r) => r.json());
     const account = summary.accounts.find((a: { id: number }) => a.id === checking);
-    // R$ 1.000 na conta, R$ 300 separados: o saldo continua R$ 1.000.
-    expect(account.currentBalanceCents).toBe(1000_00);
-    expect(account.earmarkedCents).toBe(300_00);
+    // R$ 1.000 na conta, R$ 300 guardados: a conta mostra R$ 700 e as
+    // caixinhas dela R$ 300; o saldo de tudo continua R$ 1.000.
+    expect(account.currentBalanceCents).toBe(700_00);
+    expect(account.goalsCents).toBe(300_00);
     expect(summary.consolidated.currentCents).toBe(1000_00);
-    expect(summary.consolidated.earmarkedCents).toBe(300_00);
   });
 });
 

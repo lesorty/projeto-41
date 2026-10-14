@@ -16,6 +16,8 @@ import { migration015GuidedYield } from "./015-guided-yield.js";
 import { migration016GuidedYieldComplete } from "./016-guided-yield-complete.js";
 import { migration017InvestmentAccounts } from "./017-investment-accounts.js";
 import { migration018InvestmentAccountPerson } from "./018-investment-account-person.js";
+import { migration019GoalParentAccount } from "./019-goal-parent-account.js";
+import { migration020GoalProfitMode } from "./020-goal-profit-mode.js";
 import type { Migration } from "./runner.js";
 
 /**
@@ -40,7 +42,9 @@ export const migrations: Migration[] = [
   migration015GuidedYield,
   migration016GuidedYieldComplete,
   migration017InvestmentAccounts,
-  migration018InvestmentAccountPerson
+  migration018InvestmentAccountPerson,
+  migration019GoalParentAccount,
+  migration020GoalProfitMode
 ];
 
 export * from "./runner.js";

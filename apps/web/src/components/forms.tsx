@@ -1,6 +1,7 @@
 import { Check, ChevronDown, Search, X } from "lucide-react";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { parseCurrencyInput } from "@projeto41/finance";
 
 /**
@@ -131,7 +132,10 @@ export function Dropdown<T extends string | number>(props: SingleProps<T> | Mult
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
   const root = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [panelStyle, setPanelStyle] = useState<CSSProperties | null>(null);
   const listId = useId();
+  const showSearch = options.length > searchThreshold;
 
   const selected = props.multiple ? props.value : props.value == null ? [] : [props.value];
   const emptyOption: DropdownOption<T> | null =
@@ -150,11 +154,51 @@ export function Dropdown<T extends string | number>(props: SingleProps<T> | Mult
   useEffect(() => {
     if (!open) return;
     const close = (event: MouseEvent) => {
-      if (root.current && !root.current.contains(event.target as Node)) setOpen(false);
+      const target = event.target as Node;
+      if (!root.current?.contains(target) && !panelRef.current?.contains(target)) setOpen(false);
     };
     document.addEventListener("mousedown", close);
     return () => document.removeEventListener("mousedown", close);
   }, [open]);
+
+  /**
+   * A lista vive fora da gaveta (portal): dentro dela, o `overflow` do corpo
+   * cortava as opções e obrigava a rolar o formulário. Ela abre para baixo ou
+   * para cima, o que tiver mais espaço, e encolhe até caber na janela.
+   */
+  const rows = visible.length;
+  useLayoutEffect(() => {
+    if (!open) {
+      setPanelStyle(null);
+      return;
+    }
+    function place() {
+      const trigger = root.current?.getBoundingClientRect();
+      if (!trigger) return;
+      const margin = 10;
+      const gap = 6;
+      const wanted = Math.min(264, rows * 40 + 10) + (showSearch ? 46 : 0) + 4;
+      const below = window.innerHeight - trigger.bottom - gap - margin;
+      const above = trigger.top - gap - margin;
+      const up = below < wanted && above > below;
+      const width = Math.min(Math.max(trigger.width, 200), window.innerWidth - margin * 2);
+      const left = Math.min(Math.max(trigger.left, margin), window.innerWidth - width - margin);
+      setPanelStyle({
+        left,
+        width,
+        maxHeight: Math.max(up ? above : below, 120),
+        ...(up ? { bottom: window.innerHeight - trigger.top + gap } : { top: trigger.bottom + gap })
+      });
+    }
+    place();
+    // Rolar a gaveta ou redimensionar a janela mexe o campo: a lista o segue.
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [open, rows, showSearch]);
 
   useEffect(() => {
     if (open) {
@@ -200,7 +244,6 @@ export function Dropdown<T extends string | number>(props: SingleProps<T> | Mult
   }
 
   const chosen = options.filter((option) => selected.includes(option.value));
-  const showSearch = options.length > searchThreshold;
 
   return (
     <div
@@ -254,12 +297,19 @@ export function Dropdown<T extends string | number>(props: SingleProps<T> | Mult
         <ChevronDown size={16} className="dropdown-chevron" aria-hidden />
       </button>
 
-      {open && (
+      {open &&
+        panelStyle &&
+        createPortal(
         // O Field e um <label>, e clicar em algo dentro de um label repassa o
         // clique ao primeiro controle dele: o botao deste dropdown. Sem cancelar
         // esse repasse, escolher uma opcao fechava a lista e o botao a abria de
         // novo na mesma hora.
-        <div className="dropdown-panel" onClick={(event) => event.preventDefault()}>
+        <div
+          ref={panelRef}
+          className="dropdown-panel"
+          style={panelStyle}
+          onClick={(event) => event.preventDefault()}
+        >
           {showSearch && (
             <label className="dropdown-search">
               <Search size={14} aria-hidden />
@@ -300,7 +350,8 @@ export function Dropdown<T extends string | number>(props: SingleProps<T> | Mult
               );
             })}
           </ul>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

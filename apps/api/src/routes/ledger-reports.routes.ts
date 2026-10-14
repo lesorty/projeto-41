@@ -193,24 +193,14 @@ export const registerLedgerReportsRoutes: RoutePlugin = (app, { db }) => {
       db.ledger.reports.monthSummaryByAccount(range).map((row) => [row.accountId, row])
     );
 
-    // Dinheiro marcado em caixinha continua na conta: o saldo mostrado e o da
-    // conta inteira (o que o banco mostra), e quanto dele esta separado vem a
-    // parte, so como informacao.
-    const earmarked = db.ledger.goals.earmarkedByAccount();
-    const counted = new Set(
-      balances.accounts
-        .filter((account) => !account.archived && account.includeInNetWorth && account.kind !== "credit_card")
-        .map((account) => account.id)
-    );
-    const earmarkedTotal = [...earmarked.entries()]
-      .filter(([accountId]) => counted.has(accountId))
-      .reduce((total, [, cents]) => total + cents, 0);
+    // A caixinha tem saldo proprio, fora do saldo da conta atrelada (como no
+    // banco): ao lado de cada conta vai quanto esta guardado nas dela.
+    const saved = db.ledger.goals.savedByParentAccount(today());
 
     const summary: LedgerSummary = {
       period,
       consolidated: {
         currentCents: balances.consolidatedCents,
-        earmarkedCents: earmarkedTotal,
         cardStatementCents: balances.creditCardStatementCents
       },
       accounts: balances.accounts.map((account) => ({
@@ -221,7 +211,7 @@ export const registerLedgerReportsRoutes: RoutePlugin = (app, { db }) => {
         personId: account.personId ?? null,
         personName: account.personName,
         currentBalanceCents: account.currentBalanceCents,
-        earmarkedCents: earmarked.get(account.id) ?? 0,
+        goalsCents: saved.get(account.id) ?? 0,
         paymentAccountId: account.paymentAccountId ?? null,
         // O mesmo ciclo que `balances` usou para `currentStatementCents`.
         statement:

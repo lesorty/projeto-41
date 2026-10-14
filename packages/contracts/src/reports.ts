@@ -171,11 +171,8 @@ export type CategoryTrend = {
 export type LedgerSummary = {
   period: string;
   /** Saldo e fatura, lado a lado e nunca somados: um e dinheiro, o outro divida. */
-  /**
-   * `currentCents` e o saldo das contas, inteiro. `earmarkedCents` e quanto
-   * dele esta separado em caixinhas de marcacao: ja esta dentro, nao se soma.
-   */
-  consolidated: { currentCents: number; earmarkedCents: number; cardStatementCents: number };
+  /** `currentCents` e o saldo das contas do patrimonio, caixinhas incluidas. */
+  consolidated: { currentCents: number; cardStatementCents: number };
   accounts: {
     id: number;
     name: string;
@@ -185,8 +182,8 @@ export type LedgerSummary = {
     personName: string | null;
     /** Saldo da conta, inteiro: o que o banco mostra, caixinhas incluidas. */
     currentBalanceCents: number;
-    /** Quanto do saldo esta separado em caixinhas de marcacao (ja incluido nele). */
-    earmarkedCents: number;
+    /** Guardado nas caixinhas atreladas a esta conta: fora do saldo dela. */
+    goalsCents: number;
     /** Conta que paga a fatura, para o Painel mostrar o cartao junto dela. */
     paymentAccountId: number | null;
     /**
