@@ -4,6 +4,7 @@ import {
   type ColumnMapping,
   type ImportBatchSummary,
   type ImportBatchView,
+  type ImportCandidate,
   type ImportRowConfirm,
   type ImportRowStatus,
   type ImportRowView,
@@ -16,7 +17,15 @@ import { normalizeName, statementMonthFor } from "@projeto41/finance";
 import { importRowConfirmSchema } from "@projeto41/contracts";
 import { LedgerError, notFound, nowIso, type AppDatabase } from "@projeto41/db";
 import { headerMatches, inspectCsv, readCsv } from "./csv/csv-reader.js";
-import { contentHash, findDuplicates, FUZZY_WINDOW_DAYS } from "./dedupe.js";
+import {
+  contentHash,
+  findDuplicates,
+  INSTALLMENT_WINDOW_DAYS,
+  rankCandidates,
+  type DedupeCandidate,
+  type DedupeMatch,
+  type DedupeRow
+} from "./dedupe.js";
 import { timeFromNubankId } from "./nubank-id.js";
 import { readOfx } from "./ofx/ofx-reader.js";
 import {
@@ -161,6 +170,173 @@ export function createLedgerImportService(db: AppDatabase) {
       .filter((rule): rule is PayeeRule => rule !== null);
   }
 
+  // O que o livro ja tem --------------------------------------------------
+
+  type BookEntry = {
+    id: number;
+    date: string;
+    amountCents: number;
+    externalId: string | null;
+    contentHash: string | null;
+    kind: ImportCandidate["kind"];
+    status: ImportCandidate["status"];
+    description: string | null;
+    rawDescription: string | null;
+    importRowId: number | null;
+    planId: number | null;
+    installmentNumber: number | null;
+    installmentTotal: number | null;
+    placeName: string | null;
+    categoryName: string | null;
+    personName: string | null;
+    transferWith: string | null;
+  };
+
+  const BOOK_SELECT = `
+    SELECT e.id, e.date, e.amount_cents AS amountCents, e.external_id AS externalId,
+           e.content_hash AS contentHash, e.kind, e.status, e.description,
+           e.raw_description AS rawDescription, e.import_row_id AS importRowId,
+           e.installment_plan_id AS planId, e.installment_number AS installmentNumber,
+           ip.installment_count AS installmentTotal,
+           p.name AS placeName, c.name AS categoryName, pe.name AS personName,
+           (SELECT a2.name FROM transfers t
+              JOIN entries e2 ON e2.id = CASE WHEN t.from_entry_id = e.id THEN t.to_entry_id
+                                              ELSE t.from_entry_id END
+              JOIN accounts a2 ON a2.id = e2.account_id
+            WHERE t.from_entry_id = e.id OR t.to_entry_id = e.id) AS transferWith
+    FROM entries e
+    LEFT JOIN places p ON p.id = e.place_id
+    LEFT JOIN categories c ON c.id = e.category_id
+    LEFT JOIN people pe ON pe.id = e.person_id
+    LEFT JOIN installment_plans ip ON ip.id = e.installment_plan_id`;
+
+  /** Lancamentos da conta na janela de datas; ajuste nunca e do banco, fica de fora. */
+  function bookEntries(accountId: number, from: string, to: string): BookEntry[] {
+    return sql
+      .prepare(
+        `${BOOK_SELECT}
+         WHERE e.account_id = ? AND e.date BETWEEN ? AND ? AND e.kind <> 'adjustment'
+         ORDER BY e.date, e.id`
+      )
+      .all(accountId, shiftDate(from, -INSTALLMENT_WINDOW_DAYS), shiftDate(to, INSTALLMENT_WINDOW_DAYS)) as BookEntry[];
+  }
+
+  function bookEntry(entryId: number): BookEntry | undefined {
+    return sql.prepare(`${BOOK_SELECT} WHERE e.id = ?`).get(entryId) as BookEntry | undefined;
+  }
+
+  /**
+   * Por que vincular este lancamento nao e possivel (ou `null`).
+   *
+   * O extrato e a verdade do banco: lancamento comum assume o valor do arquivo.
+   * Transferencia tem outra ponta e parcela tem um plano; nelas o valor so muda
+   * por arredondamento (ate R$ 1,00), e alem disso a diferenca e recusada.
+   */
+  function linkBlock(
+    entry: Pick<BookEntry, "status" | "kind" | "planId" | "amountCents">,
+    bankCents: number
+  ): string | null {
+    if (entry.status === "reconciled") {
+      return "Lançamento conciliado não pode ser alterado pela importação";
+    }
+    if (bankCents === entry.amountCents) return null;
+    const rounding = Math.abs(bankCents - entry.amountCents) <= 100;
+    if (
+      entry.kind === "transfer" ||
+      Math.sign(bankCents) !== Math.sign(entry.amountCents) ||
+      (entry.planId != null && !rounding)
+    ) {
+      return "O valor do arquivo é diferente do lançamento: corrija o lançamento antes de vincular";
+    }
+    return null;
+  }
+
+  function toCandidate(entry: BookEntry, match: DedupeMatch, bankCents: number): ImportCandidate {
+    return {
+      entryId: entry.id,
+      reason: match.reason,
+      confidence: match.confidence,
+      dayDistance: match.dayDistance,
+      date: entry.date,
+      amountCents: entry.amountCents,
+      kind: entry.kind,
+      status: entry.status,
+      description: entry.description,
+      placeName: entry.placeName,
+      categoryName: entry.categoryName,
+      personName: entry.personName,
+      transferWith: entry.transferWith,
+      installment:
+        entry.installmentNumber != null && entry.installmentTotal != null
+          ? { number: entry.installmentNumber, total: entry.installmentTotal }
+          : null,
+      reconciled: entry.status === "reconciled",
+      blocked: linkBlock(entry, bankCents)
+    };
+  }
+
+  const dedupeCandidateOf = (entry: BookEntry): DedupeCandidate => ({
+    id: entry.id,
+    date: entry.date,
+    amountCents: entry.amountCents,
+    externalId: entry.externalId,
+    contentHash: entry.contentHash,
+    text: [entry.description, entry.placeName, entry.rawDescription].filter(Boolean).join(" "),
+    // Ligado a uma linha importada: e o par dela, nao serve de par para outra.
+    linked: entry.importRowId != null,
+    installmentNumber: entry.planId != null ? entry.installmentNumber : null
+  });
+
+  const MAX_CANDIDATES = 5;
+
+  /**
+   * Para cada linha ainda pendente, os lancamentos do livro que ela parece
+   * repetir: o melhor primeiro (pareado sem repetir lancamento entre linhas) e
+   * depois os outros parecidos. Calculado na hora, e nao gravado: o livro muda
+   * a cada resposta no popup, e o par de uma linha muda junto.
+   */
+  function pendingMatches(batchId: number, rows = rowRecords(batchId)): Map<number, ImportCandidate[]> {
+    const pending = rows.filter((row) => PENDING.includes(row.status));
+    const result = new Map<number, ImportCandidate[]>();
+    if (pending.length === 0) return result;
+
+    const batch = batchRecord(batchId);
+    const dates = pending.map((row) => row.parsed.date).sort();
+    const entries = bookEntries(batch.accountId, dates[0]!, dates[dates.length - 1]!);
+    const byId = new Map(entries.map((entry) => [entry.id, entry]));
+    const candidates = entries.map(dedupeCandidateOf);
+
+    const dedupeRows: DedupeRow[] = pending.map((row) => ({
+      key: row.id,
+      date: row.parsed.date,
+      amountCents: row.parsed.amountCents,
+      externalId: row.externalId,
+      contentHash: row.contentHash,
+      text: payeeOf(row.parsed).display,
+      installment: installmentOf(row.parsed.rawDescription)
+    }));
+
+    const best = findDuplicates(dedupeRows, candidates, { fuzzyOnly: true });
+    for (const row of dedupeRows) {
+      const own = best.get(row.key);
+      // O melhor das outras linhas ja tem dono; o que sobra e alternativa.
+      const takenByOthers = new Set(
+        [...best].filter(([key]) => key !== row.key).map(([, match]) => match.entryId)
+      );
+      const others = rankCandidates(row, candidates, takenByOthers).filter(
+        (match) => match.entryId !== own?.entryId
+      );
+      const ordered = (own ? [own, ...others] : others).slice(0, MAX_CANDIDATES);
+      if (ordered.length > 0) {
+        result.set(
+          row.key,
+          ordered.map((match) => toCandidate(byId.get(match.entryId)!, match, row.amountCents))
+        );
+      }
+    }
+    return result;
+  }
+
   // Sugestao e situacao ----------------------------------------------------
 
   function suggestionFor(
@@ -217,12 +393,14 @@ export function createLedgerImportService(db: AppDatabase) {
     const batch = batchRecord(batchId);
     const account = ledger.accounts.raw(batch.accountId);
     const rules = loadRules();
+    const rows = rowRecords(batchId);
+    const matches = pendingMatches(batchId, rows);
     const update = sql.prepare(
       `UPDATE import_rows SET status = @status, suggested_place_id = @placeId,
          suggested_category_id = @categoryId, suggested_kind = @kind
        WHERE id = @id`
     );
-    for (const row of rowRecords(batchId)) {
+    for (const row of rows) {
       if (!PENDING.includes(row.status)) continue;
       const payee = payeeOf(row.parsed);
       const rule = findPayeeRule(rules, payee, row.parsed.amountCents);
@@ -234,7 +412,9 @@ export function createLedgerImportService(db: AppDatabase) {
         account?.kind === "credit_card"
       );
       let status: ImportRowStatus = "needs_review";
-      if (row.duplicateOfEntryId != null) status = "needs_review";
+      // Parece repetir um lancamento do livro: sempre pergunta, mesmo com regra
+      // automatica. Gravar sem olhar duplicaria o dinheiro.
+      if (matches.has(row.id)) status = "needs_review";
       else if (rule?.ignore) status = "ignored";
       else if (
         rule?.mode === "auto" &&
@@ -278,32 +458,35 @@ export function createLedgerImportService(db: AppDatabase) {
     const account = ledger.accounts.raw(batch.accountId);
     const rules = loadRules();
     const isCard = account?.kind === "credit_card";
-    const duplicateInfo = sql.prepare(
-      `SELECT e.id, e.date, e.amount_cents AS amountCents, e.description, e.status,
-              p.name AS placeName, c.name AS categoryName
-       FROM entries e
-       LEFT JOIN places p ON p.id = e.place_id
-       LEFT JOIN categories c ON c.id = e.category_id
-       WHERE e.id = ?`
-    );
+    const records = rowRecords(batchId);
+    const live = pendingMatches(batchId, records);
 
-    const rows: ImportRowView[] = rowRecords(batchId).map((row) => {
+    /** Linha ja pareada por id ou hash: o lancamento foi gravado por uma importacao anterior. */
+    const exactCandidate = (row: RowRecord): ImportCandidate | null => {
+      if (row.duplicateOfEntryId == null || !row.matchReason) return null;
+      const entry = bookEntry(row.duplicateOfEntryId);
+      if (!entry) return null;
+      return toCandidate(
+        entry,
+        {
+          entryId: entry.id,
+          reason: row.matchReason,
+          confidence: "certain",
+          score: 100,
+          dayDistance: Math.abs(
+            Math.round((Date.parse(entry.date) - Date.parse(row.parsed.date)) / 86_400_000)
+          ),
+          textMatch: 1
+        },
+        row.parsed.amountCents
+      );
+    };
+
+    const rows: ImportRowView[] = records.map((row) => {
       const payee = payeeOf(row.parsed);
       const rule = findPayeeRule(rules, payee, row.parsed.amountCents);
-      const dup =
-        row.duplicateOfEntryId != null
-          ? (duplicateInfo.get(row.duplicateOfEntryId) as
-              | {
-                  id: number;
-                  date: string;
-                  amountCents: number;
-                  description: string | null;
-                  status: string;
-                  placeName: string | null;
-                  categoryName: string | null;
-                }
-              | undefined)
-          : undefined;
+      const candidates = live.get(row.id) ?? [];
+      const exact = row.status === "duplicate" ? exactCandidate(row) : null;
       return {
         id: row.id,
         lineNo: row.lineNo,
@@ -322,19 +505,8 @@ export function createLedgerImportService(db: AppDatabase) {
         payee,
         suggestion: suggestionFor(row.parsed, payee, rule, account?.personId ?? null, isCard),
         rule: rule ? { id: rule.id, mode: rule.mode, ignore: rule.ignore } : null,
-        duplicate:
-          dup && row.matchReason
-            ? {
-                entryId: dup.id,
-                reason: row.matchReason,
-                date: dup.date,
-                amountCents: dup.amountCents,
-                description: dup.description,
-                placeName: dup.placeName,
-                categoryName: dup.categoryName,
-                reconciled: dup.status === "reconciled"
-              }
-            : null,
+        duplicate: exact ?? candidates[0] ?? null,
+        alternatives: exact ? [] : candidates.slice(1),
         entryId: row.entryId,
         skippedBefore:
           row.status === "ignored" && row.matchReason != null && row.duplicateOfEntryId == null
@@ -555,54 +727,48 @@ export function createLedgerImportService(db: AppDatabase) {
     });
   }
 
-  /** Liga a linha a um lancamento que ja existe, sem criar outro. */
+  /**
+   * Liga a linha a um lancamento que ja existe, sem criar outro.
+   *
+   * O arquivo e a verdade do banco: o lancamento passa a ter o valor e o dia
+   * dele, e o que era previsto vira confirmado. Categoria, local e descricao
+   * continuam os do usuario. Parcela mantem o dia do plano.
+   */
   function linkRow(batch: BatchRecord, row: RowRecord, entryId: number): number {
-    const entry = sql
-      .prepare(
-        `SELECT id, account_id AS accountId, status, import_row_id AS importRowId,
-                amount_cents AS amountCents, kind, installment_plan_id AS planId
-         FROM entries WHERE id = ?`
-      )
-      .get(entryId) as
-      | {
-          id: number;
-          accountId: number;
-          status: string;
-          importRowId: number | null;
-          amountCents: number;
-          kind: string;
-          planId: number | null;
-        }
+    const entry = bookEntry(entryId);
+    const accountId = sql.prepare("SELECT account_id AS id FROM entries WHERE id = ?").get(entryId) as
+      | { id: number }
       | undefined;
-    if (!entry || entry.accountId !== batch.accountId) throw notFound("Lancamento para vincular");
-    if (entry.status === "reconciled") {
-      throw new LedgerError("Lancamento conciliado nao pode ser alterado pela importacao");
-    }
+    if (!entry || accountId?.id !== batch.accountId) throw notFound("Lancamento para vincular");
     if (entry.importRowId != null) {
       throw new LedgerError("Este lancamento ja esta vinculado a outra linha importada");
     }
-    // O extrato é a verdade do banco: vincular um R$ 25,00 digitado a um
-    // R$ 25,90 do banco mantinha os 90 centavos de diferença no saldo para
-    // sempre. Lançamento comum assume o valor do banco; transferência e
-    // parcela têm outra ponta ou uma série, e aí a diferença é recusada.
+    const blocked = linkBlock(entry, row.parsed.amountCents);
+    if (blocked) throw new LedgerError(blocked);
+
     const bankCents = row.parsed.amountCents;
     if (bankCents !== entry.amountCents) {
-      if (
-        entry.kind === "transfer" ||
-        entry.planId != null ||
-        Math.sign(bankCents) !== Math.sign(entry.amountCents)
-      ) {
-        throw new LedgerError(
-          "O valor do extrato e diferente do lancamento: corrija o lancamento antes de vincular"
-        );
-      }
       sql.prepare("UPDATE entries SET amount_cents = ? WHERE id = ?").run(bankCents, entryId);
+    }
+    if (entry.planId == null && row.parsed.date !== entry.date) {
+      // A transferencia tem duas pontas, e as duas ficam no mesmo dia.
+      const legs = sql
+        .prepare(
+          `SELECT from_entry_id AS fromId, to_entry_id AS toId FROM transfers
+           WHERE from_entry_id = ? OR to_entry_id = ?`
+        )
+        .get(entryId, entryId) as { fromId: number; toId: number } | undefined;
+      const ids = legs ? [legs.fromId, legs.toId] : [entryId];
+      for (const id of ids) {
+        sql.prepare("UPDATE entries SET date = ? WHERE id = ?").run(row.parsed.date, id);
+      }
     }
     sql
       .prepare(
         `UPDATE entries SET external_id = COALESCE(external_id, @externalId),
            content_hash = COALESCE(content_hash, @hash),
            raw_description = COALESCE(raw_description, @raw),
+           status = CASE WHEN status = 'pending' THEN 'cleared' ELSE status END,
            import_row_id = @rowId, updated_at = @now
          WHERE id = @id`
       )
@@ -774,78 +940,17 @@ export function createLedgerImportService(db: AppDatabase) {
           };
         });
 
+        // Primeiro degrau: o que ja passou por uma importacao (id do banco ou hash)
+        // e certeza, nao vai para o popup. O que o usuario digitou a mao e o
+        // arquivo repete e provavel, nao certo: `reclassify` pareia e manda para
+        // a revisao, onde se ve os dois lados.
         const dates = staged.map((row) => row.date).sort();
-        const candidates = sql
-          .prepare(
-            `SELECT id, date, amount_cents AS amountCents, external_id AS externalId,
-                    content_hash AS contentHash
-             FROM entries
-             WHERE account_id = ? AND date BETWEEN ? AND ? AND kind <> 'adjustment'
-             ORDER BY date, id`
-          )
-          .all(
-            input.accountId,
-            shiftDate(dates[0]!, -FUZZY_WINDOW_DAYS),
-            shiftDate(dates[dates.length - 1]!, FUZZY_WINDOW_DAYS)
-          ) as {
-          id: number;
-          date: string;
-          amountCents: number;
-          externalId: string | null;
-          contentHash: string | null;
-        }[];
-
-        const matches = findDuplicates(staged, candidates);
-
-        // Transferência entre contas próprias (e pagamento de fatura) costuma
-        // cair um ou dois dias depois no outro banco. Fora da janela do mesmo
-        // dia, a linha virava entrada ou saída nova e o dinheiro contava duas
-        // vezes. Só pontas de transferência entram aqui, e vão para revisão.
-        const TRANSFER_WINDOW_DAYS = 3;
-        const transferLegs = sql
-          .prepare(
-            `SELECT e.id, e.date, e.amount_cents AS amountCents FROM entries e
-             WHERE e.account_id = ? AND e.kind = 'transfer' AND e.import_row_id IS NULL
-               AND e.date BETWEEN ? AND ?
-             ORDER BY e.date, e.id`
-          )
-          .all(
-            input.accountId,
-            shiftDate(dates[0]!, -TRANSFER_WINDOW_DAYS),
-            shiftDate(dates[dates.length - 1]!, TRANSFER_WINDOW_DAYS)
-          ) as { id: number; date: string; amountCents: number }[];
-        const takenLegs = new Set([...matches.values()].map((match) => match.entryId));
-        for (const row of staged) {
-          if (matches.has(row.key)) continue;
-          const leg = transferLegs
-            .filter(
-              (candidate) =>
-                !takenLegs.has(candidate.id) &&
-                candidate.amountCents === row.amountCents &&
-                Math.abs(Date.parse(candidate.date) - Date.parse(row.date)) <=
-                  TRANSFER_WINDOW_DAYS * 86_400_000
-            )
-            .sort(
-              (x, y) =>
-                Math.abs(Date.parse(x.date) - Date.parse(row.date)) -
-                  Math.abs(Date.parse(y.date) - Date.parse(row.date)) || x.id - y.id
-            )[0];
-          if (!leg) continue;
-          takenLegs.add(leg.id);
-          matches.set(row.key, {
-            entryId: leg.id,
-            reason: "fuzzy_amount_date"
-          });
-        }
+        const known = bookEntries(input.accountId, dates[0]!, dates[dates.length - 1]!);
+        const matches = findDuplicates(staged, known.map(dedupeCandidateOf), { exactOnly: true });
         const markDuplicate = sql.prepare(
-          `UPDATE import_rows SET status = ?, duplicate_of_entry_id = ?, match_reason = ? WHERE id = ?`
+          `UPDATE import_rows SET status = 'duplicate', duplicate_of_entry_id = ?, match_reason = ? WHERE id = ?`
         );
-        for (const [rowId, match] of matches) {
-          // So o degrau aproximado vai para o popup: id do banco e hash iguais
-          // sao certeza, e perguntar de novo seria ruido.
-          const status = match.reason === "fuzzy_amount_date" ? "needs_review" : "duplicate";
-          markDuplicate.run(status, match.entryId, match.reason, rowId);
-        }
+        for (const [rowId, match] of matches) markDuplicate.run(match.entryId, match.reason, rowId);
 
         // Linha que ja passou por uma importacao desta conta e foi pulada — no
         // popup, por "ignorar sempre" ou por ter o lancamento apagado depois —
@@ -943,7 +1048,11 @@ export function createLedgerImportService(db: AppDatabase) {
         }
 
         if (input.action === "link") {
-          const target = input.linkEntryId ?? row.duplicateOfEntryId;
+          const target =
+            input.linkEntryId ??
+            row.duplicateOfEntryId ??
+            pendingMatches(batchId).get(row.id)?.[0]?.entryId ??
+            null;
           if (target == null) throw new LedgerError("Nenhum lancamento para vincular");
           markCommitted(row.id, linkRow(batch, row, target));
           // O lancamento que ja existia (da planilha, digitado a mao) ensina o

@@ -56,7 +56,7 @@ describe("rotas de importacao de extrato", () => {
     const upload = await app.inject({
       method: "POST",
       url: "/api/ledger/imports",
-      ...multipart({ accountId: String(accountId) }, { name: "NU.csv", content: NUBANK_CSV })
+      ...multipart({ accountId: String(accountId), kind: "bank" }, { name: "NU.csv", content: NUBANK_CSV })
     });
     expect(upload.statusCode).toBe(201);
     const view = upload.json();
@@ -87,8 +87,31 @@ describe("rotas de importacao de extrato", () => {
     const response = await app.inject({
       method: "POST",
       url: "/api/ledger/imports",
-      ...multipart({}, { name: "NU.csv", content: NUBANK_CSV })
+      ...multipart({ kind: "bank" }, { name: "NU.csv", content: NUBANK_CSV })
     });
     expect(response.statusCode).toBe(400);
+  });
+
+  it("exige que o usuario diga se e extrato ou fatura", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/ledger/imports",
+      ...multipart({ accountId: String(accountId) }, { name: "NU.csv", content: NUBANK_CSV })
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toMatch(/extrato da conta ou a fatura do cart/);
+  });
+
+  it("recusa fatura enviada como extrato", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/ledger/imports",
+      ...multipart(
+        { accountId: String(accountId), kind: "card" },
+        { name: "NU.csv", content: NUBANK_CSV }
+      )
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toMatch(/cart/);
   });
 });

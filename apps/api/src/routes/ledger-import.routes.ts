@@ -51,6 +51,13 @@ export const registerLedgerImportRoutes: RoutePlugin = (app, { db }) => {
     if (!accountId || !Number.isInteger(accountId) || accountId <= 0) {
       return reply.status(400).send({ error: "Escolha a conta do extrato" });
     }
+    // Quem decide é o usuário: uma fatura lida como extrato (ou o contrário)
+    // grava o dinheiro no lugar errado, e não dá para adivinhar só pela conta.
+    if (!kind) {
+      return reply
+        .status(400)
+        .send({ error: "Diga se o arquivo é o extrato da conta ou a fatura do cartão" });
+    }
     return reply.status(201).send(imports.upload({ accountId, kind, ...upload }));
   });
 

@@ -1,4 +1,4 @@
-import { FileUp, ListChecks, RotateCcw, Upload, X } from "lucide-react";
+import { CreditCard, FileUp, Landmark, ListChecks, RotateCcw, Upload, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   ImportBatchSummary,
@@ -11,7 +11,8 @@ import type {
 import { useConfirm } from "../../components/dialog.js";
 import { Dropdown } from "../../components/forms.js";
 import { ImportRowDialog } from "../../components/finance/ImportRowDialog.js";
-import { Button, Empty, Field, Loading, Panel, SectionHeading, Segmented, Tag } from "../../components/ui.js";
+import { Button, Empty, Field, Loading, Panel, SectionHeading, Tag } from "../../components/ui.js";
+import { candidateTitle } from "../../components/finance/ImportCompare.js";
 import { ledgerDate, signedMoneyFromCents } from "../../lib/format.js";
 import { ACCOUNT_KIND_LABEL, useLedgerReference } from "../../lib/ledger.js";
 import { importApi } from "../../lib/ledger-import.js";
@@ -25,6 +26,32 @@ const STATUS: Record<ImportRowStatus, { label: string; tone: string }> = {
   ignored: { label: "Pulado", tone: "neutral" },
   committed: { label: "Importado", tone: "positive" }
 };
+
+/**
+ * A fila da revisão: o que parece já estar no livro vem primeiro, porque é onde
+ * um "sim" automático duplicaria dinheiro; o resto segue a ordem do arquivo.
+ */
+function reviewOrder(a: ImportRowView, b: ImportRowView): number {
+  return Number(b.duplicate != null) - Number(a.duplicate != null) || a.lineNo - b.lineNo;
+}
+
+const needsReview = (rows: ImportRowView[]) =>
+  rows.filter((row) => row.status === "needs_review").sort(reviewOrder);
+
+const KIND_CHOICES: { value: StatementKind; title: string; text: string; icon: typeof Landmark }[] = [
+  {
+    value: "bank",
+    title: "Extrato da conta",
+    text: "Entradas e saídas de uma conta corrente: Pix, débito, transferências.",
+    icon: Landmark
+  },
+  {
+    value: "card",
+    title: "Fatura do cartão",
+    text: "As compras de uma fatura de cartão de crédito, com as parcelas.",
+    icon: CreditCard
+  }
+];
 
 /** Contas que recebem extrato; a fatura vai sempre para um cartão. */
 const BANK_KINDS = new Set(["checking", "savings", "cash", "meal_voucher"]);
@@ -58,7 +85,9 @@ export function ImportPage() {
   const toast = useToast();
   const confirm = useConfirm();
 
-  const [kind, setKind] = useState<StatementKind>("bank");
+  // Sem padrão: arquivo de fatura lido como extrato (ou o contrário) grava o
+  // dinheiro no lugar errado, então o usuário escolhe antes de qualquer coisa.
+  const [kind, setKind] = useState<StatementKind | null>(null);
   const [accountId, setAccountId] = useState<number | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -72,6 +101,7 @@ export function ImportPage() {
       reference.accounts
         .filter(
           (account) =>
+            kind != null &&
             !account.archived &&
             (kind === "card" ? account.kind === "credit_card" : BANK_KINDS.has(account.kind))
         )
@@ -94,7 +124,8 @@ export function ImportPage() {
 
   useEffect(() => void loadBatches(), [loadBatches]);
 
-  const queue = useMemo(() => view?.rows.filter((row) => row.status === "needs_review") ?? [], [view]);
+  const queue = useMemo(() => (view ? needsReview(view.rows) : []), [view]);
+  const lookalikes = useMemo(() => queue.filter((row) => row.duplicate != null), [queue]);
   const openRow = view?.rows.find((row) => row.id === openRowId) ?? null;
 
   /**
@@ -103,11 +134,12 @@ export function ImportPage() {
    * só volta ao começo quando chega ao fim.
    */
   function advance(next: ImportBatchView, fromRowId?: number) {
+    const answered = view?.rows.find((row) => row.id === fromRowId);
     setView(next);
-    const from = next.rows.findIndex((row) => row.id === fromRowId);
+    const pendingRows = needsReview(next.rows);
     const pending =
-      next.rows.find((row, index) => index > from && row.status === "needs_review") ??
-      next.rows.find((row) => row.status === "needs_review");
+      (answered ? pendingRows.find((row) => reviewOrder(row, answered) > 0) : undefined) ??
+      pendingRows[0];
     setOpenRowId(pending?.id ?? null);
     if (!pending) {
       const ready = next.counts.ready;
@@ -120,7 +152,7 @@ export function ImportPage() {
   }
 
   async function sendFile() {
-    if (!file || accountId == null) return;
+    if (!file || accountId == null || kind == null) return;
     setUploading(true);
     try {
       const next = await importApi.upload(accountId, kind, file);
@@ -143,7 +175,7 @@ export function ImportPage() {
     try {
       const next = await importApi.get(batchId);
       setView(next);
-      setOpenRowId(next.rows.find((row) => row.status === "needs_review")?.id ?? null);
+      setOpenRowId(needsReview(next.rows)[0]?.id ?? null);
     } catch (cause) {
       toast.notify(cause instanceof Error ? cause.message : "Falha ao abrir o lote", "error");
     }
@@ -221,51 +253,74 @@ export function ImportPage() {
   return (
     <>
       <SectionHeading
-        title="Importar extrato"
-        subtitle="Suba o extrato da conta ou a fatura do cartão (CSV do Nubank ou OFX) e revise lançamento por lançamento antes de gravar."
+        title="Importar extrato ou fatura"
+        subtitle="Diga o que o arquivo é, suba o CSV do Nubank (ou OFX) e revise lançamento por lançamento. O que já está no livro é marcado para você conferir, lado a lado."
       />
 
       <Panel title="Enviar arquivo">
-        <Field label="Tipo de arquivo">
-          <Segmented<StatementKind>
-            value={kind}
-            onChange={(next) => {
-              setKind(next);
-              setAccountId(null);
-            }}
-            options={[
-              { value: "bank", label: "Extrato da conta" },
-              { value: "card", label: "Fatura do cartão" }
-            ]}
-          />
-        </Field>
-        <div className="fin-import-upload">
-          <Field label={kind === "card" ? "Cartão" : "Conta do extrato"}>
-            <Dropdown<number>
-              value={accountId}
-              onChange={setAccountId}
-              options={accounts}
-              placeholder={kind === "card" ? "Escolher cartão" : "Escolher conta"}
-              aria-label={kind === "card" ? "Cartão" : "Conta do extrato"}
-            />
-          </Field>
-          <Field label="Arquivo">
-            <FilePicker
-              file={file}
-              onChange={setFile}
-              accept=".csv,.ofx,text/csv"
-              placeholder="CSV ou OFX, até 10 MB"
-              aria-label="Escolher o arquivo do extrato"
-            />
-          </Field>
-          <Button icon={Upload} onClick={() => void sendFile()} disabled={!file || accountId == null || uploading}>
-            {uploading ? "Lendo…" : kind === "card" ? "Ler fatura" : "Ler extrato"}
-          </Button>
-        </div>
-        <p className="fin-callout">
-          {HELP[kind]} Um lançamento que já está no livro com o mesmo valor no mesmo dia é
-          oferecido para vincular, em vez de duplicar.
-        </p>
+        <fieldset className="fin-import-kinds">
+          <legend className="field-label">1. O que você vai importar?</legend>
+          <div className="fin-import-kind-grid" role="radiogroup" aria-label="Tipo de arquivo">
+            {KIND_CHOICES.map((choice) => {
+              const Icon = choice.icon;
+              const active = kind === choice.value;
+              return (
+                <button
+                  key={choice.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  className={`fin-import-kind ${active ? "active" : ""}`}
+                  onClick={() => {
+                    if (kind === choice.value) return;
+                    setKind(choice.value);
+                    setAccountId(null);
+                  }}
+                >
+                  <Icon size={20} aria-hidden />
+                  <span>
+                    <strong>{choice.title}</strong>
+                    <small>{choice.text}</small>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </fieldset>
+        {kind == null ? (
+          <p className="fin-callout">Comece escolhendo se o arquivo é um extrato de conta ou uma fatura de cartão.</p>
+        ) : (
+          <>
+            <div className="fin-import-upload">
+              <Field label={kind === "card" ? "2. Cartão" : "2. Conta do extrato"}>
+                <Dropdown<number>
+                  value={accountId}
+                  onChange={setAccountId}
+                  options={accounts}
+                  placeholder={kind === "card" ? "Escolher cartão" : "Escolher conta"}
+                  aria-label={kind === "card" ? "Cartão" : "Conta do extrato"}
+                />
+              </Field>
+              <Field label="3. Arquivo">
+                <FilePicker
+                  file={file}
+                  onChange={setFile}
+                  accept=".csv,.ofx,text/csv"
+                  placeholder="CSV ou OFX, até 10 MB"
+                  aria-label="Escolher o arquivo"
+                />
+              </Field>
+              <Button icon={Upload} onClick={() => void sendFile()} disabled={!file || accountId == null || uploading}>
+                {uploading ? "Lendo…" : kind === "card" ? "Ler fatura" : "Ler extrato"}
+              </Button>
+            </div>
+            <p className="fin-callout">
+              {HELP[kind]} Lançamento que já está no livro (mesmo valor, até 3 dias de diferença) é
+              marcado para você comparar lado a lado e decidir se é o mesmo — nada é vinculado sem
+              a sua confirmação.
+            </p>
+          </>
+        )}
       </Panel>
 
       {view && (
@@ -284,6 +339,7 @@ export function ImportPage() {
         >
           <div className="fin-import-summary">
             <Tag tone="warning">{view.counts.review} a revisar</Tag>
+            {lookalikes.length > 0 && <Tag tone="info">{lookalikes.length} parecem já estar no livro</Tag>}
             <Tag tone="info">{view.counts.ready} prontos</Tag>
             <Tag tone="positive">{view.counts.committed} importados</Tag>
             <Tag tone="neutral">{view.counts.duplicate} já importados</Tag>
@@ -297,8 +353,13 @@ export function ImportPage() {
                 disabled={queue.length === 0}
                 onClick={() => setOpenRowId(queue[0]?.id ?? null)}
               >
-                Revisar ({queue.length})
+                {lookalikes.length > 0 ? `Revisar possíveis duplicados (${lookalikes.length})` : `Revisar (${queue.length})`}
               </Button>
+              {lookalikes.length > 0 && queue.length > lookalikes.length && (
+                <Button variant="soft" onClick={() => setOpenRowId(queue[0]?.id ?? null)}>
+                  Revisar tudo ({queue.length})
+                </Button>
+              )}
               <Button variant="soft" icon={FileUp} disabled={view.counts.ready === 0 || busy} onClick={() => void commitReady()}>
                 Importar prontos ({view.counts.ready})
               </Button>
@@ -338,6 +399,11 @@ export function ImportPage() {
                         <small className="fin-import-raw-inline">{row.rawDescription}</small>
                       </td>
                       <td>
+                        {row.duplicate && row.status === "needs_review" && (
+                          <small className="fin-import-match">
+                            Parece o lançamento de {ledgerDate(row.duplicate.date)}: {candidateTitle(row.duplicate)}
+                          </small>
+                        )}
                         {[
                           categoryName(row.suggestion.categoryId),
                           // Sem regra o local sugerido é o próprio nome, já na coluna ao lado.
@@ -424,7 +490,9 @@ export function ImportPage() {
           accountId={view.batch.accountId}
           reference={reference}
           cardInvoice={view.batch.statementKind === "card"}
-          queue={view.rows.filter((row) => row.status === "needs_review" || row.id === openRow.id)}
+          queue={view.rows
+            .filter((row) => row.status === "needs_review" || row.id === openRow.id)
+            .sort(reviewOrder)}
           onPick={setOpenRowId}
           remaining={Math.max(queue.length, 1)}
           busy={busy}

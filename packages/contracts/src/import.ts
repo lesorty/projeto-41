@@ -343,6 +343,38 @@ export type ImportRowConfirm = z.input<typeof importRowConfirmSchema>;
 export const statementKindSchema = z.enum(["bank", "card"]);
 export type StatementKind = z.infer<typeof statementKindSchema>;
 
+/** Quao seguro o sistema esta de que a linha e um lancamento que ja existe. */
+export const matchConfidenceSchema = z.enum(["certain", "likely", "possible"]);
+export type MatchConfidence = z.infer<typeof matchConfidenceSchema>;
+
+/**
+ * Um lancamento do livro que uma linha do arquivo parece repetir, com o que a
+ * tela precisa para mostrar os dois lados e o que muda ao vincular.
+ */
+export type ImportCandidate = {
+  entryId: number;
+  reason: MatchReason;
+  confidence: MatchConfidence;
+  /** Dias entre a data do arquivo e a do lancamento. */
+  dayDistance: number;
+  date: string;
+  amountCents: number;
+  kind: "expense" | "income" | "transfer" | "adjustment";
+  /** Situacao do lancamento: previsto (`pending`), confirmado ou conciliado. */
+  status: "pending" | "cleared" | "reconciled";
+  description: string | null;
+  placeName: string | null;
+  categoryName: string | null;
+  personName: string | null;
+  /** Transferencia: a conta do outro lado. */
+  transferWith: string | null;
+  /** Parcela de um plano: `Parcela 2/4`. */
+  installment: { number: number; total: number } | null;
+  reconciled: boolean;
+  /** Motivo de nao poder vincular (conciliado, valor diferente em transferencia...). */
+  blocked: string | null;
+};
+
 /** Linha do lote como a tela de revisao enxerga. */
 export type ImportRowView = {
   id: number;
@@ -373,16 +405,10 @@ export type ImportRowView = {
     personId: number | null;
   };
   rule: { id: number; mode: RuleMode; ignore: boolean } | null;
-  duplicate: {
-    entryId: number;
-    reason: MatchReason;
-    date: string;
-    amountCents: number;
-    description: string | null;
-    placeName: string | null;
-    categoryName: string | null;
-    reconciled: boolean;
-  } | null;
+  /** O lancamento do livro que a linha parece repetir (o mais provavel), se houver. */
+  duplicate: ImportCandidate | null;
+  /** Outros lancamentos parecidos, do mais para o menos provavel. */
+  alternatives: ImportCandidate[];
   entryId: number | null;
   /** Pulada sozinha: a mesma linha foi pulada (ou teve o lancamento apagado) antes. */
   skippedBefore: boolean;

@@ -5,17 +5,12 @@ import { Modal } from "../dialog.js";
 import { Dropdown } from "../forms.js";
 import { Button, Field, Segmented, Tag } from "../ui.js";
 import { PlaceAutocomplete } from "./EntryDrawer.js";
+import { CandidatePicker, ImportCompare } from "./ImportCompare.js";
 import { ledgerDate, monthLabel, signedMoneyFromCents, weekdayName } from "../../lib/format.js";
 import { ACCOUNT_KIND_LABEL, isCard, type LedgerReference } from "../../lib/ledger.js";
 
 type Kind = "expense" | "income" | "transfer";
 type Action = "create" | "link";
-
-const REASON_LABEL: Record<string, string> = {
-  external_id: "mesmo identificador do banco",
-  content_hash: "mesma data, valor e descrição",
-  fuzzy_amount_date: "mesmo valor no mesmo dia"
-};
 
 /**
  * Popup da revisão: um lançamento do extrato por vez.
@@ -57,7 +52,17 @@ export function ImportRowDialog({
   const outgoing = row.amountCents < 0;
   const natural: Kind = outgoing ? "expense" : "income";
 
-  const [action, setAction] = useState<Action>(row.duplicate && !row.duplicate.reconciled ? "link" : "create");
+  // O sistema nunca vincula sozinho: so propõe. Muito provável abre em "vincular";
+  // possível abre em "criar novo", e o usuário confere os dois lados.
+  const candidates = useMemo(
+    () => (row.duplicate ? [row.duplicate, ...row.alternatives] : []),
+    [row.duplicate, row.alternatives]
+  );
+  const [linkEntryId, setLinkEntryId] = useState<number | null>(row.duplicate?.entryId ?? null);
+  const chosen = candidates.find((candidate) => candidate.entryId === linkEntryId) ?? null;
+  const [action, setAction] = useState<Action>(
+    row.duplicate && !row.duplicate.blocked && row.duplicate.confidence !== "possible" ? "link" : "create"
+  );
   const [kind, setKind] = useState<Kind>(row.suggestion.kind);
   const [toAccountId, setToAccountId] = useState<number | null>(null);
   const [categoryId, setCategoryId] = useState<number | null>(row.suggestion.categoryId);
@@ -103,7 +108,11 @@ export function ImportRowDialog({
     event.preventDefault();
     if (busy) return;
     if (action === "link") {
-      void onSubmit({ action: "link", remember: remember === "ignore" ? "none" : remember });
+      void onSubmit({
+        action: "link",
+        linkEntryId: chosen?.entryId ?? null,
+        remember: remember === "ignore" ? "none" : remember
+      });
       return;
     }
     if (ignoring) {
@@ -127,6 +136,7 @@ export function ImportRowDialog({
   const primaryLabel =
     action === "link" ? "Vincular e seguir" : ignoring ? "Ignorar e seguir" : "Confirmar e seguir";
   const transferMissing = action === "create" && kind === "transfer" && toAccountId == null;
+  const linkBlocked = action === "link" && (chosen == null || chosen.blocked != null);
 
   return (
     <Modal
@@ -162,7 +172,7 @@ export function ImportRowDialog({
                       {weekdayName(item.date, "short")}, {ledgerDate(item.date)}
                       {item.time ? ` · ${item.time}` : ""}
                       {item.installment ? ` · ${item.installment.number}/${item.installment.total}` : ""}
-                      {item.duplicate ? " · já no livro?" : ""}
+                      {item.duplicate ? " · parece já estar no livro" : ""}
                       {item.status === "new" ? " · automático" : ""}
                     </span>
                   </button>
@@ -203,32 +213,26 @@ export function ImportRowDialog({
               {row.rawDescription}
             </p>
 
-            {row.duplicate && (
-              <div className="fin-callout fin-import-dup">
+            {chosen && (
+              <section className="fin-callout fin-import-dup" aria-label="Possível duplicado">
                 <p>
-                  <strong>Parece já estar no livro</strong> ({REASON_LABEL[row.duplicate.reason]}):{" "}
-                  {ledgerDate(row.duplicate.date)} · {signedMoneyFromCents(row.duplicate.amountCents)}
-                  {row.duplicate.placeName ? ` · ${row.duplicate.placeName}` : ""}
-                  {row.duplicate.description ? ` · ${row.duplicate.description}` : ""}
-                  {row.duplicate.categoryName ? ` · ${row.duplicate.categoryName}` : ""}
+                  <strong>Parece já estar no livro.</strong> Confira os dois lados e diga se é o mesmo lançamento.
                 </p>
-                {row.duplicate.reconciled ? (
-                  <p>Esse lançamento está conciliado e não pode ser vinculado.</p>
-                ) : (
-                  <Segmented<Action>
-                    value={action}
-                    onChange={(next) => {
-                      setAction(next);
-                      // Vincular grava a linha, entao "ignorar sempre" nao se aplica.
-                      if (next === "link" && remember === "ignore") setRemember("ask");
-                    }}
-                    options={[
-                      { value: "link", label: "É o mesmo: vincular" },
-                      { value: "create", label: "É outro: criar novo" }
-                    ]}
-                  />
-                )}
-              </div>
+                <CandidatePicker row={row} candidates={candidates} value={linkEntryId} onChange={setLinkEntryId} />
+                <ImportCompare row={row} candidate={chosen} />
+                <Segmented<Action>
+                  value={action}
+                  onChange={(next) => {
+                    setAction(next);
+                    // Vincular grava a linha, entao "ignorar sempre" nao se aplica.
+                    if (next === "link" && remember === "ignore") setRemember("ask");
+                  }}
+                  options={[
+                    { value: "link", label: "É o mesmo: vincular" },
+                    { value: "create", label: "É outro: criar novo" }
+                  ]}
+                />
+              </section>
             )}
 
             {action === "create" && (
@@ -393,7 +397,11 @@ export function ImportRowDialog({
             >
               Pular
             </Button>
-            <Button type="submit" icon={action === "link" ? Link2 : Check} disabled={busy || transferMissing}>
+            <Button
+              type="submit"
+              icon={action === "link" ? Link2 : Check}
+              disabled={busy || transferMissing || linkBlocked}
+            >
               {busy ? "Gravando…" : primaryLabel}
             </Button>
           </div>

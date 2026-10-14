@@ -287,9 +287,9 @@ describe("o que ja passou pelo sistema e reconhecido sozinho", () => {
   });
 });
 
-describe("possivel duplicata so no mesmo dia", () => {
-  it("mesmo valor no dia seguinte nao e duplicata", () => {
-    db.ledger.entries.create({
+describe("possivel duplicata em dias proximos", () => {
+  it("mesmo valor no dia seguinte aparece como possivel, para o usuario decidir", () => {
+    const existing = db.ledger.entries.create({
       accountId,
       date: "2026-09-02",
       amountCents: -1900,
@@ -297,7 +297,18 @@ describe("possivel duplicata so no mesmo dia", () => {
       description: "Outro lanche, no dia seguinte"
     });
     const row = rowOf(upload(), "Zelia Almeida");
-    expect(row.duplicate).toBeNull();
     expect(row.status).toBe("needs_review");
+    expect(row.duplicate).toMatchObject({ entryId: existing, confidence: "possible", dayDistance: 1 });
+  });
+
+  it("alem de tres dias nao e duplicata", () => {
+    db.ledger.entries.create({
+      accountId,
+      date: "2026-09-08",
+      amountCents: -1900,
+      kind: "expense",
+      description: "Outro lanche, na semana seguinte"
+    });
+    expect(rowOf(upload(), "Zelia Almeida").duplicate).toBeNull();
   });
 });
