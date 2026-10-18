@@ -1,4 +1,4 @@
-import { Receipt } from "lucide-react";
+import { FileDown, Receipt } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CategoryReport, CategoryTrend } from "@projeto41/contracts";
 import { daysBetween, fromCents } from "@projeto41/finance";
@@ -10,14 +10,14 @@ import {
   periodLabel,
   type SelectedPeriod
 } from "../../components/finance/PeriodPicker.js";
-import { Empty, Panel, SectionHeading, Skeleton } from "../../components/ui.js";
+import { Button, Empty, Panel, SectionHeading, Skeleton } from "../../components/ui.js";
 import { api } from "../../lib/api.js";
 import { moneyFromCents } from "../../lib/format.js";
 import { spendTone, variationText } from "../../lib/report-format.js";
 import { useToast } from "../../lib/toast.js";
 
 /** Consulta de relatório: mês-calendário usa `period`, recorte livre usa from/to. */
-function reportQuery(period: SelectedPeriod, compare: boolean) {
+function reportQuery(period: SelectedPeriod, compare?: boolean) {
   const params = new URLSearchParams();
   if (period.period) params.set("period", period.period);
   else if (period.year != null) params.set("year", String(period.year));
@@ -25,7 +25,7 @@ function reportQuery(period: SelectedPeriod, compare: boolean) {
     params.set("from", period.from);
     params.set("to", period.to);
   }
-  params.set("compare", compare ? "1" : "0");
+  if (compare != null) params.set("compare", compare ? "1" : "0");
   return `?${params.toString()}`;
 }
 
@@ -164,7 +164,16 @@ export function ReportsPage() {
 
   return (
     <>
-      <SectionHeading title="Relatórios" subtitle={`Gastos de ${periodLabel(period)}`} />
+      <SectionHeading title="Relatórios" subtitle={`Gastos de ${periodLabel(period)}`}>
+        {/* O PDF sai do servidor com o mesmo período escolhido aqui. */}
+        <Button
+          variant="ghost"
+          icon={FileDown}
+          onClick={() => window.open(`/api/ledger/report.pdf${reportQuery(period)}`, "_blank")}
+        >
+          Exportar PDF
+        </Button>
+      </SectionHeading>
 
       <Panel bodyClass="fin-filter-body">
         <PeriodPicker value={period} onChange={setPeriod} />
