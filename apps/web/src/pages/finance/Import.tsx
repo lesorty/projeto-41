@@ -11,11 +11,13 @@ import type {
 import { useConfirm } from "../../components/dialog.js";
 import { Dropdown } from "../../components/forms.js";
 import { ImportRowDialog } from "../../components/finance/ImportRowDialog.js";
+import { PdfPasswordDialog } from "../../components/finance/PdfPasswordDialog.js";
+import { PdfReconciliationBanner } from "../../components/finance/PdfReconciliationBanner.js";
 import { Button, Empty, Field, Loading, Panel, SectionHeading, Tag } from "../../components/ui.js";
 import { candidateTitle } from "../../components/finance/ImportCompare.js";
 import { ledgerDate, signedMoneyFromCents } from "../../lib/format.js";
 import { ACCOUNT_KIND_LABEL, useLedgerReference } from "../../lib/ledger.js";
-import { importApi } from "../../lib/ledger-import.js";
+import { importApi, ImportUploadError } from "../../lib/ledger-import.js";
 import { useToast } from "../../lib/toast.js";
 import { FilePicker } from "../../components/FilePicker.js";
 
@@ -27,12 +29,26 @@ const STATUS: Record<ImportRowStatus, { label: string; tone: string }> = {
   committed: { label: "Importado", tone: "positive" }
 };
 
+/** Linha de PDF abaixo disto ganha o indicador de leitura duvidosa. */
+const LOW_CONFIDENCE = 0.8;
+
+/** Linha de PDF que pede olho: sinal sem marcador, leitura duvidosa ou aviso do leitor. */
+function needsAttention(row: ImportRowView): boolean {
+  return row.pdf != null && (!row.pdf.signKnown || row.pdf.confidence < LOW_CONFIDENCE || row.pdf.warnings.length > 0);
+}
+
 /**
  * A fila da revisão: o que parece já estar no livro vem primeiro, porque é onde
- * um "sim" automático duplicaria dinheiro; o resto segue a ordem do arquivo.
+ * um "sim" automático duplicaria dinheiro; depois, no PDF, as linhas duvidosas —
+ * ninguém revisa 200 linhas procurando as 6 que importam. O resto segue a
+ * ordem do arquivo.
  */
 function reviewOrder(a: ImportRowView, b: ImportRowView): number {
-  return Number(b.duplicate != null) - Number(a.duplicate != null) || a.lineNo - b.lineNo;
+  return (
+    Number(b.duplicate != null) - Number(a.duplicate != null) ||
+    Number(needsAttention(b)) - Number(needsAttention(a)) ||
+    a.lineNo - b.lineNo
+  );
 }
 
 const needsReview = (rows: ImportRowView[]) =>
@@ -61,7 +77,10 @@ const HELP: Record<StatementKind, React.ReactNode> = {
     <>
       No app do Nubank: <strong>Extrato → ícone de exportar → CSV</strong>. O arquivo tem as
       colunas Data, Valor, Identificador e Descrição. O identificador de cada transação evita
-      importar a mesma linha duas vezes.
+      importar a mesma linha duas vezes. Extrato em Excel (.xls ou .xlsx), como o do BTG, também
+      serve: o cabeçalho do relatório e as linhas de saldo do dia são ignorados. O PDF do extrato
+      do BTG também é lido, mas é o caminho de reserva: prefira Excel, CSV ou OFX quando o banco
+      oferecer, e confira a soma que aparece no topo da revisão.
     </>
   ),
   card: (
@@ -95,6 +114,8 @@ export function ImportPage() {
   const [view, setView] = useState<ImportBatchView | null>(null);
   const [openRowId, setOpenRowId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+  /** PDF com senha: o diálogo fica aberto até acertar ou desistir. */
+  const [passwordPrompt, setPasswordPrompt] = useState<{ incorrect: boolean } | null>(null);
 
   const accounts = useMemo(
     () =>
@@ -151,11 +172,12 @@ export function ImportPage() {
     }
   }
 
-  async function sendFile() {
+  async function sendFile(password?: string) {
     if (!file || accountId == null || kind == null) return;
     setUploading(true);
     try {
-      const next = await importApi.upload(accountId, kind, file);
+      const next = await importApi.upload(accountId, kind, file, password);
+      setPasswordPrompt(null);
       if (next.previousImportAt) {
         toast.notify(
           `Este arquivo já foi enviado em ${ledgerDate(next.previousImportAt.slice(0, 10))}. O que já entrou aparece como "Já importado".`
@@ -165,7 +187,13 @@ export function ImportPage() {
       await loadBatches();
       advance(next);
     } catch (cause) {
-      toast.notify(cause instanceof Error ? cause.message : "Falha ao ler o arquivo", "error");
+      if (cause instanceof ImportUploadError && cause.code === "pdf_password_required") {
+        setPasswordPrompt({ incorrect: false });
+      } else if (cause instanceof ImportUploadError && cause.code === "pdf_password_incorrect") {
+        setPasswordPrompt({ incorrect: true });
+      } else {
+        toast.notify(cause instanceof Error ? cause.message : "Falha ao ler o arquivo", "error");
+      }
     } finally {
       setUploading(false);
     }
@@ -254,7 +282,7 @@ export function ImportPage() {
     <>
       <SectionHeading
         title="Importar extrato ou fatura"
-        subtitle="Diga o que o arquivo é, suba o CSV do Nubank (ou OFX) e revise lançamento por lançamento. O que já está no livro é marcado para você conferir, lado a lado."
+        subtitle="Diga o que o arquivo é, suba o CSV do Nubank (ou OFX, ou Excel) e revise lançamento por lançamento. O que já está no livro é marcado para você conferir, lado a lado."
       />
 
       <Panel title="Enviar arquivo">
@@ -305,8 +333,8 @@ export function ImportPage() {
                 <FilePicker
                   file={file}
                   onChange={setFile}
-                  accept=".csv,.ofx,text/csv"
-                  placeholder="CSV ou OFX, até 10 MB"
+                  accept=".csv,.ofx,.xls,.xlsx,.pdf,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/pdf"
+                  placeholder="CSV, OFX ou Excel; PDF do BTG como reserva. Até 10 MB"
                   aria-label="Escolher o arquivo"
                 />
               </Field>
@@ -346,6 +374,7 @@ export function ImportPage() {
             <Tag tone="neutral">{view.counts.ignored} pulados</Tag>
             {view.batch.status === "discarded" && <Tag tone="negative">Lote encerrado</Tag>}
           </div>
+          {view.batch.pdf && <PdfReconciliationBanner info={view.batch.pdf} rowCount={view.rows.length} />}
           {view.batch.status !== "discarded" && (
             <div className="fin-import-toolbar">
               <Button
@@ -360,9 +389,12 @@ export function ImportPage() {
                   Revisar tudo ({queue.length})
                 </Button>
               )}
-              <Button variant="soft" icon={FileUp} disabled={view.counts.ready === 0 || busy} onClick={() => void commitReady()}>
-                Importar prontos ({view.counts.ready})
-              </Button>
+              {/* PDF nao tem "importar tudo": cada linha passa pelo popup. */}
+              {!view.batch.pdf && (
+                <Button variant="soft" icon={FileUp} disabled={view.counts.ready === 0 || busy} onClick={() => void commitReady()}>
+                  Importar prontos ({view.counts.ready})
+                </Button>
+              )}
               {view.counts.review + view.counts.ready > 0 && (
                 <Button variant="ghost" onClick={() => void discard()}>
                   Encerrar lote
@@ -420,6 +452,12 @@ export function ImportPage() {
                       </td>
                       <td>
                         <Tag tone={status.tone}>{status.label}</Tag>
+                        {row.pdf && !row.pdf.signKnown && <Tag tone="warning">conferir sinal</Tag>}
+                        {row.pdf && row.pdf.confidence < LOW_CONFIDENCE && (
+                          <span className="fin-pdf-low" title={row.pdf.warnings.join(" ") || "Leitura do PDF com pouca confiança"}>
+                            leitura duvidosa
+                          </span>
+                        )}
                       </td>
                       <td className="fin-import-row-action">
                         {editable && view.batch.status !== "discarded" && (
@@ -482,6 +520,16 @@ export function ImportPage() {
           </div>
         )}
       </Panel>
+
+      {passwordPrompt && file && (
+        <PdfPasswordDialog
+          fileName={file.name}
+          incorrect={passwordPrompt.incorrect}
+          busy={uploading}
+          onSubmit={(password) => void sendFile(password)}
+          onClose={() => setPasswordPrompt(null)}
+        />
+      )}
 
       {view && openRow && (
         <ImportRowDialog

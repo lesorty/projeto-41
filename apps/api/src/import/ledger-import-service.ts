@@ -10,6 +10,7 @@ import {
   type ImportRowView,
   type MatchReason,
   type ParsedTransaction,
+  type PdfBatchInfo,
   type RuleMode,
   type StatementKind
 } from "@projeto41/contracts";
@@ -28,6 +29,8 @@ import {
 } from "./dedupe.js";
 import { timeFromNubankId } from "./nubank-id.js";
 import { readOfx } from "./ofx/ofx-reader.js";
+import type { PdfStatement } from "./pdf/pdf-import-service.js";
+import { looksLikeSpreadsheet, spreadsheetToCsv } from "./spreadsheet/spreadsheet-reader.js";
 import {
   conditionsFor,
   directionOf,
@@ -69,6 +72,11 @@ type RowRecord = {
   entryId: number | null;
   duplicateOfEntryId: number | null;
   matchReason: MatchReason | null;
+  /** So linha de PDF. */
+  confidence: number | null;
+  signKnown: number;
+  sourcePage: number | null;
+  warningsJson: string | null;
 };
 
 type BatchRecord = {
@@ -85,6 +93,9 @@ type BatchRecord = {
   periodEnd: string | null;
   closingBalanceCents: number | null;
   accountName: string;
+  adapterId: string | null;
+  layoutVersion: string | null;
+  reconciliationJson: string | null;
 };
 
 const PENDING: ImportRowStatus[] = ["new", "needs_review"];
@@ -116,7 +127,9 @@ export function createLedgerImportService(db: AppDatabase) {
                 b.file_hash AS fileHash, b.imported_at AS importedAt, b.status,
                 b.row_count AS rowCount, b.committed_count AS committedCount,
                 b.period_start AS periodStart, b.period_end AS periodEnd,
-                b.closing_balance_cents AS closingBalanceCents, a.name AS accountName
+                b.closing_balance_cents AS closingBalanceCents, a.name AS accountName,
+                b.adapter_id AS adapterId, b.layout_version AS layoutVersion,
+                b.reconciliation_json AS reconciliationJson
          FROM import_batches b JOIN accounts a ON a.id = b.account_id
          WHERE b.id = ?`
       )
@@ -131,7 +144,8 @@ export function createLedgerImportService(db: AppDatabase) {
         `SELECT id, batch_id AS batchId, line_no AS lineNo, parsed_json AS parsedJson,
                 external_id AS externalId, content_hash AS contentHash, status,
                 entry_id AS entryId, duplicate_of_entry_id AS duplicateOfEntryId,
-                match_reason AS matchReason
+                match_reason AS matchReason, confidence, sign_known AS signKnown,
+                source_page AS sourcePage, warnings_json AS warningsJson
          FROM import_rows WHERE batch_id = ? ORDER BY line_no`
       )
       .all(batchId) as (Omit<RowRecord, "parsed"> & { parsedJson: string })[];
@@ -422,7 +436,9 @@ export function createLedgerImportService(db: AppDatabase) {
       ) {
         // Regra automatica cuja categoria nao serve mais (arquivada, ou de
         // saida numa entrada) volta a perguntar em vez de gravar sem categoria.
-        status = "new";
+        // Linha de PDF nunca fica pronta para gravar em lote: o PDF erra em
+        // silencio, entao toda linha dele passa pelo popup, com regra ou sem.
+        status = batch.source === "pdf" ? "needs_review" : "new";
       }
       update.run({
         id: row.id,
@@ -509,15 +525,28 @@ export function createLedgerImportService(db: AppDatabase) {
         alternatives: exact ? [] : candidates.slice(1),
         entryId: row.entryId,
         skippedBefore:
-          row.status === "ignored" && row.matchReason != null && row.duplicateOfEntryId == null
+          row.status === "ignored" && row.matchReason != null && row.duplicateOfEntryId == null,
+        pdf:
+          batch.source === "pdf"
+            ? {
+                confidence: row.confidence ?? 0,
+                signKnown: row.signKnown === 1,
+                sourcePage: row.sourcePage,
+                warnings: row.warningsJson ? (JSON.parse(row.warningsJson) as string[]) : []
+              }
+            : null
       };
     });
 
     const count = (...statuses: ImportRowStatus[]) =>
       rows.filter((row) => statuses.includes(row.status)).length;
-    const { accountName, ...rest } = batch;
+    const { accountName, adapterId, layoutVersion, reconciliationJson, ...rest } = batch;
+    const pdf: PdfBatchInfo | null =
+      adapterId && layoutVersion && reconciliationJson
+        ? { adapterId, layoutVersion, ...(JSON.parse(reconciliationJson) as Omit<PdfBatchInfo, "adapterId" | "layoutVersion">) }
+        : null;
     return {
-      batch: { ...rest, accountName, statementKind: isCard ? "card" : "bank" },
+      batch: { ...rest, accountName, statementKind: isCard ? "card" : "bank", pdf },
       previousImportAt,
       rows,
       counts: {
@@ -570,6 +599,24 @@ export function createLedgerImportService(db: AppDatabase) {
       });
   }
 
+  /** O PDF ja lido, na forma do resto: o tipo do documento tem de bater com a conta. */
+  function pdfStatement(accountKind: string, kind: StatementKind, pdf: PdfStatement) {
+    const isCardAccount = accountKind === "credit_card";
+    if (pdf.kind === "statement" && (kind === "card" || isCardAccount)) {
+      throw new LedgerError("Este PDF e extrato de conta: escolha Extrato da conta e uma conta do banco");
+    }
+    if (pdf.kind === "invoice" && (kind === "bank" || !isCardAccount)) {
+      throw new LedgerError("Este PDF e fatura de cartao: escolha Fatura do cartao e a conta do cartao");
+    }
+    return {
+      source: "pdf" as const,
+      transactions: pdf.transactions,
+      periodStart: pdf.periodStart,
+      periodEnd: pdf.periodEnd,
+      closingBalanceCents: pdf.closingBalanceCents
+    };
+  }
+
   function readStatement(
     accountId: number,
     accountKind: string,
@@ -601,7 +648,19 @@ export function createLedgerImportService(db: AppDatabase) {
       };
     }
 
-    const shape = inspectCsv(buffer);
+    // Planilha vira CSV e segue o mesmo caminho, com o mesmo mapeamento salvo.
+    const isSpreadsheet = looksLikeSpreadsheet(buffer);
+    let table = buffer;
+    if (isSpreadsheet) {
+      try {
+        table = spreadsheetToCsv(buffer);
+      } catch (error) {
+        throw new LedgerError(error instanceof Error ? error.message : String(error));
+      }
+    }
+    const fileLabel = isSpreadsheet ? "A planilha" : "O CSV";
+
+    const shape = inspectCsv(table);
     // Os dois CSVs do Nubank tem cabecalhos que nao se confundem: o extrato
     // traz `Identificador` e `Descricao`; a fatura, `date,title,amount`.
     const headers = shape.header.map((label) => normalizeName(label));
@@ -609,12 +668,12 @@ export function createLedgerImportService(db: AppDatabase) {
     const looksLikeBank = headers.includes("identificador") || headers.includes("descricao");
     if (kind === "bank" && looksLikeInvoice) {
       throw new LedgerError(
-        "Este CSV parece a fatura do cartao (date, title, amount). Escolha Fatura do cartao."
+        `${fileLabel} parece a fatura do cartao (date, title, amount). Escolha Fatura do cartao.`
       );
     }
     if (kind === "card" && looksLikeBank && !looksLikeInvoice) {
       throw new LedgerError(
-        "Este CSV parece o extrato da conta (Data, Valor, Identificador, Descricao). Escolha Extrato da conta."
+        `${fileLabel} parece o extrato da conta (Data, Valor, Descricao). Escolha Extrato da conta.`
       );
     }
     const saved = savedMapping(accountId);
@@ -630,13 +689,13 @@ export function createLedgerImportService(db: AppDatabase) {
       if (!checked.success) {
         const reason = checked.error.issues.map((issue) => issue.message).join(" ");
         throw new LedgerError(
-          `Nao reconheci as colunas do CSV (${shape.header.join(", ")}). ${reason}`
+          `Nao reconheci as colunas d${fileLabel.toLowerCase()} (${shape.header.join(", ")}). ${reason}`
         );
       }
       mapping = checked.data;
       saveMapping(accountId, mapping);
     }
-    const transactions = readCsv(buffer, mapping);
+    const transactions = readCsv(table, mapping);
     const dates = transactions.map((row) => row.date).sort();
     return {
       source: "csv" as const,
@@ -853,6 +912,8 @@ export function createLedgerImportService(db: AppDatabase) {
       buffer: Buffer;
       /** Ausente: deduzido da conta (cartao le fatura, o resto le extrato). */
       kind?: StatementKind;
+      /** PDF ja lido por `readPdfStatement`: a leitura e assincrona, o staging nao. */
+      pdf?: PdfStatement;
     }): ImportBatchView {
       const account = ledger.accounts.raw(input.accountId);
       if (!account) throw notFound("Conta");
@@ -870,13 +931,16 @@ export function createLedgerImportService(db: AppDatabase) {
       const kind = input.kind ?? (account.kind === "credit_card" ? "card" : "bank");
       // O leitor de CSV e OFX explica o que está errado no arquivo com um
       // `Error` comum; sem embrulhar, a mensagem virava "Erro interno".
-      let statement: ReturnType<typeof readStatement>;
+      let statement: ReturnType<typeof readStatement> | ReturnType<typeof pdfStatement>;
       try {
-        statement = readStatement(input.accountId, account.kind, kind, input.buffer);
+        statement = input.pdf
+          ? pdfStatement(account.kind, kind, input.pdf)
+          : readStatement(input.accountId, account.kind, kind, input.buffer);
       } catch (error) {
         if (error instanceof LedgerError) throw error;
         throw new LedgerError(error instanceof Error ? error.message : "Arquivo ilegivel");
       }
+      const pdf = input.pdf ?? null;
       if (statement.transactions.length === 0) {
         throw new LedgerError("Arquivo sem lancamentos");
       }
@@ -887,8 +951,9 @@ export function createLedgerImportService(db: AppDatabase) {
             .prepare(
               `INSERT INTO import_batches
                  (source, account_id, file_name, file_hash, imported_at, status, row_count,
-                  period_start, period_end, closing_balance_cents)
-               VALUES (?, ?, ?, ?, ?, 'review', ?, ?, ?, ?)`
+                  period_start, period_end, closing_balance_cents,
+                  adapter_id, layout_version, reconciliation_status, reconciliation_json)
+               VALUES (?, ?, ?, ?, ?, 'review', ?, ?, ?, ?, ?, ?, ?, ?)`
             )
             .run(
               statement.source,
@@ -899,15 +964,23 @@ export function createLedgerImportService(db: AppDatabase) {
               statement.transactions.length,
               statement.periodStart,
               statement.periodEnd,
-              statement.closingBalanceCents
+              statement.closingBalanceCents,
+              pdf?.info.adapterId ?? null,
+              pdf?.info.layoutVersion ?? null,
+              pdf?.info.reconciliation.status ?? null,
+              pdf
+                ? JSON.stringify({ reconciliation: pdf.info.reconciliation, warnings: pdf.info.warnings })
+                : null
             ).lastInsertRowid
         );
 
         const insertRow = sql.prepare(
-          `INSERT INTO import_rows (batch_id, line_no, raw_json, parsed_json, external_id, content_hash, status)
-           VALUES (?, ?, ?, ?, ?, ?, 'new')`
+          `INSERT INTO import_rows (batch_id, line_no, raw_json, parsed_json, external_id, content_hash, status,
+                                    confidence, sign_known, source_page, source_line, warnings_json)
+           VALUES (?, ?, ?, ?, ?, ?, 'new', ?, ?, ?, ?, ?)`
         );
-        const staged = statement.transactions.map((transaction) => {
+        const staged = statement.transactions.map((transaction, index) => {
+          const pdfRow = pdf?.rows[index] ?? null;
           const hash = contentHash(
             input.accountId,
             transaction.date,
@@ -928,7 +1001,12 @@ export function createLedgerImportService(db: AppDatabase) {
               raw,
               JSON.stringify(transaction),
               transaction.externalId ?? null,
-              hash
+              hash,
+              pdfRow?.confidence ?? null,
+              pdfRow && !pdfRow.signKnown ? 0 : 1,
+              pdfRow?.sourcePage ?? null,
+              pdfRow?.sourceLine ?? null,
+              pdfRow ? JSON.stringify(pdfRow.warnings) : null
             ).lastInsertRowid
           );
           return {
@@ -1119,6 +1197,10 @@ export function createLedgerImportService(db: AppDatabase) {
     commitReady(batchId: number): ImportBatchView {
       const batch = batchRecord(batchId);
       if (batch.status === "discarded") throw new LedgerError("Lote descartado", 409);
+      // Nao existe caminho que grave linha de PDF sem confirmacao, linha a linha.
+      if (batch.source === "pdf") {
+        throw new LedgerError("Lote de PDF: cada lancamento e confirmado na revisao", 409);
+      }
       const view = viewOf(batchId);
       db.transaction(() => {
         for (const item of view.rows.filter((row) => row.status === "new")) {

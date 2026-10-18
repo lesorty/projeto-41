@@ -1,16 +1,28 @@
 import { statementKindSchema, type StatementKind } from "@projeto41/contracts";
+import { looksLikePdf, PdfParseError, type PdfErrorCode } from "@projeto41/pdf-statements";
 import { z } from "zod";
 import {
   createLedgerImportService,
   STATEMENT_MAX_BYTES
 } from "../import/ledger-import-service.js";
+import { readPdfStatement, type PdfStatement } from "../import/pdf/pdf-import-service.js";
 import type { RoutePlugin } from "./index.js";
+
+/** Senha ausente ou errada e 401, para a interface pedir a senha; o resto e arquivo ruim. */
+const PDF_STATUS: Record<PdfErrorCode, number> = {
+  pdf_password_required: 401,
+  pdf_password_incorrect: 401,
+  pdf_scanned: 422,
+  pdf_layout_unknown: 422,
+  pdf_unreadable: 422,
+  pdf_parse_failed: 422
+};
 
 const idParam = z.object({ id: z.coerce.number().int().positive() });
 const rowParam = idParam.extend({ rowId: z.coerce.number().int().positive() });
 
 /**
- * Importacao de extrato (CSV do Nubank, OFX), revisada linha a linha.
+ * Importacao de extrato (CSV do Nubank, OFX, Excel, PDF), revisada linha a linha.
  *
  * O arquivo enviado nao e guardado: ficam o nome, o hash e as linhas lidas em
  * `import_rows`. O nome vindo do cliente nunca vira caminho em disco.
@@ -25,11 +37,15 @@ export const registerLedgerImportRoutes: RoutePlugin = (app, { db }) => {
     let accountId: number | null = null;
     let kind: StatementKind | undefined;
     let upload: { fileName: string; buffer: Buffer } | null = null;
+    // A senha do PDF vive so nesta requisicao: nao e gravada nem logada.
+    let password: string | undefined;
 
     try {
       for await (const part of request.parts({ limits: { fileSize: STATEMENT_MAX_BYTES } })) {
         if (part.type === "field" && part.fieldname === "accountId") {
           accountId = Number(part.value);
+        } else if (part.type === "field" && part.fieldname === "password") {
+          password = String(part.value) || undefined;
         } else if (part.type === "field" && part.fieldname === "kind") {
           kind = statementKindSchema.parse(part.value);
         } else if (part.type === "file") {
@@ -58,7 +74,18 @@ export const registerLedgerImportRoutes: RoutePlugin = (app, { db }) => {
         .status(400)
         .send({ error: "Diga se o arquivo é o extrato da conta ou a fatura do cartão" });
     }
-    return reply.status(201).send(imports.upload({ accountId, kind, ...upload }));
+    let pdf: PdfStatement | undefined;
+    if (looksLikePdf(upload.buffer)) {
+      try {
+        pdf = await readPdfStatement(upload.buffer, password ? { password } : {});
+      } catch (error) {
+        if (error instanceof PdfParseError) {
+          return reply.status(PDF_STATUS[error.code]).send({ error: error.message, code: error.code });
+        }
+        throw error;
+      }
+    }
+    return reply.status(201).send(imports.upload({ accountId, kind, ...upload, ...(pdf ? { pdf } : {}) }));
   });
 
   app.get("/api/ledger/imports/:id", async (request) => imports.view(idParam.parse(request.params).id));

@@ -6460,3 +6460,61 @@ select option {
     grid-template-columns: 1fr;
   }
 }
+
+/* ============================================================
+   Importação de PDF: faixa de conciliação e linhas duvidosas
+   ============================================================ */
+
+.fin-pdf-reconcile {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  font-size: 0.86rem;
+  color: var(--text);
+}
+.fin-pdf-reconcile.match {
+  border-color: var(--positive);
+  background: var(--positive-soft);
+}
+.fin-pdf-reconcile.mismatch {
+  border-color: var(--negative);
+  background: var(--negative-soft);
+}
+.fin-pdf-reconcile header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.fin-pdf-reconcile.match header svg {
+  color: var(--positive);
+}
+.fin-pdf-reconcile.mismatch header svg {
+  color: var(--negative);
+}
+.fin-pdf-reconcile ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0 0 0 26px;
+}
+.fin-pdf-reconcile li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+.fin-pdf-reconcile p {
+  margin: 0;
+  padding-left: 26px;
+  color: var(--text-muted);
+}
+.fin-pdf-low {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 0.74rem;
+  color: var(--warning);
+  white-space: nowrap;
+}

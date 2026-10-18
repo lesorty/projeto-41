@@ -412,10 +412,38 @@ export type ImportRowView = {
   entryId: number | null;
   /** Pulada sozinha: a mesma linha foi pulada (ou teve o lancamento apagado) antes. */
   skippedBefore: boolean;
+  /** So linha vinda de PDF: quanto a leitura merece confianca. */
+  pdf: {
+    /** 0..1, sempre abaixo de 1. */
+    confidence: number;
+    /** `false`: o texto nao trazia marcador de credito/debito — confira o sinal. */
+    signKnown: boolean;
+    sourcePage: number | null;
+    warnings: string[];
+  } | null;
+};
+
+/** Um eixo da conciliacao do PDF: o que o documento declara contra a soma lida. */
+export type PdfReconciliationAxis = {
+  key: string;
+  label: string;
+  declaredCents: number | null;
+  parsedCents: number;
+  differenceCents: number | null;
+  rowCount: number;
+  status: "match" | "mismatch" | "unavailable";
+};
+
+export type PdfBatchInfo = {
+  adapterId: string;
+  layoutVersion: string;
+  /** `mismatch` em qualquer eixo (ou eixo indisponivel) bloqueia o caminho automatico. */
+  reconciliation: { status: "match" | "mismatch"; axes: PdfReconciliationAxis[] };
+  warnings: string[];
 };
 
 export type ImportBatchView = {
-  batch: ImportBatch & { accountName: string; statementKind: StatementKind };
+  batch: ImportBatch & { accountName: string; statementKind: StatementKind; pdf: PdfBatchInfo | null };
   /** Mesmo arquivo ja enviado antes: so aviso, nunca bloqueio. */
   previousImportAt: string | null;
   rows: ImportRowView[];

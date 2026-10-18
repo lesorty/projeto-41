@@ -20,7 +20,7 @@ const DELIMITERS = [";", ",", "\t"];
 
 /** Cabecalhos que cada papel reconhece, ja normalizados. */
 const HEADER_HINTS: [CsvField, string[]][] = [
-  ["date", ["data", "data lancamento", "data da compra", "date", "data mov"]],
+  ["date", ["data", "data lancamento", "data da compra", "date", "data mov", "data e hora"]],
   ["amount", ["valor", "amount", "montante", "valor r"]],
   ["amount_in", ["entrada", "credito", "valor credito", "receita"]],
   ["amount_out", ["saida", "debito", "valor debito", "despesa"]],
@@ -28,19 +28,25 @@ const HEADER_HINTS: [CsvField, string[]][] = [
     "description",
     ["descricao", "historico", "title", "lancamento", "estabelecimento", "detalhes", "memo"]
   ],
-  ["type", ["tipo", "type", "natureza"]],
+  ["type", ["tipo", "type", "natureza", "transacao"]],
   ["document", ["identificador", "id", "documento", "numero documento", "fitid"]]
 ];
 
 const IGNORED_HEADERS = ["saldo", "balance", "saldo r"];
 
-function normalizeHeader(value: string) {
+export function normalizeHeader(value: string) {
   return value
     .toLowerCase()
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
+}
+
+/** O papel que o cabecalho sugere, sem levar em conta as outras colunas. */
+export function headerRole(label: string): CsvField | null {
+  const normalized = normalizeHeader(label);
+  return HEADER_HINTS.find(([, hints]) => hints.includes(normalized))?.[0] ?? null;
 }
 
 function detectDelimiter(firstLine: string): string {

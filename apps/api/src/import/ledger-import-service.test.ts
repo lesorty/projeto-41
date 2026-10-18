@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { createTestDatabase, type AppDatabase } from "@projeto41/db";
 import { beforeEach, describe, expect, it } from "vitest";
+import * as XLSX from "xlsx";
 import { createLedgerImportService, type LedgerImportService } from "./ledger-import-service.js";
 
 const NUBANK_CSV = readFileSync(new URL("./__fixtures__/csv/nubank-conta.csv", import.meta.url));
@@ -310,5 +311,55 @@ describe("possivel duplicata em dias proximos", () => {
       description: "Outro lanche, na semana seguinte"
     });
     expect(rowOf(upload(), "Zelia Almeida").duplicate).toBeNull();
+  });
+});
+
+describe("extrato em planilha", () => {
+  /** Extrato no formato do BTG, com dados ficticios. */
+  function btgWorkbook(bookType: "biff8" | "xlsx"): Buffer {
+    const sheet = XLSX.utils.aoa_to_sheet([
+      [null, "Extrato de conta corrente"],
+      [null, "Cliente:", "Fulano de Tal"],
+      [],
+      [null, "Data e hora", "Categoria", "Transação", null, "Descrição", null, "Valor"],
+      [null, "28/09/2026 11:27", "Transferência", "Pix recebido", null, "Fulana Silva", null, 160],
+      [null, "28/09/2026 11:34", "Saúde", "Pix enviado", null, "Farmacia do Bairro", null, -42.9],
+      [null, "28/09/2026 23:59", null, null, null, "Saldo Diário", null, 117.1]
+    ]);
+    const book = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(book, sheet, "Extrato");
+    return XLSX.write(book, { type: "buffer", bookType });
+  }
+
+  it.each([
+    ["Extrato.xls", "biff8"],
+    ["Extrato.xlsx", "xlsx"]
+  ] as const)("%s entra na mesma revisao do CSV, sem a linha de saldo", (fileName, bookType) => {
+    const view = imports.upload({ accountId, fileName, buffer: btgWorkbook(bookType) });
+    expect(view.rows.map((row) => [row.date, row.amountCents, row.rawDescription])).toEqual([
+      ["2026-09-28", 16000, "Fulana Silva"],
+      ["2026-09-28", -4290, "Farmacia do Bairro"]
+    ]);
+    expect(db.raw.prepare("SELECT count(*) AS n FROM entries").get()).toEqual({ n: 0 });
+  });
+
+  it("reenviar a mesma planilha nao duplica o que ja foi gravado", () => {
+    const first = imports.upload({ accountId, fileName: "Extrato.xls", buffer: btgWorkbook("biff8") });
+    imports.confirm(first.batch.id, first.rows[1]!.id, {
+      action: "create",
+      kind: "expense",
+      categoryId: farmacia
+    });
+    const again = imports.upload({ accountId, fileName: "Extrato.xls", buffer: btgWorkbook("biff8") });
+    expect(again.rows[1]).toMatchObject({ status: "duplicate" });
+  });
+
+  it("planilha que nao e extrato e recusada com o motivo", () => {
+    const book = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(book, XLSX.utils.aoa_to_sheet([["Nome"], ["Ana"]]), "Plan1");
+    const buffer = XLSX.write(book, { type: "buffer", bookType: "xlsx" }) as Buffer;
+    expect(() => imports.upload({ accountId, fileName: "lista.xlsx", buffer })).toThrow(
+      /tabela de lancamentos/
+    );
   });
 });

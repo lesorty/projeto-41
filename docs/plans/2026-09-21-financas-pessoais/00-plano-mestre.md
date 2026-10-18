@@ -211,7 +211,10 @@ person_period_budgets
 ```
 import_batches
   id, source CHECK('ofx','csv','pdf'), account_id → accounts, file_name,
-  file_hash, imported_at, status, row_count, committed_count
+  file_hash, imported_at, status, row_count, committed_count,
+  adapter_id, layout_version,               -- fase 8 (021): qual adapter leu o PDF
+  reconciliation_status CHECK('match','mismatch'),
+  reconciliation_json                       -- eixos da conciliação e avisos do lote
 
 import_rows
   id, batch_id → import_batches, line_no, raw_json, parsed_json,
@@ -223,7 +226,9 @@ import_rows
                                             -- rebuild de tabela depois (R-01)
   entry_id → entries, suggested_place_id, suggested_category_id,
   duplicate_of_entry_id → entries,          -- qual lançamento casou
-  match_reason                              -- 'external_id' | 'hash' | 'fuzzy'
+  match_reason,                             -- 'external_id' | 'hash' | 'fuzzy'
+  confidence, sign_known DEFAULT 1,         -- fase 8 (021): só linha de PDF
+  source_page, source_line, warnings_json
 
 import_column_mappings                      -- memória do mapeamento de CSV
   id, account_id → accounts, source_label, mapping_json,
