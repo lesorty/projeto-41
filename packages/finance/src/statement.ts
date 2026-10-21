@@ -5,6 +5,7 @@ import {
   formatMonth,
   parseMonth,
   addDays,
+  statementMonthFor,
   type YearMonth
 } from "./dates.js";
 
@@ -64,6 +65,24 @@ export function statementDatesFor(
     periodStart: addDays(previousClosing, 1),
     periodEnd
   };
+}
+
+/**
+ * Fatura natural da parcela `number` (1 = a da compra) de um parcelamento.
+ *
+ * Uma parcela por fatura, a partir da fatura da compra. Recalcular o mes pela
+ * data de cada parcela falha com fechamento no dia 28-31: a data encurtada no
+ * mes curto cai antes do fechamento e duas parcelas vao para a mesma fatura.
+ * Criacao, troca de cartao e antecipacao usam esta regra, e so ela.
+ */
+export function installmentStatementMonth(
+  purchaseDate: string,
+  number: number,
+  closingDay: number,
+  dueDay: number
+): string {
+  const first = parseMonth(statementMonthFor(purchaseDate, closingDay, dueDay));
+  return formatMonth(addMonths(first, number - 1));
 }
 
 /** Sequencia inclusiva de meses `YYYY-MM`, usada pela navegacao de faturas. */

@@ -47,6 +47,19 @@ export function createRefundsRepository(db: Db) {
     return row;
   }
 
+  /** Total da compra parcelada e o que ja foi devolvido de qualquer parcela dela. */
+  function planRefunds(planId: number) {
+    return db
+      .prepare(
+        `SELECT p.total_cents AS totalCents,
+                (SELECT COALESCE(SUM(r.amount_cents), 0) FROM entries r
+                 JOIN entries o ON o.id = r.refund_of_entry_id
+                 WHERE o.installment_plan_id = p.id) AS refundedCents
+         FROM installment_plans p WHERE p.id = ?`
+      )
+      .get(planId) as { totalCents: number; refundedCents: number };
+  }
+
   const repository = {
     /** Soma ja estornada de um lancamento, para não estornar mais que o total. */
     refundedCents: (entryId: number): number =>
@@ -78,6 +91,14 @@ export function createRefundsRepository(db: Db) {
 
       if (already + Math.abs(amountCents) > magnitude) {
         throw new LedgerError("O estorno passa do valor do lancamento original");
+      }
+      // Numa parcela, o teto tambem e o da compra inteira: o estorno integral
+      // do plano fica preso a primeira parcela, mas devolve todas.
+      if (original.installmentPlanId != null) {
+        const plan = planRefunds(original.installmentPlanId);
+        if (plan.refundedCents + Math.abs(amountCents) > plan.totalCents) {
+          throw new LedgerError("O estorno passa do valor da compra parcelada");
+        }
       }
 
       // `kind` continua o do original: estorno de despesa e `expense` com valor
@@ -131,21 +152,12 @@ export function createRefundsRepository(db: Db) {
 
       const first = db
         .prepare(
-          `SELECT id FROM entries
+          `SELECT id, person_id AS personId FROM entries
            WHERE installment_plan_id = ? ORDER BY installment_number LIMIT 1`
         )
-        .get(planId) as { id: number } | undefined;
+        .get(planId) as { id: number; personId: number | null } | undefined;
       if (!first) throw notFound("Parcela");
-      const already = (
-        db
-          .prepare(
-            `SELECT COALESCE(SUM(r.amount_cents), 0) AS total FROM entries r
-             JOIN entries o ON o.id = r.refund_of_entry_id
-             WHERE o.installment_plan_id = ?`
-          )
-          .get(planId) as { total: number }
-      ).total;
-      if (already + plan.totalCents > plan.totalCents) {
+      if (planRefunds(planId).refundedCents > 0) {
         throw new LedgerError(
           "Esta compra parcelada ja tem estorno: o total ja foi devolvido em parte ou por inteiro"
         );
@@ -153,6 +165,9 @@ export function createRefundsRepository(db: Db) {
 
       return entries.createInternal({
         accountId: plan.accountId,
+        // A pessoa da compra, nao a dona do cartao: e do realizado dela que o
+        // estorno abate no alvo.
+        personId: first.personId,
         date: input.date,
         amountCents: plan.totalCents,
         kind: "expense",

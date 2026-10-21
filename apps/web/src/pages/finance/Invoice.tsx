@@ -15,7 +15,7 @@ import type {
   EntryRecord,
   StatementSummary
 } from "@projeto41/contracts";
-import { fromCents, statementMonthFor } from "@projeto41/finance";
+import { fromCents } from "@projeto41/finance";
 import { AreaTrend } from "../../components/charts.js";
 import { ColorDot } from "../../components/ColorPicker.js";
 import { useConfirm } from "../../components/dialog.js";
@@ -48,6 +48,8 @@ type StatementDetail = {
   dueDate: string;
   purchases: EntryRecord[];
   payments: EntryRecord[];
+  /** Compras fora da fatura natural (a da série, na parcela). Vem do servidor. */
+  anticipatedIds: number[];
   purchasesCents: number;
   paymentsCents: number;
   totalCents: number;
@@ -157,21 +159,11 @@ export function InvoicePage({ onNavigate }: { onNavigate?: FinanceNavigate }) {
   );
 
   /**
-   * Uma parcela está antecipada quando o mês gravado difere do natural. Como a
-   * data nunca muda, dá para descobrir isso sem coluna nova nem histórico.
+   * Uma parcela está antecipada quando o mês gravado difere do natural. O
+   * natural da parcela é o da série, não o da data dela, e quem sabe a série é
+   * o servidor: recalcular aqui pela data marcava parcelas comuns.
    */
-  const anticipatedIds = useMemo(() => {
-    const ids = new Set<number>();
-    if (!card || !detail) return ids;
-    for (const entry of detail.purchases) {
-      // Desconto de antecipacao e estorno nao sao parcela: nao se restauram
-      // sozinhos, saem junto com a parcela a que pertencem.
-      if (entry.statementMonth == null || entry.refundOfEntryId != null) continue;
-      const natural = statementMonthFor(entry.date, card.closingDay, card.dueDay);
-      if (natural !== entry.statementMonth) ids.add(entry.id);
-    }
-    return ids;
-  }, [card, detail]);
+  const anticipatedIds = useMemo(() => new Set(detail?.anticipatedIds ?? []), [detail]);
 
   async function restore(entryId: number) {
     if (!card) return;

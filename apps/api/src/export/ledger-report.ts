@@ -72,7 +72,9 @@ export function collectLedgerReport(db: AppDatabase, range: Range, generatedAt: 
   }
 
   const accounts: ReportAccount[] = [];
-  for (const account of db.ledger.accounts.list()) {
+  // Arquivada entra: o que ela movimentou no período aconteceu, e as categorias
+  // (que não filtram conta) já o contam. Sem ela os totais não fechavam com a pizza.
+  for (const account of db.ledger.accounts.list({ includeArchived: true })) {
     const rows = byAccount.get(account.id) ?? [];
     const isCard = account.kind === "credit_card";
     let invoiceCents: number | null = null;

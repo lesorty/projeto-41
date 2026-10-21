@@ -6,6 +6,7 @@ import type {
 } from "@projeto41/contracts";
 import {
   anticipationDiscounts,
+  installmentStatementMonth,
   statementDatesFor,
   statementMonthFor,
   statementMonthsBetween,
@@ -103,6 +104,37 @@ export function createStatementsRepository(db: Db) {
       register.run(id, row.id, nowIso());
     });
   }
+
+  /**
+   * A fatura em que o lancamento cairia sem antecipacao. Parcela segue o plano
+   * (uma por fatura a partir da compra), e nao a propria data: com fechamento
+   * no dia 28-31 as duas regras divergem e a parcela parecia antecipada.
+   */
+  function naturalMonthOf(row: {
+    date: string;
+    accountId: number;
+    installmentPlanId: number | null;
+    installmentNumber: number | null;
+  }): string {
+    const cycle = cards.cycle(row.accountId);
+    if (row.installmentPlanId != null && row.installmentNumber != null) {
+      const plan = db
+        .prepare("SELECT purchase_date AS purchaseDate FROM installment_plans WHERE id = ?")
+        .get(row.installmentPlanId) as { purchaseDate: string } | undefined;
+      if (plan) {
+        return installmentStatementMonth(
+          plan.purchaseDate,
+          row.installmentNumber,
+          cycle.closingDay,
+          cycle.dueDay
+        );
+      }
+    }
+    return statementMonthFor(row.date, cycle.closingDay, cycle.dueDay);
+  }
+
+  const NATURAL_COLUMNS = `e.date, e.account_id AS accountId, e.statement_month AS statementMonth,
+    e.installment_plan_id AS installmentPlanId, e.installment_number AS installmentNumber`;
 
   /** Meses que precisam aparecer na navegacao, incluindo os futuros com parcela. */
   function monthsFor(accountId: number, asOf: string, range?: { from?: string; to?: string }) {
@@ -205,6 +237,16 @@ export function createStatementsRepository(db: Db) {
         ...dates,
         purchases: sortEntries(purchases),
         payments: sortEntries(payments),
+        // Desconto e estorno nao sao parcela: saem junto com a parcela a que
+        // pertencem, entao nunca aparecem como antecipados.
+        anticipatedIds: purchases
+          .filter(
+            (row) =>
+              row.statementMonth != null &&
+              row.refundOfEntryId == null &&
+              row.statementMonth !== naturalMonthOf(row)
+          )
+          .map((row) => row.id),
         purchasesCents: totals.purchasesCents,
         paymentsCents: totals.paymentsCents,
         totalCents: totals.totalCents,
@@ -353,10 +395,11 @@ export function createStatementsRepository(db: Db) {
     },
 
     /**
-     * Desfaz a antecipacao recalculando o mes natural a partir de `date`.
+     * Desfaz a antecipacao recalculando o mes natural: o da serie, na parcela;
+     * o de `date`, no resto.
      *
-     * Nao existe tabela de historico nem coluna nova: como `date` nunca muda, o
-     * natural e sempre recuperavel. Um lancamento esta antecipado quando o mes
+     * Nao existe tabela de historico nem coluna nova: como `date` e o plano
+     * nunca mudam, o natural e sempre recuperavel. Um lancamento esta antecipado quando o mes
      * armazenado difere do natural.
      *
      * Ressalva registrada: se o usuario mudar `closing_day` depois de antecipar,
@@ -375,16 +418,25 @@ export function createStatementsRepository(db: Db) {
           }
           const row = db
             .prepare(
-              `SELECT e.id, e.date, e.account_id AS accountId,
-                      e.statement_month AS statementMonth
-               FROM entries e WHERE e.id = ?`
+              `SELECT e.id, e.kind, ${NATURAL_COLUMNS} FROM entries e WHERE e.id = ?`
             )
             .get(entryId) as
-            | { id: number; date: string; accountId: number; statementMonth: string | null }
+            | {
+                id: number;
+                kind: string;
+                date: string;
+                accountId: number;
+                statementMonth: string | null;
+                installmentPlanId: number | null;
+                installmentNumber: number | null;
+              }
             | undefined;
           if (!row) throw new LedgerError(`Lancamento ${entryId} nao encontrado`, 404);
-          const cycle = cards.cycle(row.accountId);
-          const natural = statementMonthFor(row.date, cycle.closingDay, cycle.dueDay);
+          // Pagamento de fatura vai para o mes que pagou, nao para o da data.
+          if (row.kind === "transfer") {
+            throw new LedgerError(`Lancamento ${entryId} e um pagamento, nao uma compra`);
+          }
+          const natural = naturalMonthOf(row);
           db.prepare("UPDATE entries SET statement_month = ?, updated_at = ? WHERE id = ?").run(
             natural,
             nowIso(),
@@ -404,16 +456,19 @@ export function createStatementsRepository(db: Db) {
     /** Um lancamento esta antecipado quando o mes gravado difere do natural. */
     isAnticipated: (entryId: number): boolean => {
       const row = db
-        .prepare(
-          `SELECT date, account_id AS accountId, statement_month AS statementMonth
-           FROM entries WHERE id = ?`
-        )
+        .prepare(`SELECT e.kind, ${NATURAL_COLUMNS} FROM entries e WHERE e.id = ?`)
         .get(entryId) as
-        | { date: string; accountId: number; statementMonth: string | null }
+        | {
+            kind: string;
+            date: string;
+            accountId: number;
+            statementMonth: string | null;
+            installmentPlanId: number | null;
+            installmentNumber: number | null;
+          }
         | undefined;
-      if (!row || !row.statementMonth) return false;
-      const cycle = cards.cycle(row.accountId);
-      return row.statementMonth !== statementMonthFor(row.date, cycle.closingDay, cycle.dueDay);
+      if (!row || !row.statementMonth || row.kind === "transfer") return false;
+      return row.statementMonth !== naturalMonthOf(row);
     }
   };
 

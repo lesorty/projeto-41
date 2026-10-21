@@ -1,4 +1,4 @@
-import { FileDown, Receipt } from "lucide-react";
+import { Receipt } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CategoryReport, CategoryTrend } from "@projeto41/contracts";
 import { daysBetween, fromCents } from "@projeto41/finance";
@@ -10,8 +10,10 @@ import {
   periodLabel,
   type SelectedPeriod
 } from "../../components/finance/PeriodPicker.js";
-import { Button, Empty, Panel, SectionHeading, Skeleton } from "../../components/ui.js";
+import { ExportMenu } from "../../components/ExportMenu.js";
+import { Empty, Panel, SectionHeading, Skeleton } from "../../components/ui.js";
 import { api } from "../../lib/api.js";
+import { filterToQuery } from "../../lib/ledger.js";
 import { moneyFromCents } from "../../lib/format.js";
 import { spendTone, variationText } from "../../lib/report-format.js";
 import { useToast } from "../../lib/toast.js";
@@ -166,13 +168,10 @@ export function ReportsPage() {
     <>
       <SectionHeading title="Relatórios" subtitle={`Gastos de ${periodLabel(period)}`}>
         {/* O PDF sai do servidor com o mesmo período escolhido aqui. */}
-        <Button
-          variant="ghost"
-          icon={FileDown}
-          onClick={() => window.open(`/api/ledger/report.pdf${reportQuery(period)}`, "_blank")}
-        >
-          Exportar PDF
-        </Button>
+        <ExportMenu
+          csvUrl={`/api/ledger/export.csv${filterToQuery({ from: period.from, to: period.to })}`}
+          pdfUrl={`/api/ledger/report.pdf${reportQuery(period)}`}
+        />
       </SectionHeading>
 
       <Panel bodyClass="fin-filter-body">

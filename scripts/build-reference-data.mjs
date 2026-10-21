@@ -27,6 +27,13 @@ const FIRST_YEAR = 1999;
 const LAST_YEAR = 2099;
 /** A série 12 do SGS começa bem antes, mas 2018 já cobre qualquer caixinha. */
 const CDI_FROM = "2018-01-01";
+/**
+ * Fim **fixo** da semente. Os testes contam com o último dia semeado (a taxa
+ * de 17 e 18/09 é a que eles conferem), e o resto da série a API busca em
+ * runtime. Baixar "até hoje" fazia cada regeneração mudar o arquivo e quebrar
+ * os testes. Para estender a semente, mude aqui e atualize os testes juntos.
+ */
+const CDI_TO = "2026-09-18";
 
 // --- Feriados ---------------------------------------------------------------
 
@@ -150,8 +157,6 @@ async function fetchSeries(from, to) {
 
 // --- Execução ---------------------------------------------------------------
 
-const today = new Date().toISOString().slice(0, 10);
-
 const holidays = buildHolidays();
 writeFileSync(
   resolve(dataDir, "feriados-anbima.json"),
@@ -160,7 +165,7 @@ writeFileSync(
 console.log(`feriados: ${holidays.length} linhas`);
 
 console.log("baixando a serie 12 do SGS");
-const rates = await fetchSeries(CDI_FROM, today);
+const rates = await fetchSeries(CDI_FROM, CDI_TO);
 writeFileSync(
   resolve(dataDir, "cdi-sgs12-seed.json"),
   `${JSON.stringify(rates, null, 0)}\n`

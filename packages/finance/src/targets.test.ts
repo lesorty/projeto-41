@@ -223,6 +223,19 @@ describe("modo pooled", () => {
     expect(targetOf(result, "Steylor")).toBe(350000);
   });
 
+  it("bolo nao informado deixa de fora a renda de pessoa inativa", () => {
+    const result = computeTargets(
+      base({
+        splitMode: "pooled",
+        people: [STEYLOR, { ...BIANCA, active: false }, CONJUNTO],
+        jointExpenseTargetCents: 100000,
+        incomeByPerson: { 1: 250000, 2: 500000, 3: 50000 }
+      })
+    );
+    expect(result.totalTargetCents).toBe(300000);
+    expect(targetOf(result, "Steylor")).toBe(200000);
+  });
+
   it("nao gera alvo negativo quando o teto conjunto passa do bolo", () => {
     const result = computeTargets(
       base({

@@ -23,6 +23,14 @@ const MIN_INTERVAL_MS = 15 * 60 * 1000;
  * um quarto de hora, sem nenhuma chance de recuperação.
  */
 const RETRY_AFTER_FAILURE_MS = 60 * 1000;
+/**
+ * Quanto uma rota espera pela rede antes de seguir com a série local.
+ *
+ * Sem rede, a busca gasta 3 tentativas de 20s cada. Uma tela que pede só as
+ * caixinhas não pode ficar parada esse tempo todo: a busca termina em segundo
+ * plano e a próxima leitura já encontra o resultado.
+ */
+const ROUTE_WAIT_MS = 3_000;
 
 type State = {
   etag: string | null;
@@ -52,6 +60,7 @@ export function createCdiService(
   const client = createSgsClient(fetcher, retryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS);
   const statePath = join(dataDir, "cdi", "sgs-12.state.json");
   let online = true;
+  let inFlight: Promise<unknown> | null = null;
 
   async function readState(): Promise<State> {
     try {
@@ -175,7 +184,19 @@ export function createCdiService(
     async ensureRange(_from: string, to: string) {
       const last = lastRateDate();
       if (last != null && last >= to) return;
-      await refresh();
+      // Uma busca por vez: leituras simultâneas esperam a mesma, em vez de
+      // cada uma abrir as suas tentativas contra o BCB.
+      inFlight ??= refresh()
+        .catch(() => undefined)
+        .finally(() => {
+          inFlight = null;
+        });
+      let timer: NodeJS.Timeout | undefined;
+      const patience = new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, ROUTE_WAIT_MS);
+      });
+      await Promise.race([inFlight, patience]);
+      clearTimeout(timer);
     },
 
     async status(): Promise<CdiStatus> {

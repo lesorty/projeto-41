@@ -217,3 +217,103 @@ describe("listagem", () => {
     expect(ledger.installmentPlans.list()).toHaveLength(1);
   });
 });
+
+describe("parcela de fatura ja paga", () => {
+  // 10/05 no Cartao A (fecha 20, vence 27): parcelas em mai, jun e jul.
+  const payMay = () =>
+    ledger.statements.pay(card, "2026-05", { date: "2026-05-27", amountCents: 3334 });
+
+  it("excluir o plano preserva a parcela da fatura paga, mesmo pendente", () => {
+    const id = plan();
+    payMay();
+
+    const result = ledger.installmentPlans.remove(id);
+    expect(result).toEqual({ removed: 2, kept: 1 });
+    // A fatura paga continua fechando em zero, e nao vira credito.
+    expect(ledger.statements.get(card, "2026-05", "2026-06-01").totalCents).toBe(0);
+  });
+
+  it("trocar de cartao deixa a parcela da fatura paga onde foi cobrada", () => {
+    const id = plan();
+    payMay();
+
+    ledger.installmentPlans.changeAccount(id, otherCard);
+    const rows = ledger.installmentPlans.installments(id);
+    expect(rows.find((row) => row.installmentNumber === 1)?.accountId).toBe(card);
+    expect(rows.find((row) => row.installmentNumber === 2)?.accountId).toBe(otherCard);
+  });
+
+  it("conta a parcela da fatura paga como paga no resumo do plano", () => {
+    const id = plan();
+    payMay();
+    expect(ledger.installmentPlans.get(id)).toMatchObject({
+      paidCount: 1,
+      remainingCount: 2,
+      remainingCents: 6666
+    });
+  });
+});
+
+describe("fechamento no fim do mes", () => {
+  let lateCard: number;
+  beforeEach(() => {
+    lateCard = ledger.accounts.create({
+      name: "Cartao C",
+      kind: "credit_card",
+      color: "#0f0",
+      personId: steylor,
+      closingDay: 29,
+      dueDay: 7,
+      paymentAccountId: checking
+    });
+  });
+
+  // 31/01 fecha em 28/02: parcelas em mar, abr e mai. A 2a (28/02) cairia em
+  // marco pela propria data.
+  const latePlan = () =>
+    ledger.installmentPlans.create({
+      accountId: lateCard,
+      purchaseDate: "2026-01-31",
+      totalCents: 30000,
+      installmentCount: 3,
+      categoryId: mercado,
+      description: "Sofa"
+    });
+
+  it("parcela na fatura da serie nao aparece como antecipada", () => {
+    const id = latePlan();
+    const second = ledger.installmentPlans.installments(id)[1]!;
+    expect(second.statementMonth).toBe("2026-04");
+    expect(ledger.statements.isAnticipated(second.id)).toBe(false);
+    expect(ledger.statements.get(lateCard, "2026-04", "2026-02-01").anticipatedIds).toEqual([]);
+  });
+
+  it("restaurar devolve a parcela antecipada para a fatura da serie", () => {
+    const id = latePlan();
+    const third = ledger.installmentPlans.installments(id)[2]!;
+    ledger.statements.anticipate(lateCard, { entryIds: [third.id], targetMonth: "2026-04" });
+    expect(ledger.statements.isAnticipated(third.id)).toBe(true);
+
+    ledger.statements.restoreNatural([third.id]);
+    expect(ledger.entries.get(third.id)?.statementMonth).toBe("2026-05");
+  });
+
+  it("trocar de cartao mantem uma parcela por fatura", () => {
+    const id = latePlan();
+    const sameCycle = ledger.accounts.create({
+      name: "Cartao D",
+      kind: "credit_card",
+      color: "#ff0",
+      personId: steylor,
+      closingDay: 29,
+      dueDay: 7,
+      paymentAccountId: checking
+    });
+    ledger.installmentPlans.changeAccount(id, sameCycle);
+    expect(ledger.installmentPlans.installments(id).map((row) => row.statementMonth)).toEqual([
+      "2026-03",
+      "2026-04",
+      "2026-05"
+    ]);
+  });
+});

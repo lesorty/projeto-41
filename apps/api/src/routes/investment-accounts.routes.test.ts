@@ -30,7 +30,7 @@ describe("contas de investimento", () => {
   it("as contas são as pessoas de Finanças: a Principal vira a primeira, e cada pessoa ganha a sua", async () => {
     const list = await app.inject("/api/investment-accounts").then((r) => r.json());
     // Steylor e Bianca; o "Conjunto" não investe.
-    expect(list.map((a: { name: string; personId: number }) => [a.id, a.name, a.personId])).toEqual([
+    expect(list.map((a: { id: number; name: string; personId: number }) => [a.id, a.name, a.personId])).toEqual([
       [1, "Steylor", 1],
       [2, "Bianca", 2]
     ]);

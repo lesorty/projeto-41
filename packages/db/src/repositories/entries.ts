@@ -251,10 +251,14 @@ export function createEntriesRepository(db: Db) {
       accountId: number;
       date: string;
       statementMonth: string | null;
+      installmentPlanId: number | null;
     },
     accountId: number
   ): string | null | undefined {
     if (existing.statementMonth == null || existing.accountId !== accountId) return undefined;
+    // Parcela nao segue a propria data: a fatura dela vem da serie (uma por
+    // fatura a partir da compra) e so muda por antecipacao ou troca de cartao.
+    if (existing.installmentPlanId != null) return existing.statementMonth;
     const account = accounts.raw(accountId);
     if (!account || account.closingDay == null || account.dueDay == null) return undefined;
     const natural = statementMonthFor(existing.date, account.closingDay, account.dueDay);
@@ -424,11 +428,13 @@ export function createEntriesRepository(db: Db) {
      (account_id, person_id, date, amount_cents, kind, status, category_id, place_id,
       description, notes, raw_description, payment_method, statement_month,
       installment_plan_id, installment_number, parent_entry_id, refund_of_entry_id,
-      counts_toward_target, external_id, import_row_id, content_hash, created_at, updated_at)
+      counts_toward_target, external_id, import_row_id, content_hash, goal_profit,
+      created_at, updated_at)
      VALUES (@accountId, @personId, @date, @amountCents, @kind, @status, @categoryId, @placeId,
              @description, @notes, @rawDescription, @paymentMethod, @statementMonth,
              @installmentPlanId, @installmentNumber, @parentEntryId, @refundOfEntryId,
-             @countsTowardTarget, @externalId, @importRowId, @contentHash, @createdAt, @updatedAt)`
+             @countsTowardTarget, @externalId, @importRowId, @contentHash, @goalProfit,
+             @createdAt, @updatedAt)`
   );
 
   /** Os campos extras so sao preenchidos pelas fases 3 (parcelas) e 6 (importacao). */
@@ -443,6 +449,8 @@ export function createEntriesRepository(db: Db) {
       externalId?: string | null;
       importRowId?: number | null;
       contentHash?: string | null;
+      /** So a caixinha informa: de onde vem o lucro (migracao 022). */
+      goalProfit?: "yield" | "profit" | "profit_adjust" | null;
     }
   ): number {
     const defaults = resolveAccountDefaults(input);
@@ -482,6 +490,7 @@ export function createEntriesRepository(db: Db) {
         externalId: input.externalId ?? null,
         importRowId: input.importRowId ?? null,
         contentHash: input.contentHash ?? null,
+        goalProfit: input.goalProfit ?? null,
         createdAt: timestamp,
         updatedAt: timestamp
       }).lastInsertRowid
@@ -708,6 +717,7 @@ export function createEntriesRepository(db: Db) {
             `SELECT e.id, e.kind, e.counts_toward_target AS countsTowardTarget,
                     e.refund_of_entry_id AS refundOfEntryId, e.account_id AS accountId,
                     e.date, e.amount_cents AS amountCents, e.statement_month AS statementMonth,
+                    e.installment_plan_id AS installmentPlanId,
                     EXISTS (SELECT 1 FROM anticipation_discounts d WHERE d.entry_id = e.id)
                       AS isDiscount,
                     t.id AS transferId, t.purpose AS transferPurpose,
@@ -726,6 +736,7 @@ export function createEntriesRepository(db: Db) {
               date: string;
               amountCents: number;
               statementMonth: string | null;
+              installmentPlanId: number | null;
               isDiscount: number;
               transferId: number | null;
               transferPurpose: TransferPurpose | null;

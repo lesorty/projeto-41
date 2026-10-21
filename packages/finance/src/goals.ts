@@ -52,12 +52,18 @@ export function projectCompletion(input: {
   const target = input.targetAmountCents ?? null;
   const factor = input.monthlyYieldFactor ?? 1;
 
-  // Os 3 meses fechados anteriores ao mês corrente.
+  // Os 3 meses fechados anteriores ao mês corrente, a partir do primeiro
+  // aporte. Mês sem depósito dentro da janela conta como zero: tirá-lo da
+  // média fazia um único depósito valer como ritmo mensal.
   const current = parseMonth(input.asOf.slice(0, 7));
-  const window = [1, 2, 3].map((offset) => formatMonth(addMonths(current, -offset)));
-  const observed = window.filter((month) => input.depositsByMonth[month] != null);
-  const total = observed.reduce((sum, month) => sum + (input.depositsByMonth[month] ?? 0), 0);
-  const monthlyDepositCents = observed.length > 0 ? Math.round(total / observed.length) : 0;
+  const firstMonth = Object.keys(input.depositsByMonth)
+    .filter((month) => (input.depositsByMonth[month] ?? 0) > 0)
+    .sort()[0];
+  const window = [1, 2, 3]
+    .map((offset) => formatMonth(addMonths(current, -offset)))
+    .filter((month) => firstMonth != null && month >= firstMonth);
+  const total = window.reduce((sum, month) => sum + (input.depositsByMonth[month] ?? 0), 0);
+  const monthlyDepositCents = window.length > 0 ? Math.round(total / window.length) : 0;
 
   if (target == null || input.balanceCents >= target) {
     return { monthlyDepositCents, estimatedDate: null, basis: "none" };

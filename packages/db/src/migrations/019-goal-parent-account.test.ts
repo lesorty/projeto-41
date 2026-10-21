@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createTestDatabase, type AppDatabase } from "../index.js";
 import { convertEarmarkGoals, linkAccountGoals } from "./019-goal-parent-account.js";
+import { backfillGoalProfit } from "./022-goal-profit-marker.js";
 
 let db: AppDatabase;
 let checking: number;
@@ -18,6 +19,12 @@ beforeEach(() => {
     openingBalanceCents: 0
   });
 });
+
+/** A 019 roda antes da 022 em produção; o banco de teste já nasce na 022. */
+function convert() {
+  convertEarmarkGoals(db.raw);
+  backfillGoalProfit(db.raw);
+}
 
 /** Uma marcação como as versões antigas gravavam: alocações presas a entradas. */
 function earmark(name: string, allocations: [string, number][], yieldCents = 0, through: string | null = null) {
@@ -61,7 +68,7 @@ describe("migração 019 — caixinha com conta atrelada", () => {
     const gatos = earmark("Gatos", [["2026-09-28", 200_00]]);
     const before = balanceOf(checking);
 
-    convertEarmarkGoals(db.raw);
+    convert();
 
     // O saldo da conta atrelada é o que o banco mostra: a caixinha é separada.
     expect(balanceOf(checking)).toBe(before);
@@ -88,7 +95,7 @@ describe("migração 019 — caixinha com conta atrelada", () => {
 
   it("o rendimento segue do dia seguinte ao último apurado, sem contar de novo", () => {
     const viagem = earmark("Viagem", [["2026-09-01", 300_00]], 111, "2026-09-10");
-    convertEarmarkGoals(db.raw);
+    convert();
 
     const result = db.ledger.goals.accrue(viagem, "2026-09-18");
     expect(result.cents).toBeGreaterThan(0);

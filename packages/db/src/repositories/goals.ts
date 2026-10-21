@@ -7,6 +7,7 @@ import type {
 import {
   accrueLots,
   addDays,
+  dayFactor,
   estimateRedemption,
   goalProgress,
   iofFreeDate,
@@ -33,19 +34,14 @@ const SELECT_GOAL = `
 type GoalRow = Omit<GoalRecord, "archived"> & { archived: number };
 
 /**
- * Como cada lançamento da conta da caixinha se reconhece. O texto é o que
- * separa o lucro do dinheiro que o usuário pôs: rendimento do CDI, lucro que
- * ele lançou e o ajuste do lucro são lucro; o resto é aporte e saque.
+ * SQL: o lançamento `e` é lucro — rendimento do CDI, lucro que o usuário
+ * lançou ou o ajuste do lucro. O resto é aporte e saque. A marca é a coluna
+ * `goal_profit` (migração 022), nunca o texto: a descrição o usuário edita.
  */
-const YIELD_TEXT = "Rendimento CDI%";
-const PROFIT_TEXT = "Lucro%";
-const PROFIT_ADJUST_TEXT = "Ajuste de lucro%";
+const IS_PROFIT_SQL = `(e.goal_profit IS NOT NULL)`;
 
-/** SQL: o lançamento `e` é lucro (rendimento, lucro lançado ou ajuste de lucro). */
-const IS_PROFIT_SQL = `(
-  (e.kind = 'income' AND (e.description LIKE '${YIELD_TEXT}' OR e.description LIKE '${PROFIT_TEXT}'))
-  OR (e.kind = 'adjustment' AND e.description LIKE '${PROFIT_ADJUST_TEXT}')
-)`;
+/** Dias úteis num mês típico, para levar o fator diário do CDI a um mês. */
+const BUSINESS_DAYS_PER_MONTH = 21;
 
 const map = (row: GoalRow): GoalRecord => ({ ...row, archived: fromBit(row.archived) });
 
@@ -80,10 +76,9 @@ export function createGoalsRepository(db: Db) {
     const rows = db
       .prepare(
         `SELECT date, amount_cents AS amountCents, kind,
-                (kind = 'income' AND (description LIKE 'Rendimento CDI%' OR description LIKE 'Lucro%')) AS isYield
+                COALESCE(goal_profit IN ('yield', 'profit'), 0) AS isYield
          FROM entries
-         WHERE account_id = ?
-           AND NOT (kind = 'adjustment' AND description LIKE 'Ajuste de lucro%')
+         WHERE account_id = ? AND goal_profit IS NOT 'profit_adjust'
          ORDER BY date, id`
       )
       .all(goal.accountId) as { date: string; amountCents: number; kind: string; isYield: number }[];
@@ -386,6 +381,7 @@ export function createGoalsRepository(db: Db) {
           status: "cleared",
           categoryId: category?.id ?? null,
           description: note ? `Lucro · ${note}` : "Lucro lançado",
+          goalProfit: "profit",
           countsTowardTarget: false,
           tagIds: []
         });
@@ -417,6 +413,7 @@ export function createGoalsRepository(db: Db) {
           status: "cleared",
           categoryId: null,
           description: "Ajuste de lucro",
+          goalProfit: "profit_adjust",
           countsTowardTarget: false,
           tagIds: []
         });
@@ -659,26 +656,43 @@ export function createGoalsRepository(db: Db) {
         };
       })();
 
-      const depositsByMonth = Object.fromEntries(
-        (
-          db
-            .prepare(
-              `SELECT substr(date, 1, 7) AS month, COALESCE(SUM(amount_cents), 0) AS total
-               FROM entries WHERE account_id = ? AND amount_cents > 0 AND kind = 'transfer'
-               GROUP BY month`
+      // Depósito é transferência que entra na conta da caixinha. Na marcação a
+      // conta é a do dia a dia, e toda entrada nela pareceria depósito.
+      const depositsByMonth: Record<string, number> =
+        goal.mode === "account" && goal.accountId != null
+          ? Object.fromEntries(
+              (
+                db
+                  .prepare(
+                    `SELECT substr(date, 1, 7) AS month, COALESCE(SUM(amount_cents), 0) AS total
+                     FROM entries WHERE account_id = ? AND amount_cents > 0 AND kind = 'transfer'
+                     GROUP BY month`
+                  )
+                  .all(goal.accountId) as { month: string; total: number }[]
+              ).map((row) => [row.month, row.total])
             )
-            .all(goal.accountId ?? -1) as { month: string; total: number }[]
-        ).map((row) => [row.month, row.total])
-      );
+          : {};
+
+      // ~21 dias úteis no mês, com o fator do último dia conhecido. O
+      // rendimento acumulado dos lotes não serve: é o de toda a vida da
+      // caixinha, e compô-lo todo mês adiantava a data estimada em anos.
+      const lastRate =
+        goal.cdiPercent != null
+          ? (db
+              .prepare(
+                `SELECT date, daily_factor AS dailyRatePercent FROM cdi_rates
+                 WHERE date <= ? ORDER BY date DESC LIMIT 1`
+              )
+              .get(asOf) as CdiRate | undefined)
+          : undefined;
 
       const projection = projectCompletion({
         balanceCents,
         targetAmountCents: goal.targetAmountCents,
         depositsByMonth,
-        // ~21 dias úteis no mês, com o fator do último dia conhecido.
         monthlyYieldFactor:
-          goal.cdiPercent != null && accrual && accrual.principalCents > 0
-            ? 1 + ((accrual.realizedYieldCents / accrual.principalCents) || 0)
+          goal.cdiPercent != null && lastRate
+            ? dayFactor(lastRate, goal.cdiPercent) ** BUSINESS_DAYS_PER_MONTH
             : 1,
         asOf
       });
@@ -770,6 +784,7 @@ export function createGoalsRepository(db: Db) {
           status: "cleared",
           categoryId: category?.id ?? null,
           description: `Rendimento CDI · ${from} a ${accrual.realizedThroughDate}`,
+          goalProfit: "yield",
           countsTowardTarget: false,
           tagIds: []
         });
@@ -805,8 +820,7 @@ export function createGoalsRepository(db: Db) {
           // Rendimento depois do dia corrigido foi calculado sobre o saldo
           // errado: sai e é refeito a partir do valor real.
           db.prepare(
-            `DELETE FROM entries WHERE account_id = ? AND kind = 'income'
-               AND description LIKE 'Rendimento CDI%' AND date > ?`
+            `DELETE FROM entries WHERE account_id = ? AND goal_profit = 'yield' AND date > ?`
           ).run(goal.accountId, input.date);
           const sameDay = db
             .prepare("SELECT entry_id AS entryId FROM goal_corrections WHERE goal_id = ? AND date = ?")
@@ -876,7 +890,7 @@ export function createGoalsRepository(db: Db) {
         .prepare(
           `SELECT MAX(date) AS last FROM (
              SELECT date FROM entries
-             WHERE account_id = ? AND kind = 'income' AND description LIKE 'Rendimento CDI%'
+             WHERE account_id = ? AND goal_profit = 'yield'
              UNION ALL
              SELECT date FROM goal_corrections WHERE goal_id = ?
            )`
@@ -889,27 +903,25 @@ export function createGoalsRepository(db: Db) {
   /**
    * Conta própria: tira o rendimento calculado antes de um depósito que chegou
    * depois com data anterior, e refaz cada correção para fechar no saldo real.
+   * "Chegou depois" é a ordem de gravação (`id`), que não empata como dois
+   * `created_at` no mesmo milissegundo.
    */
   function reconcileAccountGoal(goal: GoalRecord) {
     if (goal.accountId == null) return;
     const late = db
       .prepare(
         `SELECT MIN(d.date) AS since FROM entries d
-         WHERE d.account_id = @account AND d.kind <> 'adjustment'
-           AND NOT (d.kind = 'income' AND d.description LIKE 'Rendimento CDI%')
-           AND NOT (d.kind = 'income' AND d.description LIKE 'Lucro%')
+         WHERE d.account_id = @account AND d.kind <> 'adjustment' AND d.goal_profit IS NULL
            AND EXISTS (
              SELECT 1 FROM entries y
-             WHERE y.account_id = @account AND y.kind = 'income'
-               AND y.description LIKE 'Rendimento CDI%'
-               AND y.date >= d.date AND y.created_at < d.created_at
+             WHERE y.account_id = @account AND y.goal_profit = 'yield'
+               AND y.date >= d.date AND y.id < d.id
            )`
       )
       .get({ account: goal.accountId }) as { since: string | null };
     if (late.since) {
       db.prepare(
-        `DELETE FROM entries WHERE account_id = ? AND kind = 'income'
-           AND description LIKE 'Rendimento CDI%' AND date >= ?`
+        `DELETE FROM entries WHERE account_id = ? AND goal_profit = 'yield' AND date >= ?`
       ).run(goal.accountId, late.since);
     }
 
@@ -930,7 +942,8 @@ export function createGoalsRepository(db: Db) {
         db
           .prepare(
             `SELECT COALESCE(SUM(amount_cents), 0) AS total FROM entries
-             WHERE account_id = ? AND date <= ? AND id <> ?`
+             WHERE account_id = ? AND date <= ? AND id <> ?
+               AND status IN ('cleared','reconciled')`
           )
           .get(goal.accountId, correction.date, correction.entryId) as { total: number }
       ).total;

@@ -1,8 +1,9 @@
-import { Download, HardDriveDownload, Plus } from "lucide-react";
+import { HardDriveDownload, Plus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { EntryRecord, LedgerSummary } from "@projeto41/contracts";
 import { AccountStrip } from "../../components/finance/AccountStrip.js";
 import { CategoryGoals } from "../../components/finance/CategoryGoals.js";
+import { ExportMenu } from "../../components/ExportMenu.js";
 import { EntryDrawer } from "../../components/finance/EntryDrawer.js";
 import { EntryFilters, type LedgerFilter } from "../../components/finance/EntryFilters.js";
 import { EntryTable } from "../../components/finance/EntryTable.js";
@@ -146,15 +147,15 @@ export function LedgerPage({
         >
           Backup
         </Button>
-        <Button
-          variant="ghost"
-          icon={Download}
-          onClick={() =>
-            window.open(`/api/ledger/export.csv${filterToQuery(effectiveFilter)}`, "_blank")
+        <ExportMenu
+          csvUrl={`/api/ledger/export.csv${filterToQuery(effectiveFilter)}`}
+          pdfUrl={
+            effectiveFilter.from && effectiveFilter.to
+              ? `/api/ledger/report.pdf${filterToQuery({ from: effectiveFilter.from, to: effectiveFilter.to })}`
+              : null
           }
-        >
-          Exportar CSV
-        </Button>
+          pdfHint="O PDF precisa de um período: escolha as datas inicial e final."
+        />
         <Button icon={Plus} onClick={() => setCreating(true)}>
           Novo lançamento
         </Button>

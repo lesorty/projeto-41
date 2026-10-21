@@ -178,3 +178,43 @@ describe("categoria negativa no mes", () => {
     expect(totals.map((row) => row.name)).toContain("Lazer");
   });
 });
+
+describe("teto do estorno numa compra parcelada", () => {
+  const purchase = (personId: number | null = null) =>
+    ledger.installmentPlans.create({
+      accountId: card,
+      purchaseDate: "2026-05-10",
+      totalCents: 30000,
+      installmentCount: 3,
+      categoryId: mercado,
+      personId,
+      description: "TV"
+    });
+
+  it("depois do estorno integral, nenhuma parcela aceita estorno avulso", () => {
+    const planId = purchase();
+    ledger.refunds.createForPlan(planId, { date: "2026-05-12" });
+    const second = ledger.installmentPlans.installments(planId)[1]!;
+
+    expect(() => ledger.refunds.create(second.id, { date: "2026-05-13" })).toThrow(
+      /compra parcelada/
+    );
+  });
+
+  it("estornos avulsos de parcelas somam no teto da compra", () => {
+    const planId = purchase();
+    const [first, second] = ledger.installmentPlans.installments(planId);
+    ledger.refunds.create(first!.id, { date: "2026-05-12" });
+    ledger.refunds.create(second!.id, { date: "2026-05-12" });
+    expect(ledger.refunds.refundedCents(first!.id) + ledger.refunds.refundedCents(second!.id)).toBe(
+      20000
+    );
+  });
+
+  it("o estorno integral vai para a pessoa da compra, nao para a dona do cartao", () => {
+    const other = ledger.people.create({ name: "Outra", kind: "individual", color: "#0af" });
+    const planId = purchase(other);
+    const refundId = ledger.refunds.createForPlan(planId, { date: "2026-05-12" });
+    expect(ledger.entries.get(refundId)?.personId).toBe(other);
+  });
+});

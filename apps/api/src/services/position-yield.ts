@@ -43,13 +43,12 @@ type Movement = {
   kind: string;
   amount: number;
   targetValue: number | null;
-  createdAt: string;
 };
 
 function movementsOf(db: AppDatabase, positionId: number): Movement[] {
   return db.raw
     .prepare(
-      `SELECT id, date, kind, amount, target_value AS targetValue, created_at AS createdAt
+      `SELECT id, date, kind, amount, target_value AS targetValue
        FROM position_movements WHERE position_id = ? ORDER BY date, id`
     )
     .all(positionId) as Movement[];
@@ -147,11 +146,13 @@ export function syncPosition(db: AppDatabase, id: number, asOf: string) {
       movements = movementsOf(db, id);
     }
 
+    // "Chegou depois" é a ordem de gravação, e o id (AUTOINCREMENT) a guarda
+    // sem empate: dois `created_at` no mesmo milissegundo não diziam quem veio
+    // antes, e o aporte atrasado passava sem refazer o rendimento.
     const yields = movements.filter((movement) => movement.kind === "yield");
     const lateFlows = movements.filter(
       (movement) =>
-        isFlow(movement) &&
-        yields.some((y) => y.date >= movement.date && y.createdAt < movement.createdAt)
+        isFlow(movement) && yields.some((y) => y.date >= movement.date && y.id < movement.id)
     );
     if (lateFlows.length > 0) {
       const since = lateFlows.reduce((min, movement) => (movement.date < min ? movement.date : min), lateFlows[0]!.date);

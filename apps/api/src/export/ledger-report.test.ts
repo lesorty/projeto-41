@@ -94,6 +94,16 @@ describe("dados do relatorio", () => {
     expect(report.accounts[2]).toMatchObject({ transfersCents: 500_00 });
   });
 
+  it("conta arquivada depois continua no relatorio do periodo em que movimentou", () => {
+    db.raw.prepare("UPDATE accounts SET archived = 1 WHERE id = ?").run(bank);
+    const report = collectLedgerReport(db, SEPTEMBER, "2026-10-18T19:40");
+    // Os totais seguem fechando com as categorias, que nao filtram conta.
+    expect(report.totals.expenseCents).toBe(-450_00);
+    const categories = report.expenseCategories.reduce((sum, category) => sum + category.cents, 0);
+    expect(-report.totals.expenseCents).toBe(categories);
+    expect(report.accounts.map((account) => account.name)).toContain("Conta Teste");
+  });
+
   it("categorias de saida e de entrada, com participacoes que somam 100%", () => {
     const report = collectLedgerReport(db, SEPTEMBER, "2026-10-18T19:40");
     expect(report.expenseCategories.map((category) => [category.name, category.cents])).toEqual([

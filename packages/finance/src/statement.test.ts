@@ -3,6 +3,7 @@ import { addDays, formatIsoDate, parseIsoDate } from "./dates.js";
 import {
   clampDay,
   closingDateFor,
+  installmentStatementMonth,
   lastDayOfMonth,
   statementDatesFor,
   statementMonthFor,
@@ -77,6 +78,22 @@ describe("statementMonthFor", () => {
   it("compra em 31 de dezembro com fechamento 31 ainda e da fatura de dezembro", () => {
     expect(statementDatesFor(statementMonthFor("2026-12-31", 31, 10), 31, 10).closingDate).toBe(
       "2026-12-31"
+    );
+  });
+});
+
+describe("installmentStatementMonth", () => {
+  it("uma parcela por fatura mesmo quando a data encurtada cai antes do fechamento", () => {
+    // Fecha 29, vence 7: 31/01 fecha em 28/02 (vence mar). A 2a parcela (28/02)
+    // tambem cairia em marco pela propria data; pela serie, e abril.
+    const months = [1, 2, 3].map((n) => installmentStatementMonth("2026-01-31", n, 29, 7));
+    expect(months).toEqual(["2026-03", "2026-04", "2026-05"]);
+    expect(statementMonthFor("2026-02-28", 29, 7)).toBe("2026-03");
+  });
+
+  it("a primeira parcela e a fatura da compra", () => {
+    expect(installmentStatementMonth("2026-05-10", 1, 20, 27)).toBe(
+      statementMonthFor("2026-05-10", 20, 27)
     );
   });
 });

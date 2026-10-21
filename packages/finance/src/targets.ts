@@ -187,10 +187,13 @@ export function computeTargets(input: TargetInput): TargetResult {
   }
 
   // Modo pooled: o casal junta a renda, reserva um teto conjunto e divide o
-  // restante igualmente.
+  // restante igualmente. O bolo é a renda de quem está ativo (a conjunta
+  // inclusa): pessoa inativa já não reparte nada e não pode inflar o bolo.
   const pooledIncomeCents =
     input.pooledIncomeCents ??
-    input.people.reduce((sum, person) => sum + effectiveIncome(input, person.id), 0);
+    input.people
+      .filter((person) => person.active)
+      .reduce((sum, person) => sum + effectiveIncome(input, person.id), 0);
   const jointTarget = input.jointExpenseTargetCents ?? 0;
   let leftover = pooledIncomeCents - jointTarget;
 

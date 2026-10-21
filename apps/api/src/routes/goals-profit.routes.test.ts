@@ -150,6 +150,37 @@ describe("lançar lucro", () => {
   });
 });
 
+describe("o que conta como lucro", () => {
+  it("entrada escrita à mão com 'lucro' na descrição continua sendo aporte", async () => {
+    const id = await goalWithDeposit();
+    const accountId = db.ledger.goals.get(id)!.accountId!;
+    db.ledger.entries.create({
+      accountId,
+      date: "2026-09-10",
+      amountCents: 20_000,
+      kind: "income",
+      description: "lucro da venda do carro"
+    });
+    const goal = (await post(`/api/ledger/goals/${id}/profit`, { amountCents: 500, date: "2026-09-30" })).json().goal;
+    expect(goal.yieldCents).toBe(500);
+    expect(goal.profit.cents).toBe(500);
+  });
+
+  it("renomear o lucro lançado não o transforma em aporte", async () => {
+    const id = await goalWithDeposit();
+    const { entryId } = db.ledger.goals.addProfit(id, { amountCents: 700, date: "2026-09-30" });
+    const entry = db.ledger.entries.get(entryId)!;
+    db.ledger.entries.update(entryId, {
+      accountId: entry.accountId,
+      date: entry.date,
+      amountCents: entry.amountCents,
+      kind: "income",
+      description: "Juros do mês"
+    });
+    expect(db.ledger.goals.progress(id, "2026-09-30").yieldCents).toBe(700);
+  });
+});
+
 describe("ajustar lucro", () => {
   it("lança a diferença para chegar no lucro informado", async () => {
     const id = await goalWithDeposit();

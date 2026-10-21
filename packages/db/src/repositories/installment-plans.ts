@@ -3,14 +3,7 @@ import type {
   InstallmentPlanRecord,
   UpdateInstallmentPlanInput
 } from "@projeto41/contracts";
-import {
-  addMonths,
-  formatMonth,
-  installmentDates,
-  parseMonth,
-  splitCents,
-  statementMonthFor
-} from "@projeto41/finance";
+import { installmentDates, installmentStatementMonth, splitCents } from "@projeto41/finance";
 import { createCardsRepository } from "./cards.js";
 import { createEntriesRepository } from "./entries.js";
 import { LedgerError, notFound, nowIso, type Db } from "./shared.js";
@@ -34,6 +27,17 @@ const SELECT_PLAN = `
   LEFT JOIN categories c ON c.id = p.category_id
 `;
 
+/**
+ * A parcela ja aconteceu: foi liquidada (a mao ou pelo extrato importado) ou
+ * esta numa fatura que ja recebeu pagamento. Pagar a fatura nao muda o status
+ * da parcela, entao `pending` sozinho nao quer dizer "futura" — tratar assim
+ * apagava ou movia parcelas de faturas ja pagas.
+ */
+const SETTLED_SQL = `(e.status IN ('cleared','reconciled') OR EXISTS (
+  SELECT 1 FROM entries pe JOIN transfers t ON t.to_entry_id = pe.id
+  WHERE t.purpose = 'invoice_payment' AND pe.account_id = e.account_id
+    AND pe.statement_month = e.statement_month))`;
+
 type PlanRow = Omit<
   InstallmentPlanRecord,
   "paidCount" | "remainingCount" | "remainingCents" | "lastStatementMonth" | "sumCents" | "sumMatchesTotal"
@@ -47,14 +51,13 @@ export function createInstallmentPlansRepository(db: Db) {
     return db
       .prepare(
         `SELECT
-           COALESCE(SUM(CASE WHEN status IN ('cleared','reconciled') THEN 1 ELSE 0 END), 0)
-             AS paidCount,
-           COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0) AS remainingCount,
-           -COALESCE(SUM(CASE WHEN status = 'pending' THEN amount_cents END), 0)
+           COALESCE(SUM(CASE WHEN ${SETTLED_SQL} THEN 1 ELSE 0 END), 0) AS paidCount,
+           COALESCE(SUM(CASE WHEN ${SETTLED_SQL} THEN 0 ELSE 1 END), 0) AS remainingCount,
+           -COALESCE(SUM(CASE WHEN ${SETTLED_SQL} THEN 0 ELSE e.amount_cents END), 0)
              AS remainingCents,
-           -COALESCE(SUM(amount_cents), 0) AS sumCents,
-           MAX(statement_month) AS lastStatementMonth
-         FROM entries WHERE installment_plan_id = ?`
+           -COALESCE(SUM(e.amount_cents), 0) AS sumCents,
+           MAX(e.statement_month) AS lastStatementMonth
+         FROM entries e WHERE e.installment_plan_id = ?`
       )
       .get(planId) as {
       paidCount: number;
@@ -113,14 +116,11 @@ export function createInstallmentPlansRepository(db: Db) {
         // primeira parcela (6.3). Nao reimplementar aqui.
         const amounts = splitCents(input.totalCents, count);
         const dates = installmentDates(input.purchaseDate, count);
-        // Uma parcela por fatura, a partir da fatura da compra. Recalcular o
-        // mês pela data de cada parcela falhava com fechamento no dia 28-31:
-        // a data encurtada no mês curto caía antes do fechamento, e duas
-        // parcelas iam para a mesma fatura, pulando o mês seguinte.
-        const firstMonth = parseMonth(
-          statementMonthFor(input.purchaseDate, cycle.closingDay, cycle.dueDay)
+        // Uma parcela por fatura, a partir da fatura da compra: nunca pela
+        // data de cada parcela (ver `installmentStatementMonth`).
+        const months = dates.map((_, index) =>
+          installmentStatementMonth(input.purchaseDate, index + 1, cycle.closingDay, cycle.dueDay)
         );
-        const months = dates.map((_, index) => formatMonth(addMonths(firstMonth, index)));
 
         const planId = Number(
           db
@@ -223,20 +223,26 @@ export function createInstallmentPlansRepository(db: Db) {
         );
         const pending = db
           .prepare(
-            `SELECT id, date FROM entries
-             WHERE installment_plan_id = ? AND status = 'pending'`
+            `SELECT e.id, e.installment_number AS installmentNumber FROM entries e
+             WHERE e.installment_plan_id = ? AND NOT ${SETTLED_SQL}`
           )
-          .all(id) as { id: number; date: string }[];
+          .all(id) as { id: number; installmentNumber: number | null }[];
 
         const update = db.prepare(
           `UPDATE entries SET account_id = ?, statement_month = ?, updated_at = ? WHERE id = ?`
         );
         for (const row of pending) {
           // O ciclo do cartao de destino quase nunca e o mesmo, entao cada
-          // parcela precisa de `statement_month` recalculado.
+          // parcela precisa de `statement_month` recalculado — pela mesma
+          // regra da criacao, uma por fatura a partir da compra.
           update.run(
             newAccountId,
-            statementMonthFor(row.date, cycle.closingDay, cycle.dueDay),
+            installmentStatementMonth(
+              plan.purchaseDate,
+              row.installmentNumber ?? 1,
+              cycle.closingDay,
+              cycle.dueDay
+            ),
             nowIso(),
             row.id
           );
@@ -269,8 +275,9 @@ export function createInstallmentPlansRepository(db: Db) {
     },
 
     /**
-     * Exclui o plano e as parcelas **nao pagas**. Parcelas conciliadas ja
-     * aconteceram: sobrevivem sem o vinculo. Nunca apagar historico conciliado.
+     * Exclui o plano e as parcelas **que ainda nao aconteceram**. Parcela
+     * liquidada ou numa fatura ja paga sobrevive sem o vinculo: nunca apagar
+     * historico cobrado.
      */
     remove: (id: number) => {
       const plan = repository.get(id);
@@ -278,7 +285,7 @@ export function createInstallmentPlansRepository(db: Db) {
 
       return db.transaction(() => {
         const removed = db
-          .prepare("DELETE FROM entries WHERE installment_plan_id = ? AND status = 'pending'")
+          .prepare(`DELETE FROM entries AS e WHERE e.installment_plan_id = ? AND NOT ${SETTLED_SQL}`)
           .run(id).changes;
         const kept = db
           .prepare(

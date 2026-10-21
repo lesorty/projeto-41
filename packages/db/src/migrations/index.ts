@@ -19,6 +19,7 @@ import { migration018InvestmentAccountPerson } from "./018-investment-account-pe
 import { migration019GoalParentAccount } from "./019-goal-parent-account.js";
 import { migration020GoalProfitMode } from "./020-goal-profit-mode.js";
 import { migration021PdfImport } from "./021-pdf-import.js";
+import { migration022GoalProfitMarker } from "./022-goal-profit-marker.js";
 import type { Migration } from "./runner.js";
 
 /**
@@ -46,7 +47,8 @@ export const migrations: Migration[] = [
   migration018InvestmentAccountPerson,
   migration019GoalParentAccount,
   migration020GoalProfitMode,
-  migration021PdfImport
+  migration021PdfImport,
+  migration022GoalProfitMarker
 ];
 
 export * from "./runner.js";
