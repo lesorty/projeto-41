@@ -5743,11 +5743,18 @@ select option {
   border-radius: 12px;
   background: var(--surface-2);
 }
-.fin-import-remember .segmented {
-  flex-wrap: wrap;
-}
+/* Cinco niveis numa linha so: colunas iguais e o rotulo quebra em duas linhas
+   quando nao cabe, em vez de estourar a largura do popup. */
 .fin-import-remember .segmented button {
-  white-space: nowrap;
+  padding: 7px 6px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 520px) {
+  .fin-import-remember .segmented {
+    grid-auto-flow: row;
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 .fin-import-actions {
   display: flex;
