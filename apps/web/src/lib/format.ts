@@ -219,6 +219,16 @@ export function moneyFromCents(cents: number) {
   return money((cents || 0) / 100);
 }
 
+const amountFmt = new Intl.NumberFormat("pt-BR", {
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2
+});
+
+/** Valor sem "R$", como numa célula de planilha: as colunas cabem lado a lado. */
+export function amountFromCents(cents: number) {
+  return masked ? MASK : amountFmt.format((cents || 0) / 100);
+}
+
 /** Mostra o sinal explícito: usado na coluna de valor do livro. */
 export function signedMoneyFromCents(cents: number) {
   if (masked) return `R$ ${MASK}`;

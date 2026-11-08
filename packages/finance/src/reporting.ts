@@ -327,3 +327,102 @@ export function previousRangeToDate(range: Range, options: { today: string }): R
   }
   return { from: previous.from, to: addDays(previous.from, info.daysElapsed - 1) };
 }
+
+export type YearCategoryCell = {
+  categoryId: number | null;
+  kind: "income" | "expense";
+  name: string;
+  color: string | null;
+  /** 1 a 12. */
+  month: number;
+  /** Sinal do livro: entrada positiva, saida negativa. */
+  totalCents: number;
+};
+
+export type YearMatrixRow = {
+  categoryId: number | null;
+  kind: "income" | "expense";
+  name: string;
+  color: string | null;
+  /** Doze posicoes, janeiro a dezembro, com o sinal do livro. */
+  months: number[];
+  totalCents: number;
+};
+
+export type YearMatrix = {
+  income: { rows: YearMatrixRow[]; months: number[]; totalCents: number };
+  expense: { rows: YearMatrixRow[]; months: number[]; totalCents: number };
+  /** Entradas mais saidas, mes a mes: o resultado de cada coluna. */
+  net: { months: number[]; totalCents: number };
+};
+
+const sumMonths = (rows: { months: number[] }[]) =>
+  Array.from({ length: 12 }, (_, index) =>
+    rows.reduce((total, row) => total + (row.months[index] ?? 0), 0)
+  );
+
+/**
+ * Planilha anual: categorias nas linhas, meses nas colunas, totais nas bordas.
+ *
+ * `include` sao categorias que precisam aparecer mesmo zeradas (as escolhidas
+ * no filtro): sumir com a linha faria parecer que o filtro nao pegou. A ordem
+ * das linhas e a de `order` (a da tela de categorias); o que nao esta nela vai
+ * por nome, e "Sem categoria" sempre por ultimo, como lembrete de pendencia.
+ */
+export function yearMatrix(
+  cells: YearCategoryCell[],
+  options: {
+    include?: Omit<YearCategoryCell, "month" | "totalCents">[];
+    order?: (number | null)[];
+  } = {}
+): YearMatrix {
+  const byKey = new Map<string, YearMatrixRow>();
+  const keyOf = (kind: string, categoryId: number | null) => `${kind}:${categoryId ?? "none"}`;
+  const rowFor = (cell: Omit<YearCategoryCell, "month" | "totalCents">) => {
+    const key = keyOf(cell.kind, cell.categoryId);
+    let row = byKey.get(key);
+    if (!row) {
+      row = {
+        categoryId: cell.categoryId,
+        kind: cell.kind,
+        name: cell.name,
+        color: cell.color,
+        months: Array.from({ length: 12 }, () => 0),
+        totalCents: 0
+      };
+      byKey.set(key, row);
+    }
+    return row;
+  };
+
+  for (const category of options.include ?? []) rowFor(category);
+  for (const cell of cells) {
+    if (cell.month < 1 || cell.month > 12) continue;
+    const row = rowFor(cell);
+    row.months[cell.month - 1] = (row.months[cell.month - 1] ?? 0) + cell.totalCents;
+    row.totalCents += cell.totalCents;
+  }
+
+  const position = new Map((options.order ?? []).map((id, index) => [id, index]));
+  const sorted = [...byKey.values()].sort((a, b) => {
+    if (a.categoryId === null) return 1;
+    if (b.categoryId === null) return -1;
+    const pa = position.get(a.categoryId) ?? Number.POSITIVE_INFINITY;
+    const pb = position.get(b.categoryId) ?? Number.POSITIVE_INFINITY;
+    return pa - pb || a.name.localeCompare(b.name, "pt-BR");
+  });
+
+  const section = (kind: "income" | "expense") => {
+    const rows = sorted.filter((row) => row.kind === kind);
+    const months = sumMonths(rows);
+    return { rows, months, totalCents: months.reduce((a, b) => a + b, 0) };
+  };
+  const income = section("income");
+  const expense = section("expense");
+  const netMonths = income.months.map((value, index) => value + (expense.months[index] ?? 0));
+  return {
+    income,
+    expense,
+    net: { months: netMonths, totalCents: income.totalCents + expense.totalCents }
+  };
+}

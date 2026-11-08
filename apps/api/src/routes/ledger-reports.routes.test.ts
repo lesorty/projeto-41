@@ -373,3 +373,57 @@ describe("PATCH /api/ledger/entries/:id/target", () => {
     expect(response.statusCode).toBe(404);
   });
 });
+
+describe("GET /api/ledger/reports/categories/year", () => {
+  it("monta categorias x meses com subtotais, resultado e filtro por conta", async () => {
+    const salario = db.ledger.categories
+      .list()
+      .find((c) => c.name === "Salário" && c.kind === "income")!.id;
+    seedExpense(50000, mercado, { date: "2026-01-05" });
+    seedExpense(20000, mercado, { date: "2026-03-05" });
+    seedExpense(10000, null, { date: "2026-03-06" });
+    seedExpense(7000, lazer, { date: "2026-03-07", accountId: savings });
+    seedExpense(99999, mercado, { date: "2025-12-31" });
+    db.ledger.entries.create({
+      accountId: checking,
+      date: "2026-03-01",
+      amountCents: 500000,
+      kind: "income",
+      categoryId: salario
+    });
+
+    const all = await app
+      .inject("/api/ledger/reports/categories/year?year=2026")
+      .then((r) => r.json());
+    const row = (section: { rows: { categoryId: number | null }[] }, id: number | null) =>
+      section.rows.find((r) => r.categoryId === id) as
+        | { months: number[]; totalCents: number }
+        | undefined;
+
+    expect(row(all.expense, mercado)!.months[0]).toBe(-50000);
+    expect(row(all.expense, mercado)!.months[2]).toBe(-20000);
+    expect(row(all.expense, mercado)!.totalCents).toBe(-70000);
+    expect(all.expense.rows.at(-1).categoryId).toBeNull();
+    expect(all.expense.totalCents).toBe(-87000);
+    expect(all.income.totalCents).toBe(500000);
+    expect(all.net.months[2]).toBe(500000 - 37000);
+    expect(all.net.totalCents).toBe(500000 - 87000);
+
+    const onlyChecking = await app
+      .inject(`/api/ledger/reports/categories/year?year=2026&accountId=${checking}`)
+      .then((r) => r.json());
+    expect(row(onlyChecking.expense, lazer)).toBeUndefined();
+    expect(onlyChecking.expense.totalCents).toBe(-80000);
+
+    // Categoria escolhida sem movimento aparece zerada; "none" e Sem categoria.
+    const picked = await app
+      .inject(`/api/ledger/reports/categories/year?year=2026&categoryId=${lazer},none`)
+      .then((r) => r.json());
+    expect(picked.expense.rows.map((r: { categoryId: number | null }) => r.categoryId)).toEqual([
+      lazer,
+      null
+    ]);
+    expect(picked.income.rows).toHaveLength(0);
+    expect(picked.expense.totalCents).toBe(-17000);
+  });
+});

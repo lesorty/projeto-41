@@ -55,6 +55,63 @@ export function createReportsRepository(db: Db) {
         .all({ ...range, kind }) as CategoryTotalRow[];
     },
 
+    /**
+     * Soma crua por categoria e mes de um ano, com o sinal do livro (entrada
+     * positiva, saida negativa) — e o que a planilha anual do Painel soma.
+     *
+     * So entrada e saida: transferencia e ajuste ficam de fora (D21), senao o
+     * pagamento de fatura contaria o gasto do cartao duas vezes. O tipo vem do
+     * lancamento, nao da categoria, porque "Sem categoria" existe nos dois.
+     */
+    yearByCategoryMonth: (options: {
+      year: number;
+      accountIds?: number[];
+      categoryIds?: (number | null)[];
+    }) => {
+      const accountIds = (options.accountIds ?? []).filter(Number.isInteger);
+      const categoryIds = options.categoryIds ?? [];
+      const realIds = categoryIds.filter((id): id is number => Number.isInteger(id));
+      const wantsUncategorized = categoryIds.includes(null);
+
+      const accountFilter =
+        accountIds.length > 0 ? `AND e.account_id IN (${accountIds.join(",")})` : "";
+      const categoryFilter =
+        categoryIds.length > 0
+          ? `AND (${[
+              realIds.length > 0 ? `e.category_id IN (${realIds.join(",")})` : null,
+              wantsUncategorized ? "e.category_id IS NULL" : null
+            ]
+              .filter(Boolean)
+              .join(" OR ")})`
+          : "";
+
+      return db
+        .prepare(
+          `SELECT
+             e.category_id AS categoryId,
+             e.kind AS kind,
+             COALESCE(c.name, 'Sem categoria') AS name,
+             c.color,
+             CAST(strftime('%m', e.date) AS INTEGER) AS month,
+             SUM(e.amount_cents) AS totalCents
+           FROM entries e
+           LEFT JOIN categories c ON c.id = e.category_id
+           WHERE e.kind IN ('income', 'expense')
+             AND e.date >= @from AND e.date <= @to
+             ${accountFilter}
+             ${categoryFilter}
+           GROUP BY e.category_id, e.kind, month`
+        )
+        .all({ from: `${options.year}-01-01`, to: `${options.year}-12-31` }) as {
+        categoryId: number | null;
+        kind: "income" | "expense";
+        name: string;
+        color: string | null;
+        month: number;
+        totalCents: number;
+      }[];
+    },
+
     monthSummary: (range: PeriodRange) =>
       db
         .prepare(

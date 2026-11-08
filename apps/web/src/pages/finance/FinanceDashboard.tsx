@@ -20,6 +20,7 @@ import {
 } from "../../components/finance/PeriodPicker.js";
 import { TargetBars } from "../../components/finance/TargetBars.js";
 import { TargetDrawer } from "../../components/finance/TargetDrawer.js";
+import { YearCategorySheet } from "../../components/finance/YearCategorySheet.js";
 import {
   AnimatedNumber,
   Button,
@@ -320,6 +321,8 @@ export function FinanceDashboardPage({ onNavigate }: { onNavigate: FinanceNaviga
               )}
             </Panel>
           </div>
+
+          <YearCategorySheet initialYear={Number(period.from.slice(0, 4))} />
 
           {!hasMovement && summary.accounts.length > 0 && (
             <Empty icon={Receipt} text="Nenhum lançamento neste período." />

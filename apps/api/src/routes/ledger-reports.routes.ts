@@ -5,9 +5,11 @@ import {
   periodSchema,
   personPeriodBudgetInputSchema,
   reportRangeSchema,
+  yearCategoryQuerySchema,
   type CategoryReport,
   type LedgerSummary,
-  type TargetReport
+  type TargetReport,
+  type YearCategoryReport
 } from "@projeto41/contracts";
 import {
   categoryTotals,
@@ -21,6 +23,7 @@ import {
   startOfMonth,
   statementCycleFor,
   topSlices,
+  yearMatrix,
   type Range
 } from "@projeto41/finance";
 import type { AppDatabase } from "@projeto41/db";
@@ -254,6 +257,31 @@ export const registerLedgerReportsRoutes: RoutePlugin = (app, { db }) => {
       months: query.months,
       endMonth: query.endMonth ?? currentPeriod()
     });
+  });
+
+  // Planilha anual: categorias x meses, com subtotais e o resultado de cada mes.
+  app.get("/api/ledger/reports/categories/year", async (request) => {
+    const query = yearCategoryQuerySchema.parse(request.query);
+    const categories = db.ledger.categories.list({ includeArchived: true });
+    const chosen = new Set(query.categoryId ?? []);
+    const cells = db.ledger.reports.yearByCategoryMonth({
+      year: query.year,
+      accountIds: query.accountId,
+      categoryIds: query.categoryId
+    });
+    const matrix = yearMatrix(cells, {
+      include: categories
+        .filter((category) => chosen.has(category.id))
+        .map((category) => ({
+          categoryId: category.id,
+          kind: category.kind,
+          name: category.name,
+          color: category.color
+        })),
+      order: categories.map((category) => category.id)
+    });
+    const report: YearCategoryReport = { year: query.year, ...matrix };
+    return report;
   });
 
   app.get("/api/ledger/targets", async (request) => {

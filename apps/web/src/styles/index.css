@@ -6571,3 +6571,89 @@ select option {
   opacity: 0.45;
   cursor: not-allowed;
 }
+
+/* --- Planilha do ano (Painel) -------------------------------------------- */
+
+.fin-sheet-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 14px;
+}
+.fin-sheet-filter {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.fin-sheet {
+  transition: opacity var(--transition);
+}
+.fin-sheet.is-loading {
+  opacity: 0.55;
+}
+.fin-sheet .data-table th,
+.fin-sheet .data-table td {
+  padding: 7px 10px;
+}
+.fin-sheet .data-table td {
+  font-size: 12.5px;
+}
+/* A coluna da categoria fica parada enquanto os meses rolam de lado. */
+.fin-sheet .fin-sheet-label {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--surface);
+  min-width: 170px;
+  box-shadow: inset -1px 0 0 var(--border);
+}
+.fin-sheet .fin-sheet-subtotal .fin-sheet-label,
+.fin-sheet tfoot .fin-sheet-label {
+  background: var(--surface-2);
+}
+.fin-sheet tbody tr:hover .fin-sheet-label {
+  background: var(--surface-2);
+}
+.fin-sheet .fin-sheet-group td {
+  padding-top: 14px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: var(--text-faint);
+  background: transparent;
+}
+.fin-sheet .fin-sheet-subtotal td {
+  font-weight: 600;
+  background: var(--surface-2);
+}
+.fin-sheet .fin-sheet-total {
+  font-weight: 600;
+}
+.fin-sheet tfoot th {
+  font-size: 12.5px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text);
+  border-top: 2px solid var(--border);
+  border-bottom: 0;
+  background: var(--surface-2);
+}
+.fin-sheet tfoot th.fin-negative {
+  color: var(--negative);
+}
+.fin-sheet tfoot th.fin-positive {
+  color: var(--positive);
+}
+.fin-sheet tfoot th.fin-muted {
+  color: var(--text-muted);
+}
+.fin-sheet td.fin-negative {
+  color: var(--negative);
+}
+.fin-sheet td.fin-positive {
+  color: var(--positive);
+}
+.fin-sheet td.fin-muted {
+  color: var(--text-faint);
+}

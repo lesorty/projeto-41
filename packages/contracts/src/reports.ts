@@ -83,6 +83,32 @@ export const categoryTrendQuerySchema = z.object({
   endMonth: periodSchema.optional()
 });
 
+/** Lista de ids na query (`?accountId=1&accountId=2` ou `?accountId=1,2`). */
+const idListSchema = z
+  .union([z.string(), z.number(), z.array(z.union([z.string(), z.number()]))])
+  .transform((value) => {
+    const parts = Array.isArray(value) ? value : String(value).split(",");
+    return parts.map((part) => String(part).trim()).filter((part) => part !== "");
+  });
+
+/**
+ * Planilha anual do Painel. `categoryId=none` escolhe "Sem categoria"; sem
+ * conta ou sem categoria, vale tudo.
+ */
+export const yearCategoryQuerySchema = z.object({
+  year: yearSchema,
+  accountId: idListSchema
+    .transform((parts) => parts.map(Number).filter((id) => Number.isInteger(id) && id > 0))
+    .optional(),
+  categoryId: idListSchema
+    .transform((parts) =>
+      parts
+        .map((part) => (part === "none" ? null : Number(part)))
+        .filter((id): id is number | null => id === null || (Number.isInteger(id) && id > 0))
+    )
+    .optional()
+});
+
 // Mutacoes -------------------------------------------------------------------
 
 /**
@@ -166,6 +192,23 @@ export type CategoryTrend = {
   name: string;
   color: string | null;
   points: { month: string; totalCents: number }[];
+};
+
+export type YearCategoryRow = {
+  categoryId: number | null;
+  kind: "income" | "expense";
+  name: string;
+  color: string | null;
+  /** Janeiro a dezembro, com o sinal do livro: entrada positiva, saida negativa. */
+  months: number[];
+  totalCents: number;
+};
+
+export type YearCategoryReport = {
+  year: number;
+  income: { rows: YearCategoryRow[]; months: number[]; totalCents: number };
+  expense: { rows: YearCategoryRow[]; months: number[]; totalCents: number };
+  net: { months: number[]; totalCents: number };
 };
 
 export type LedgerSummary = {
