@@ -1,12 +1,19 @@
 import { Check, Link2, SkipForward } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { ImportRowConfirm, ImportRowView, PayeeRemember } from "@projeto41/contracts";
+import { invoiceMonthForPayment } from "@projeto41/finance";
 import { Modal } from "../dialog.js";
 import { Dropdown } from "../forms.js";
 import { Button, Field, Segmented, Tag } from "../ui.js";
 import { PlaceAutocomplete } from "./EntryDrawer.js";
 import { CandidatePicker, ImportCompare } from "./ImportCompare.js";
-import { ledgerDate, monthLabel, signedMoneyFromCents, weekdayName } from "../../lib/format.js";
+import {
+  ledgerDate,
+  moneyFromCents,
+  monthLabel,
+  signedMoneyFromCents,
+  weekdayName
+} from "../../lib/format.js";
 import { ACCOUNT_KIND_LABEL, isCard, type LedgerReference } from "../../lib/ledger.js";
 
 type Kind = "expense" | "income" | "transfer";
@@ -64,7 +71,7 @@ export function ImportRowDialog({
     row.duplicate && !row.duplicate.blocked && row.duplicate.confidence !== "possible" ? "link" : "create"
   );
   const [kind, setKind] = useState<Kind>(row.suggestion.kind);
-  const [toAccountId, setToAccountId] = useState<number | null>(null);
+  const [toAccountId, setToAccountId] = useState<number | null>(row.suggestion.toAccountId);
   const [categoryId, setCategoryId] = useState<number | null>(row.suggestion.categoryId);
   const [description, setDescription] = useState(row.suggestion.description ?? "");
   const [placeName, setPlaceName] = useState(row.suggestion.placeName ?? "");
@@ -93,16 +100,37 @@ export function ImportRowDialog({
   const otherAccounts = useMemo(
     () =>
       reference.accounts
-        .filter((account) => account.id !== accountId && !account.archived && !isCard(account))
+        // Cartao so como destino de uma saida: e o pagamento da fatura.
+        .filter((account) => account.id !== accountId && !account.archived)
+        .filter((account) => (isCard(account) ? outgoing : true))
         .filter((account) => account.kind !== "investment")
         .map((account) => ({
           value: account.id,
           label: account.name,
           color: account.color,
-          hint: [account.personName, ACCOUNT_KIND_LABEL[account.kind]].filter(Boolean).join(" · ")
+          hint: [
+            account.personName,
+            isCard(account) ? "Pagar fatura" : ACCOUNT_KIND_LABEL[account.kind]
+          ]
+            .filter(Boolean)
+            .join(" · ")
         })),
-    [reference.accounts, accountId]
+    [reference.accounts, accountId, outgoing]
   );
+
+  // Transferencia para o cartao e pagamento de fatura: qual fatura ela quita.
+  const payingCard =
+    kind === "transfer" && toAccountId != null
+      ? reference.accounts.find((account) => account.id === toAccountId && isCard(account))
+      : undefined;
+  const payingMonth =
+    payingCard?.closingDay != null && payingCard.dueDay != null
+      ? invoiceMonthForPayment(row.date, payingCard.closingDay, payingCard.dueDay)
+      : null;
+  const payingTotal =
+    row.invoicePayment && row.invoicePayment.cardId === payingCard?.id && row.invoicePayment.month === payingMonth
+      ? row.invoicePayment.statementTotalCents
+      : null;
 
   const ignoring = remember === "ignore" && action === "create" && kind !== "transfer";
   const canRemember = action === "link" || kind !== "transfer";
@@ -207,8 +235,14 @@ export function ImportRowDialog({
                   {row.statementMonth && (
                     <Tag tone="neutral">Fatura de {monthLabel(row.statementMonth).toLowerCase()}</Tag>
                   )}
-                  {row.rule?.mode === "ask" && <Tag tone="warning">{party}: perguntar sempre</Tag>}
-                  {!row.rule && <Tag tone="warning">{party} novo</Tag>}
+                  {row.invoicePayment ? (
+                    <Tag tone="info">Pagamento de fatura</Tag>
+                  ) : (
+                    <>
+                      {row.rule?.mode === "ask" && <Tag tone="warning">{party}: perguntar sempre</Tag>}
+                      {!row.rule && <Tag tone="warning">{party} novo</Tag>}
+                    </>
+                  )}
                 </div>
               </div>
               <span className={`fin-import-amount ${outgoing ? "negative" : "positive"}`}>
@@ -296,11 +330,32 @@ export function ImportRowDialog({
                   />
                 )}
 
+                {payingCard && (
+                  <p className="fin-callout fin-import-invoice">
+                    {payingMonth ? (
+                      <>
+                        <strong>
+                          Paga a fatura de {monthLabel(payingMonth).toLowerCase()} do {payingCard.name}
+                        </strong>
+                        {payingTotal != null && payingTotal !== -row.amountCents && (
+                          <> (total hoje {moneyFromCents(payingTotal)})</>
+                        )}
+                        . Sai do saldo desta conta e quita a fatura: não é gasto e não leva categoria,
+                        porque as compras do cartão já levam.
+                      </>
+                    ) : (
+                      "Este cartão não tem fechamento e vencimento: defina na tela Contas para registrar o pagamento."
+                    )}
+                  </p>
+                )}
+
                 <Field label="Descrição" full={kind === "transfer" || cardInvoice}>
                   <input
                     value={description}
                     onChange={(event) => setDescription(event.target.value)}
-                    placeholder="O título que aparece no livro"
+                    placeholder={
+                      payingMonth ? `Pagamento da fatura ${payingMonth}` : "O título que aparece no livro"
+                    }
                     maxLength={200}
                     autoFocus
                   />

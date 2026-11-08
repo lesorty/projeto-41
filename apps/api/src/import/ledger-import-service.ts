@@ -15,7 +15,7 @@ import {
   type RuleMode,
   type StatementKind
 } from "@projeto41/contracts";
-import { normalizeName, statementMonthFor } from "@projeto41/finance";
+import { invoiceMonthForPayment, normalizeName, statementMonthFor } from "@projeto41/finance";
 import { importRowConfirmSchema } from "@projeto41/contracts";
 import { LedgerError, notFound, nowIso, type AppDatabase } from "@projeto41/db";
 import { headerMatches, inspectCsv, readCsv } from "./csv/csv-reader.js";
@@ -102,6 +102,8 @@ type BatchRecord = {
 };
 
 const PENDING: ImportRowStatus[] = ["new", "needs_review"];
+/** Descritor do banco para o pagamento da fatura do cartao ("Pagamento de fatura", Nubank). */
+const INVOICE_PAYMENT_TEXT = /\bpagamento\s+(?:de|da)\s+fatura\b/i;
 const IMPORTABLE_KINDS = new Set(["checking", "savings", "cash", "meal_voucher", "credit_card"]);
 
 /** Limite de extrato: nenhum arquivo honesto chega perto disso. */
@@ -362,8 +364,29 @@ export function createLedgerImportService(db: AppDatabase) {
     payee: PayeeIdentity,
     rule: PayeeRule | null,
     accountPersonId: number | null,
-    isCard = false
-  ) {
+    isCard = false,
+    invoiceCard: InvoiceCard | null = null
+  ): {
+    kind: "expense" | "income" | "transfer";
+    toAccountId: number | null;
+    categoryId: number | null;
+    placeName: string | null;
+    description: string | null;
+    personId: number | null;
+  } {
+    // Pagamento de fatura vence regra do destinatario: categoria e local nao
+    // cabem nele, e uma regra antiga de "ignorar" (o jeito de nao lancar o
+    // pagamento como gasto) deixaria a fatura sem pagamento.
+    if (invoiceCard) {
+      return {
+        kind: "transfer",
+        toAccountId: invoiceCard.id,
+        categoryId: null,
+        placeName: null,
+        description: null,
+        personId: accountPersonId
+      };
+    }
     const kind = parsed.amountCents < 0 ? ("expense" as const) : ("income" as const);
     const categoryFits = (categoryId: number | null) => {
       if (categoryId == null) return null;
@@ -386,6 +409,7 @@ export function createLedgerImportService(db: AppDatabase) {
       const place = rule.placeId != null ? ledger.places.get(rule.placeId) : undefined;
       return {
         kind,
+        toAccountId: null,
         categoryId: categoryFits(rule.categoryId),
         placeName: place?.name ?? payeePlaceName,
         // A descricao e daquele lancamento, nunca do destinatario: o Pix para a
@@ -399,11 +423,59 @@ export function createLedgerImportService(db: AppDatabase) {
     // Sem regra, um local que ja existe traz a categoria padrao dele.
     return {
       kind,
+      toAccountId: null,
       categoryId: categoryFits(payeePlace?.defaultCategoryId ?? null),
       placeName: payeePlaceName,
       description: null,
       personId: accountPersonId
     };
+  }
+
+  type InvoiceCard = { id: number; name: string; closingDay: number; dueDay: number };
+
+  /**
+   * Pagamento de fatura no extrato da conta: o dinheiro sai do saldo e quita o
+   * cartao. Nao e gasto (as compras do cartao ja sao) e nao leva categoria.
+   * Reconhecido so quando um unico cartao ativo paga por esta conta; com dois ou
+   * nenhum, o usuario escolhe o cartao no popup.
+   */
+  function invoiceCardFor(accountId: number, parsed: ParsedTransaction): InvoiceCard | null {
+    if (parsed.amountCents >= 0 || !INVOICE_PAYMENT_TEXT.test(parsed.rawDescription)) return null;
+    const account = ledger.accounts.raw(accountId);
+    if (!account || account.kind === "credit_card") return null;
+    const cards = sql
+      .prepare(
+        `SELECT id, name, closing_day AS closingDay, due_day AS dueDay FROM accounts
+         WHERE kind = 'credit_card' AND archived = 0 AND payment_account_id = ?
+           AND closing_day IS NOT NULL AND due_day IS NOT NULL`
+      )
+      .all(accountId) as InvoiceCard[];
+    return cards.length === 1 ? cards[0]! : null;
+  }
+
+  function invoicePaymentOf(card: InvoiceCard, date: string) {
+    const month = invoiceMonthForPayment(date, card.closingDay, card.dueDay);
+    return {
+      cardId: card.id,
+      cardName: card.name,
+      month,
+      statementTotalCents: ledger.statements.get(card.id, month).totalCents
+    };
+  }
+
+  /** Cartao de credito com ciclo: a transferencia para ele e pagamento de fatura. */
+  function cardCycle(accountId: number): InvoiceCard | null {
+    const row = sql
+      .prepare(
+        `SELECT id, name, closing_day AS closingDay, due_day AS dueDay FROM accounts
+         WHERE id = ? AND kind = 'credit_card'`
+      )
+      .get(accountId) as { id: number; name: string; closingDay: number | null; dueDay: number | null } | undefined;
+    if (!row) return null;
+    if (row.closingDay == null || row.dueDay == null) {
+      throw new LedgerError("Cartao sem ciclo configurado: defina fechamento e vencimento");
+    }
+    return { id: row.id, name: row.name, closingDay: row.closingDay, dueDay: row.dueDay };
   }
 
   /**
@@ -426,18 +498,23 @@ export function createLedgerImportService(db: AppDatabase) {
       if (!PENDING.includes(row.status)) continue;
       const payee = payeeOf(row.parsed);
       const rule = findPayeeRule(rules, payee, row.parsed.amountCents);
+      const invoiceCard = invoiceCardFor(batch.accountId, row.parsed);
       const suggestion = suggestionFor(
         row.parsed,
         payee,
         rule,
         account?.personId ?? null,
-        account?.kind === "credit_card"
+        account?.kind === "credit_card",
+        invoiceCard
       );
       let status: ImportRowStatus = "needs_review";
       let commitNow = false;
       // Parece repetir um lancamento do livro: sempre pergunta, mesmo com regra
       // automatica. Gravar sem olhar duplicaria o dinheiro.
       if (matches.has(row.id)) status = "needs_review";
+      // Pagamento de fatura passa pelo popup ja montado como transferencia para
+      // o cartao: a regra do destinatario (ignorar, categoria) nao vale nele.
+      else if (invoiceCard) status = "needs_review";
       else if (rule?.ignore) status = "ignored";
       else if (
         rule?.mode === "auto" &&
@@ -482,6 +559,7 @@ export function createLedgerImportService(db: AppDatabase) {
       db.transaction(() => {
         const entryId = createFromRow(batch, row, {
           kind: suggestion.kind,
+          toAccountId: suggestion.toAccountId,
           categoryId: suggestion.categoryId,
           placeName: suggestion.placeName,
           description: suggestion.description,
@@ -544,6 +622,9 @@ export function createLedgerImportService(db: AppDatabase) {
       const rule = findPayeeRule(rules, payee, row.parsed.amountCents);
       const candidates = live.get(row.id) ?? [];
       const exact = row.status === "duplicate" ? exactCandidate(row) : null;
+      const invoiceCard = PENDING.includes(row.status)
+        ? invoiceCardFor(batch.accountId, row.parsed)
+        : null;
       return {
         id: row.id,
         lineNo: row.lineNo,
@@ -560,10 +641,18 @@ export function createLedgerImportService(db: AppDatabase) {
             ? statementMonthFor(row.parsed.date, account.closingDay, account.dueDay)
             : null,
         payee,
-        suggestion: suggestionFor(row.parsed, payee, rule, account?.personId ?? null, isCard),
+        suggestion: suggestionFor(
+          row.parsed,
+          payee,
+          rule,
+          account?.personId ?? null,
+          isCard,
+          invoiceCard
+        ),
         rule: rule
           ? { id: rule.id, mode: rule.mode, ignore: rule.ignore, autoCommit: rule.autoCommit }
           : null,
+        invoicePayment: invoiceCard ? invoicePaymentOf(invoiceCard, row.parsed.date) : null,
         duplicate: exact ?? candidates[0] ?? null,
         alternatives: exact ? [] : candidates.slice(1),
         entryId: row.entryId,
@@ -780,14 +869,23 @@ export function createLedgerImportService(db: AppDatabase) {
     if (values.kind === "transfer") {
       const other = values.toAccountId!;
       const outgoing = amountCents < 0;
+      // Dinheiro saindo da conta para o cartao e o pagamento da fatura, gravado
+      // como a tela Fatura grava: transferencia `invoice_payment` com a ponta do
+      // cartao na fatura que o pagamento quita (D21).
+      const card = outgoing ? cardCycle(other) : null;
+      if (!outgoing && ledger.accounts.raw(other)?.kind === "credit_card") {
+        throw new LedgerError("Entrada vinda do cartao nao e pagamento de fatura");
+      }
+      const month = card ? invoiceMonthForPayment(date, card.closingDay, card.dueDay) : null;
       const created = ledger.entries.createTransfer({
         fromAccountId: outgoing ? batch.accountId : other,
         toAccountId: outgoing ? other : batch.accountId,
         date,
         amountCents: Math.abs(amountCents),
-        description: text(values.description),
+        description: text(values.description) ?? (month ? `Pagamento da fatura ${month}` : null),
         notes: text(values.notes),
-        personId: values.personId ?? null
+        personId: values.personId ?? null,
+        ...(month ? { purpose: "invoice_payment" as const, statementMonth: month } : {})
       });
       const legId = outgoing ? created.fromEntryId : created.toEntryId;
       sql

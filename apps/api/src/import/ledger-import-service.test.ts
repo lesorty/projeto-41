@@ -562,3 +562,120 @@ describe("extrato em planilha", () => {
     );
   });
 });
+
+describe("pagamento de fatura no extrato da conta", () => {
+  let cardId: number;
+
+  function payment(id: string, date = "06/11/2026", value = "-837.72") {
+    return imports.upload({
+      accountId,
+      fileName: `${id}.csv`,
+      kind: "bank",
+      buffer: Buffer.from(`Data,Valor,Identificador,Descrição\n${date},${value},${id},Pagamento de fatura\n`)
+    });
+  }
+
+  beforeEach(() => {
+    cardId = db.ledger.accounts.create({
+      name: "Cartao Nubank",
+      kind: "credit_card",
+      color: "#8a2be2",
+      personId: db.ledger.people.list()[0]!.id,
+      openingBalanceCents: 0,
+      closingDay: 31,
+      dueDay: 8,
+      paymentAccountId: accountId
+    });
+    // Compra de outubro: cai na fatura que fecha 31/10 e vence 08/11.
+    db.ledger.entries.create({
+      accountId: cardId,
+      date: "2026-10-20",
+      amountCents: -83772,
+      kind: "expense",
+      categoryId: farmacia
+    });
+  });
+
+  it("vem montado como transferencia para o cartao, sem categoria, quitando a fatura do vencimento", () => {
+    const row = payment("fat-1").rows[0]!;
+    expect(row.status).toBe("needs_review");
+    expect(row.suggestion).toMatchObject({
+      kind: "transfer",
+      toAccountId: cardId,
+      categoryId: null,
+      placeName: null
+    });
+    expect(row.invoicePayment).toEqual({
+      cardId,
+      cardName: "Cartao Nubank",
+      month: "2026-11",
+      statementTotalCents: 83772
+    });
+  });
+
+  it("confirmar grava o pagamento como a tela Fatura: a fatura fica paga e nada vira gasto", () => {
+    const view = payment("fat-2");
+    imports.confirm(view.batch.id, view.rows[0]!.id, {
+      action: "create",
+      kind: "transfer",
+      toAccountId: cardId,
+      remember: "none"
+    });
+    const statement = db.ledger.statements.get(cardId, "2026-11", "2026-11-07");
+    expect(statement.payments).toHaveLength(1);
+    expect(statement.totalCents).toBe(0);
+    expect(statement.status).toBe("paid");
+    const legs = db.raw
+      .prepare(
+        `SELECT e.kind, e.category_id AS categoryId, e.description, t.purpose FROM entries e
+         JOIN transfers t ON t.from_entry_id = e.id WHERE e.account_id = ?`
+      )
+      .all(accountId);
+    expect(legs).toEqual([
+      { kind: "transfer", categoryId: null, description: "Pagamento da fatura 2026-11", purpose: "invoice_payment" }
+    ]);
+  });
+
+  it("regra antiga de 'ignorar sempre' para o pagamento nao esconde mais a linha", () => {
+    const first = payment("fat-3", "06/10/2026", "-100.00");
+    imports.confirm(first.batch.id, first.rows[0]!.id, { action: "skip", remember: "ignore" });
+    const rule = db.raw.prepare("SELECT COUNT(*) AS n FROM rule_actions WHERE action = 'ignore'").get();
+    expect(rule).toEqual({ n: 1 });
+
+    const row = payment("fat-4").rows[0]!;
+    expect(row.status).toBe("needs_review");
+    expect(row.suggestion.kind).toBe("transfer");
+  });
+
+  it("dois cartoes pagos pela mesma conta: nao adivinha, o usuario escolhe", () => {
+    db.ledger.accounts.create({
+      name: "Outro cartao",
+      kind: "credit_card",
+      color: "#000000",
+      personId: db.ledger.people.list()[0]!.id,
+      openingBalanceCents: 0,
+      closingDay: 25,
+      dueDay: 2,
+      paymentAccountId: accountId
+    });
+    const row = payment("fat-5").rows[0]!;
+    expect(row.invoicePayment).toBeNull();
+    expect(row.suggestion.kind).toBe("expense");
+  });
+
+  it("transferencia escolhida a mao para o cartao tambem vira pagamento de fatura", () => {
+    const view = imports.upload({
+      accountId,
+      fileName: "pix-cartao.csv",
+      kind: "bank",
+      buffer: Buffer.from("Data,Valor,Identificador,Descrição\n06/11/2026,-837.72,pix-1,Débito em conta\n")
+    });
+    imports.confirm(view.batch.id, view.rows[0]!.id, {
+      action: "create",
+      kind: "transfer",
+      toAccountId: cardId,
+      remember: "none"
+    });
+    expect(db.ledger.statements.get(cardId, "2026-11", "2026-11-07").status).toBe("paid");
+  });
+});

@@ -85,6 +85,27 @@ export function installmentStatementMonth(
   return formatMonth(addMonths(first, number - 1));
 }
 
+/**
+ * A fatura que um pagamento feito em `paymentDate` quita: a primeira cujo
+ * vencimento e no proprio dia ou depois. Paga-se perto do vencimento, as vezes
+ * antes do fechamento (dia 29 para um cartao que fecha dia 31 e vence dia 8 e
+ * a fatura que vence no dia 8 seguinte), as vezes no proprio dia.
+ */
+export function invoiceMonthForPayment(
+  paymentDate: string,
+  closingDay: number,
+  dueDay: number
+): string {
+  // A fatura da compra no mesmo dia vence depois do pagamento; a que o
+  // pagamento quita e ela ou uma das duas anteriores.
+  const open = parseMonth(statementMonthFor(paymentDate, closingDay, dueDay));
+  for (let back = 2; back >= 1; back -= 1) {
+    const month = formatMonth(addMonths(open, -back));
+    if (statementDatesFor(month, closingDay, dueDay).dueDate >= paymentDate) return month;
+  }
+  return formatMonth(open);
+}
+
 /** Sequencia inclusiva de meses `YYYY-MM`, usada pela navegacao de faturas. */
 export function statementMonthsBetween(fromMonth: string, toMonth: string): string[] {
   const from = parseMonth(fromMonth);

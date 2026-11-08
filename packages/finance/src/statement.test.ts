@@ -4,12 +4,29 @@ import {
   clampDay,
   closingDateFor,
   installmentStatementMonth,
+  invoiceMonthForPayment,
   lastDayOfMonth,
   statementDatesFor,
   statementMonthFor,
   statementMonthsBetween,
   statementStatus
 } from "./statement.js";
+
+describe("invoiceMonthForPayment", () => {
+  it("quita a primeira fatura que vence no dia do pagamento ou depois", () => {
+    // Fecha dia 31, vence dia 8.
+    expect(invoiceMonthForPayment("2026-11-06", 31, 8)).toBe("2026-11");
+    expect(invoiceMonthForPayment("2026-09-08", 31, 8)).toBe("2026-09");
+    // Pago antes do fechamento (30/09, setembro curto): a que vence em 8/10.
+    expect(invoiceMonthForPayment("2026-09-29", 31, 8)).toBe("2026-10");
+    // Fecha dia 25, vence dia 2.
+    expect(invoiceMonthForPayment("2026-09-02", 25, 2)).toBe("2026-09");
+    expect(invoiceMonthForPayment("2026-10-04", 25, 2)).toBe("2026-11");
+    // Vencimento depois do fechamento no mesmo mes: fecha 3, vence 10.
+    expect(invoiceMonthForPayment("2026-05-09", 3, 10)).toBe("2026-05");
+    expect(invoiceMonthForPayment("2026-05-11", 3, 10)).toBe("2026-06");
+  });
+});
 
 describe("primitivos de calendario", () => {
   it("conhece o ultimo dia do mes, inclusive bissexto", () => {

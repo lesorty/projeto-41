@@ -5863,6 +5863,12 @@ select option {
   gap: 10px 12px;
   align-items: start;
 }
+.fin-import-grid .fin-import-invoice {
+  grid-column: 1 / -1;
+}
+.fin-import-invoice strong {
+  color: var(--text);
+}
 .fin-import-grid .field {
   gap: 4px;
 }

@@ -403,7 +403,10 @@ export type ImportRowView = {
   };
   /** O que o popup abre preenchido: regra do destinatario ou deducao do descritor. */
   suggestion: {
-    kind: "expense" | "income";
+    /** `transfer` so no pagamento de fatura reconhecido (`invoicePayment`). */
+    kind: "expense" | "income" | "transfer";
+    /** A outra conta da transferencia sugerida: o cartao, no pagamento de fatura. */
+    toAccountId: number | null;
     categoryId: number | null;
     placeName: string | null;
     description: string | null;
@@ -414,6 +417,20 @@ export type ImportRowView = {
    * linha nasce gravada. Sem ele, "auto" e "categoria automatica".
    */
   rule: { id: number; mode: RuleMode; ignore: boolean; autoCommit: boolean } | null;
+  /**
+   * Linha do extrato reconhecida como pagamento de fatura ("Pagamento de
+   * fatura") do cartao que tem esta conta como conta de pagamento. Vira
+   * transferencia para o cartao, quitando a fatura `month`: nao e gasto e nao
+   * leva categoria, porque as compras do cartao ja levam.
+   */
+  invoicePayment: {
+    cardId: number;
+    cardName: string;
+    /** `YYYY-MM` do vencimento da fatura quitada. */
+    month: string;
+    /** Total da fatura hoje, para conferir com o valor pago. */
+    statementTotalCents: number;
+  } | null;
   /** O lancamento do livro que a linha parece repetir (o mais provavel), se houver. */
   duplicate: ImportCandidate | null;
   /** Outros lancamentos parecidos, do mais para o menos provavel. */
