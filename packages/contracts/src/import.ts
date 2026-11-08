@@ -284,12 +284,17 @@ export type AccountIdentityDraft = z.input<typeof accountIdentityDraftSchema>;
 /**
  * O que o usuario decide sobre o destinatario ao confirmar uma linha.
  *
- * - `auto`: as proximas linhas dele entram prontas, sem perguntar.
+ * - `always` ("Sempre automatico"): as proximas linhas dele ja nascem gravadas
+ *   no livro, confirmadas, sem popup e sem "Importar prontos".
+ * - `auto` ("Categoria automatica"): as proximas entram com categoria e local
+ *   preenchidos, sem abrir o popup, mas esperam a confirmacao do lote em
+ *   "Importar prontos". Foi o unico "automatico" ate existir `always`, e e o
+ *   que as regras antigas continuam sendo.
  * - `ask`: as proximas vem pre-preenchidas, mas sempre passam pelo popup.
  * - `none`: nao grava nada sobre o destinatario.
  * - `ignore`: as proximas linhas dele nem entram na revisao.
  */
-export const payeeRememberSchema = z.enum(["none", "auto", "ask", "ignore"]);
+export const payeeRememberSchema = z.enum(["none", "always", "auto", "ask", "ignore"]);
 
 /** Corpo da confirmacao de uma linha no popup. */
 export const importRowConfirmSchema = z
@@ -404,7 +409,11 @@ export type ImportRowView = {
     description: string | null;
     personId: number | null;
   };
-  rule: { id: number; mode: RuleMode; ignore: boolean } | null;
+  /**
+   * `autoCommit` so vale com `mode: "auto"`: a regra e "sempre automatico" e a
+   * linha nasce gravada. Sem ele, "auto" e "categoria automatica".
+   */
+  rule: { id: number; mode: RuleMode; ignore: boolean; autoCommit: boolean } | null;
   /** O lancamento do livro que a linha parece repetir (o mais provavel), se houver. */
   duplicate: ImportCandidate | null;
   /** Outros lancamentos parecidos, do mais para o menos provavel. */

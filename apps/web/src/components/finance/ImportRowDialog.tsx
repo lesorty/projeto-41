@@ -73,7 +73,13 @@ export function ImportRowDialog({
   const [notes, setNotes] = useState("");
   const [notesOpen, setNotesOpen] = useState(false);
   const [remember, setRemember] = useState<PayeeRemember>(
-    row.rule ? (row.rule.ignore ? "ignore" : row.rule.mode) : "ask"
+    row.rule
+      ? row.rule.ignore
+        ? "ignore"
+        : row.rule.mode === "auto" && row.rule.autoCommit
+          ? "always"
+          : row.rule.mode
+      : "ask"
   );
 
   const categories = useMemo(
@@ -173,7 +179,7 @@ export function ImportRowDialog({
                       {item.time ? ` · ${item.time}` : ""}
                       {item.installment ? ` · ${item.installment.number}/${item.installment.total}` : ""}
                       {item.duplicate ? " · parece já estar no livro" : ""}
-                      {item.status === "new" ? " · automático" : ""}
+                      {item.status === "new" ? " · categoria automática" : ""}
                     </span>
                   </button>
                 </li>
@@ -363,7 +369,8 @@ export function ImportRowDialog({
                   value={remember}
                   onChange={setRemember}
                   options={[
-                    { value: "auto", label: "Sempre automático" },
+                    { value: "always", label: "Sempre automático" },
+                    { value: "auto", label: "Categoria automática" },
                     { value: "ask", label: "Perguntar sempre" },
                     { value: "none", label: "Não lembrar" },
                     ...(action === "create" ? [{ value: "ignore" as const, label: "Ignorar sempre" }] : [])
@@ -371,10 +378,18 @@ export function ImportRowDialog({
                 />
                 <small className="field-hint">
                   {action === "link" && remember !== "none" && "Usa a categoria e o local do lançamento existente. "}
+                  {remember === "always" &&
+                    (action === "create"
+                      ? "Os próximos já entram no livro, confirmados, com esta categoria e local. Sem popup, sem “Importar prontos”, sem descrição nem observação."
+                      : "Os próximos já entram no livro, confirmados, sem popup nem “Importar prontos”.")}
                   {remember === "auto" &&
                     action === "create" &&
-                    "Os próximos entram prontos com esta categoria e local, sem abrir este popup. A descrição fica em branco."}
-                  {remember === "auto" && action === "link" && "Os próximos entram prontos, sem abrir este popup."}
+                    "Os próximos entram com esta categoria e local, sem abrir este popup, e esperam em “Importar prontos” a sua confirmação. A descrição fica em branco."}
+                  {remember === "auto" &&
+                    action === "link" &&
+                    "Os próximos entram prontos, sem abrir este popup, e esperam em “Importar prontos” a sua confirmação."}
+                  {row.pdf && (remember === "always" || remember === "auto") &&
+                    " Em PDF, cada linha continua passando por aqui."}
                   {remember === "ask" && "Os próximos abrem este popup com a categoria e o local já preenchidos."}
                   {remember === "none" && "Nada é guardado: os próximos chegam em branco."}
                   {remember === "ignore" &&

@@ -23,7 +23,7 @@ import { FilePicker } from "../../components/FilePicker.js";
 
 const STATUS: Record<ImportRowStatus, { label: string; tone: string }> = {
   needs_review: { label: "A revisar", tone: "warning" },
-  new: { label: "Pronto (automático)", tone: "info" },
+  new: { label: "Pronto (categoria automática)", tone: "info" },
   duplicate: { label: "Já importado", tone: "neutral" },
   ignored: { label: "Pulado", tone: "neutral" },
   committed: { label: "Importado", tone: "positive" }
@@ -96,8 +96,9 @@ const HELP: Record<StatementKind, React.ReactNode> = {
 /**
  * Importação de extrato: sobe o arquivo e revisa lançamento por lançamento.
  *
- * Nada vai para o livro sem passar pelo popup ou por uma regra "sempre
- * automático" que o próprio usuário criou num popup anterior.
+ * Nada vai para o livro sem passar pelo popup ou por uma regra que o próprio
+ * usuário criou num popup anterior: "categoria automática" deixa a linha pronta
+ * para confirmar em "Importar prontos"; "sempre automático" já a grava.
  */
 export function ImportPage() {
   const reference = useLedgerReference();
@@ -166,7 +167,7 @@ export function ImportPage() {
       const ready = next.counts.ready;
       toast.notify(
         ready > 0
-          ? `Revisão concluída. ${ready} lançamento(s) automático(s) prontos para importar.`
+          ? `Revisão concluída. ${ready} lançamento(s) com categoria automática prontos para importar.`
           : "Revisão concluída"
       );
     }
@@ -186,6 +187,10 @@ export function ImportPage() {
       setFile(null);
       await loadBatches();
       advance(next);
+      // O que entrou sozinho nao passou por nenhuma tela: avisa, para nao ser surpresa.
+      if (next.counts.committed > 0) {
+        toast.notify(`${next.counts.committed} lançamento(s) já entraram no livro (sempre automático).`);
+      }
     } catch (cause) {
       if (cause instanceof ImportUploadError && cause.code === "pdf_password_required") {
         setPasswordPrompt({ incorrect: false });
@@ -215,6 +220,12 @@ export function ImportPage() {
     try {
       const next = await importApi.confirm(view.batch.id, row.id, body);
       advance(next, row.id);
+      // "Sempre automático" tambem grava as outras linhas do mesmo destinatario no lote.
+      const own = body.action === "skip" ? 0 : 1;
+      const alsoAuto = next.counts.committed - view.counts.committed - own;
+      if (alsoAuto > 0) {
+        toast.notify(`${alsoAuto} lançamento(s) do mesmo destinatário já entraram no livro (sempre automático).`);
+      }
       void loadBatches();
     } catch (cause) {
       toast.notify(cause instanceof Error ? cause.message : "Falha ao gravar", "error");
@@ -237,8 +248,8 @@ export function ImportPage() {
   async function commitReady() {
     if (!view) return;
     const ok = await confirm({
-      title: "Importar os automáticos",
-      message: `Gravar ${view.counts.ready} lançamento(s) com a categoria e o local das regras "sempre automático"?`,
+      title: "Importar os prontos",
+      message: `Gravar ${view.counts.ready} lançamento(s) com a categoria e o local das regras "categoria automática"?`,
       confirmLabel: "Importar"
     });
     if (!ok) return;

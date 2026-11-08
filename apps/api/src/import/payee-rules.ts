@@ -24,6 +24,8 @@ export type Direction = "out" | "in";
 export type PayeeRule = {
   id: number;
   mode: RuleMode;
+  /** "Sempre automatico": a linha e gravada no upload, sem confirmacao. So com `mode: "auto"`. */
+  autoCommit: boolean;
   key: string;
   direction: Direction;
   ignore: boolean;
@@ -124,6 +126,7 @@ export function conditionsFor(key: string, direction: Direction) {
 type StoredRule = {
   id: number;
   mode: RuleMode;
+  autoCommit: boolean;
   active: boolean;
   conditions: { field: string; op: string; value: string }[];
   actions: { action: string; value: string | null }[];
@@ -160,6 +163,7 @@ export function toPayeeRule(stored: StoredRule): PayeeRule | null {
   return {
     id: stored.id,
     mode: stored.mode,
+    autoCommit: stored.mode === "auto" && stored.autoCommit,
     key,
     direction,
     ignore: stored.actions.some((item) => item.action === "ignore"),

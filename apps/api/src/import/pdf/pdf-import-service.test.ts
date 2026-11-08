@@ -98,35 +98,38 @@ describe("PDF do BTG pelo pipeline da fase 6", () => {
     expect(stored).toEqual({ status: "match" });
   });
 
-  it("nem regra 'sempre automatico' nem conciliacao perfeita gravam linha de PDF sozinhas", async () => {
-    const month = (day: string, cents: [number, number, number]): FixtureRow[] => [
-      { date: `28/${day}`, time: "09h00", category: ["Transferência"], transaction: ["Pix recebido"], description: "Fulana de Tal", cents: cents[0] },
-      { date: `29/${day}`, time: "10h00", category: ["Transporte"], transaction: ["Pix enviado"], description: "Uber", cents: cents[1] },
-      { date: `29/${day}`, time: "12h00", category: ["Alimentação"], transaction: ["Pix enviado"], description: "Mercadinho Teste", cents: cents[2] }
-    ];
-    // Primeiro mes: o usuario ensina "sempre automatico" para todo destinatario.
-    const first = (await send(writePdf(btgFixturePages(month("09/2026", [50000, -713, -4590]))))).json();
-    for (const row of first.rows) {
-      const confirmed = await app.inject({
-        method: "POST",
-        url: `/api/ledger/imports/${first.batch.id}/rows/${row.id}/confirm`,
-        payload: { action: "create", kind: row.amountCents < 0 ? "expense" : "income", remember: "auto" }
-      });
-      expect(confirmed.statusCode).toBe(200);
+  it.each(["auto", "always"] as const)(
+    "nem regra '%s' nem conciliacao perfeita gravam linha de PDF sozinhas",
+    async (level) => {
+      const month = (day: string, cents: [number, number, number]): FixtureRow[] => [
+        { date: `28/${day}`, time: "09h00", category: ["Transferência"], transaction: ["Pix recebido"], description: "Fulana de Tal", cents: cents[0] },
+        { date: `29/${day}`, time: "10h00", category: ["Transporte"], transaction: ["Pix enviado"], description: "Uber", cents: cents[1] },
+        { date: `29/${day}`, time: "12h00", category: ["Alimentação"], transaction: ["Pix enviado"], description: "Mercadinho Teste", cents: cents[2] }
+      ];
+      // Primeiro mes: o usuario ensina o nivel automatico para todo destinatario.
+      const first = (await send(writePdf(btgFixturePages(month("09/2026", [50000, -713, -4590]))))).json();
+      for (const row of first.rows) {
+        const confirmed = await app.inject({
+          method: "POST",
+          url: `/api/ledger/imports/${first.batch.id}/rows/${row.id}/confirm`,
+          payload: { action: "create", kind: row.amountCents < 0 ? "expense" : "income", remember: level }
+        });
+        expect(confirmed.statusCode).toBe(200);
+      }
+      const before = entryCount();
+
+      // Mes seguinte, mesmos destinatarios, soma conferida: num CSV tudo viria pronto.
+      const next = (await send(writePdf(btgFixturePages(month("09/2026", [51000, -820, -3990]))), {}, "outubro.pdf")).json();
+      expect(next.batch.pdf.reconciliation.status).toBe("match");
+      expect(next.rows.every((row: { rule: unknown }) => row.rule !== null)).toBe(true);
+      expect(next.counts.ready).toBe(0);
+      expect(next.rows.every((row: { status: string }) => row.status === "needs_review")).toBe(true);
+
+      const commit = await app.inject({ method: "POST", url: `/api/ledger/imports/${next.batch.id}/commit-ready` });
+      expect(commit.statusCode).toBe(409);
+      expect(entryCount()).toBe(before);
     }
-    const before = entryCount();
-
-    // Mes seguinte, mesmos destinatarios, soma conferida: num CSV tudo viria pronto.
-    const next = (await send(writePdf(btgFixturePages(month("09/2026", [51000, -820, -3990]))), {}, "outubro.pdf")).json();
-    expect(next.batch.pdf.reconciliation.status).toBe("match");
-    expect(next.rows.every((row: { rule: unknown }) => row.rule !== null)).toBe(true);
-    expect(next.counts.ready).toBe(0);
-    expect(next.rows.every((row: { status: string }) => row.status === "needs_review")).toBe(true);
-
-    const commit = await app.inject({ method: "POST", url: `/api/ledger/imports/${next.batch.id}/commit-ready` });
-    expect(commit.statusCode).toBe(409);
-    expect(entryCount()).toBe(before);
-  });
+  );
 
   it("reenviar o mesmo PDF marca o que ja foi gravado como duplicado", async () => {
     const first = (await send(BTG_FIXTURE)).json();

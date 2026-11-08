@@ -20,6 +20,7 @@ import { migration019GoalParentAccount } from "./019-goal-parent-account.js";
 import { migration020GoalProfitMode } from "./020-goal-profit-mode.js";
 import { migration021PdfImport } from "./021-pdf-import.js";
 import { migration022GoalProfitMarker } from "./022-goal-profit-marker.js";
+import { migration023RuleAutoCommit } from "./023-rule-auto-commit.js";
 import type { Migration } from "./runner.js";
 
 /**
@@ -48,7 +49,8 @@ export const migrations: Migration[] = [
   migration019GoalParentAccount,
   migration020GoalProfitMode,
   migration021PdfImport,
-  migration022GoalProfitMarker
+  migration022GoalProfitMarker,
+  migration023RuleAutoCommit
 ];
 
 export * from "./runner.js";

@@ -23,6 +23,19 @@ function rowOf(view: ReturnType<typeof upload>, raw: string) {
   return row;
 }
 
+/** Um arquivo de uma linha so, Pix para a Farmacia Central, com id de banco proprio. */
+function freshFarmacia(id: string) {
+  return imports.upload({
+    accountId,
+    fileName: `${id}.csv`,
+    kind: "bank",
+    buffer: Buffer.from(
+      "Data,Valor,Identificador,Descrição\n" +
+        `05/10/2026,-30.00,${id},Transferência enviada pelo Pix - FARMACIA CENTRAL - 01.669.256/7421-99 - MERCADO PAGO IP LTDA. (0323) Agência: 1 Conta: 65967190-0\n`
+    )
+  });
+}
+
 beforeEach(() => {
   db = createTestDatabase();
   imports = createLedgerImportService(db);
@@ -162,6 +175,149 @@ describe("importacao do extrato Nubank", () => {
     const committed = imports.commitReady(view.batch.id).rows.find((row) => row.id === second.id)!;
     const entry = db.ledger.entries.get(committed.entryId!)!;
     expect(db.ledger.places.get(entry.placeId!)!.name).toBe("Farmacia Central");
+  });
+
+  it("'sempre automatico' grava na hora as outras linhas do destinatario, ja confirmadas", () => {
+    const view = upload();
+    const first = rowOf(view, "FARMACIA CENTRAL");
+    const after = imports.confirm(view.batch.id, first.id, {
+      action: "create",
+      kind: "expense",
+      categoryId: farmacia,
+      remember: "always"
+    });
+    const second = after.rows.find((row) => row.payee.display === "Farmacia Central" && row.id !== first.id)!;
+    // Nao fica "pronto" esperando "Importar prontos": ja esta no livro.
+    expect(second).toMatchObject({ status: "committed", rule: { mode: "auto", autoCommit: true } });
+    expect(after.counts.ready).toBe(0);
+    expect(after.counts.committed).toBe(2);
+
+    const entry = db.ledger.entries.get(second.entryId!)!;
+    expect(entry).toMatchObject({
+      status: "cleared",
+      categoryId: farmacia,
+      description: null,
+      notes: null
+    });
+    expect(db.ledger.places.get(entry.placeId!)!.name).toBe("Farmacia Central");
+  });
+
+  it("'sempre automatico' ja entra confirmado no upload seguinte, sem popup nem 'Importar prontos'", () => {
+    const view = upload();
+    const first = rowOf(view, "FARMACIA CENTRAL");
+    imports.confirm(view.batch.id, first.id, {
+      action: "create",
+      kind: "expense",
+      categoryId: farmacia,
+      remember: "always"
+    });
+
+    const next = imports.upload({
+      accountId,
+      fileName: "NU_2026-10.csv",
+      kind: "bank",
+      buffer: Buffer.from(
+        [
+          "Data,Valor,Identificador,Descrição",
+          "05/10/2026,-22.00,novo-id-1,Transferência enviada pelo Pix - FARMACIA CENTRAL - 01.669.256/7421-99 - MERCADO PAGO IP LTDA. (0323) Agência: 1 Conta: 65967190-0",
+          "06/10/2026,-9.00,novo-id-2,Transferência enviada pelo Pix - Fulano Desconhecido - •••.111.222-•• - BANCO X (0001) Agência: 1 Conta: 1-1"
+        ].join("\n") + "\n"
+      )
+    });
+    const known = next.rows.find((row) => row.payee.display === "Farmacia Central")!;
+    const unknown = next.rows.find((row) => row.payee.display !== "Farmacia Central")!;
+    expect(known.status).toBe("committed");
+    expect(db.ledger.entries.get(known.entryId!)).toMatchObject({
+      amountCents: -2200,
+      status: "cleared",
+      categoryId: farmacia
+    });
+    // Quem nenhuma regra conhece continua indo para a revisao.
+    expect(unknown.status).toBe("needs_review");
+    expect(next.counts).toMatchObject({ committed: 1, ready: 0, review: 1 });
+  });
+
+  it("'categoria automatica' continua pronta e so grava em 'Importar prontos'", () => {
+    const view = upload();
+    const first = rowOf(view, "FARMACIA CENTRAL");
+    const after = imports.confirm(view.batch.id, first.id, {
+      action: "create",
+      kind: "expense",
+      categoryId: farmacia,
+      remember: "auto"
+    });
+    const second = after.rows.find((row) => row.payee.display === "Farmacia Central" && row.id !== first.id)!;
+    expect(second).toMatchObject({ status: "new", rule: { mode: "auto", autoCommit: false } });
+    expect(second.entryId).toBeNull();
+    expect(after.counts).toMatchObject({ ready: 1, committed: 1 });
+  });
+
+  it("trocar a regra de 'sempre automatico' para 'categoria automatica' vale para as proximas", () => {
+    const view = upload();
+    const first = rowOf(view, "FARMACIA CENTRAL");
+    imports.confirm(view.batch.id, first.id, {
+      action: "create",
+      kind: "expense",
+      categoryId: farmacia,
+      remember: "always"
+    });
+
+    // Mesmo arquivo de novo: a linha ja importada volta por "Importar mesmo assim"
+    // e o usuario muda o nivel da regra no popup.
+    const again = upload();
+    const repeated = rowOf(again, "FARMACIA CENTRAL");
+    expect(repeated.rule).toMatchObject({ autoCommit: true });
+    imports.reopen(again.batch.id, repeated.id);
+    imports.confirm(again.batch.id, repeated.id, {
+      action: "create",
+      kind: "expense",
+      categoryId: farmacia,
+      remember: "auto"
+    });
+
+    const next = freshFarmacia("troca-1");
+    expect(next.rows[0]).toMatchObject({ status: "new", rule: { mode: "auto", autoCommit: false } });
+  });
+
+  it("regra antiga de 'categoria automatica' sobe para 'sempre automatico'", () => {
+    const view = upload();
+    const first = rowOf(view, "FARMACIA CENTRAL");
+    const after = imports.confirm(view.batch.id, first.id, {
+      action: "create",
+      kind: "expense",
+      categoryId: farmacia,
+      remember: "auto"
+    });
+    const ready = after.rows.find((row) => row.status === "new" && row.payee.display === "Farmacia Central")!;
+    // A linha pronta e editada e o usuario escolhe o nivel novo.
+    imports.confirm(view.batch.id, ready.id, {
+      action: "create",
+      kind: "expense",
+      categoryId: farmacia,
+      remember: "always"
+    });
+
+    expect(freshFarmacia("sobe-1").rows[0]).toMatchObject({
+      status: "committed",
+      rule: { mode: "auto", autoCommit: true }
+    });
+  });
+
+  it("'sempre automatico' nao grava sozinho quando a categoria da regra foi arquivada", () => {
+    const view = upload();
+    const first = rowOf(view, "FARMACIA CENTRAL");
+    imports.confirm(view.batch.id, first.id, {
+      action: "create",
+      kind: "expense",
+      categoryId: farmacia,
+      remember: "always"
+    });
+    db.ledger.categories.archive(farmacia);
+
+    // Gravar sem a categoria perderia o que a regra promete: volta a perguntar.
+    const next = freshFarmacia("arquivada-1");
+    expect(next.rows[0]!.status).toBe("needs_review");
+    expect(next.counts.committed).toBe(0);
   });
 
   it("a regra vale na importacao seguinte e o mesmo arquivo nao duplica", () => {

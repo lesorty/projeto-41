@@ -10,6 +10,7 @@ import {
   type ImportRowView,
   type MatchReason,
   type ParsedTransaction,
+  type PayeeRemember,
   type PdfBatchInfo,
   type RuleMode,
   type StatementKind
@@ -49,8 +50,10 @@ import {
  * O arquivo vira `import_batches` + `import_rows` e **nada** entra no livro sem
  * passar por aqui:
  *
- * - linha de destinatario marcado como "sempre automatico" nasce `new`, pronta
- *   para gravar em lote;
+ * - linha de destinatario marcado como "categoria automatica" nasce `new`, pronta
+ *   para gravar em lote (o usuario confirma em "Importar prontos");
+ * - linha de destinatario marcado como "sempre automatico" ja nasce gravada no
+ *   livro (`committed`), confirmada, sem passar por popup nem por confirmacao;
  * - destinatario desconhecido, marcado como "perguntar sempre" ou linha que
  *   parece repetir um lancamento do livro nasce `needs_review` e vai para o
  *   popup, uma de cada vez;
@@ -163,8 +166,8 @@ export function createLedgerImportService(db: AppDatabase) {
 
   function loadRules(): PayeeRule[] {
     const rules = sql
-      .prepare(`SELECT id, mode, active FROM rules WHERE stage = 'default'`)
-      .all() as { id: number; mode: RuleMode; active: number }[];
+      .prepare(`SELECT id, mode, auto_commit AS autoCommit, active FROM rules WHERE stage = 'default'`)
+      .all() as { id: number; mode: RuleMode; autoCommit: number; active: number }[];
     const conditions = sql
       .prepare(`SELECT rule_id AS ruleId, field, op, value FROM rule_conditions`)
       .all() as { ruleId: number; field: string; op: string; value: string }[];
@@ -176,6 +179,7 @@ export function createLedgerImportService(db: AppDatabase) {
         toPayeeRule({
           id: rule.id,
           mode: rule.mode,
+          autoCommit: rule.autoCommit === 1,
           active: rule.active === 1,
           conditions: conditions.filter((c) => c.ruleId === rule.id),
           actions: actions.filter((a) => a.ruleId === rule.id)
@@ -369,10 +373,6 @@ export function createLedgerImportService(db: AppDatabase) {
       return category && category.kind === kind ? category.id : null;
     };
 
-    if (rule && !rule.ignore) {
-      const place = rule.placeId != null ? ledger.places.get(rule.placeId) : undefined;
-      return {
-        kind,
     // O nome do outro lado vira o local quando nada o decidiu. Na fatura do
     // cartao o texto e sempre o estabelecimento; no extrato, um texto sem
     // contraparte e canal ("Debito em conta") e nao vira local.
@@ -380,9 +380,13 @@ export function createLedgerImportService(db: AppDatabase) {
     const payeePlace = hasName ? ledger.places.getByName(payee.display) : undefined;
     const payeePlaceName = payeePlace?.name ?? (hasName ? payee.display : null);
 
-        categoryId: categoryFits(rule.categoryId),
+    if (rule && !rule.ignore) {
       // Regra com local manda; regra sem local (o usuario nao escolheu um)
       // cai no nome do destinatario, como se nao houvesse regra.
+      const place = rule.placeId != null ? ledger.places.get(rule.placeId) : undefined;
+      return {
+        kind,
+        categoryId: categoryFits(rule.categoryId),
         placeName: place?.name ?? payeePlaceName,
         // A descricao e daquele lancamento, nunca do destinatario: o Pix para a
         // mesma pessoa e almoco hoje e aluguel amanha. Regra antiga que gravou
@@ -430,6 +434,7 @@ export function createLedgerImportService(db: AppDatabase) {
         account?.kind === "credit_card"
       );
       let status: ImportRowStatus = "needs_review";
+      let commitNow = false;
       // Parece repetir um lancamento do livro: sempre pergunta, mesmo com regra
       // automatica. Gravar sem olhar duplicaria o dinheiro.
       if (matches.has(row.id)) status = "needs_review";
@@ -443,6 +448,10 @@ export function createLedgerImportService(db: AppDatabase) {
         // Linha de PDF nunca fica pronta para gravar em lote: o PDF erra em
         // silencio, entao toda linha dele passa pelo popup, com regra ou sem.
         status = batch.source === "pdf" ? "needs_review" : "new";
+        // "Sempre automatico" nao espera: a mesma regra que deixaria a linha
+        // pronta a grava. As salvaguardas acima (parece repetir o livro, categoria
+        // que nao serve, PDF) valem para os dois niveis.
+        commitNow = status === "new" && rule.autoCommit;
       }
       update.run({
         id: row.id,
@@ -453,8 +462,36 @@ export function createLedgerImportService(db: AppDatabase) {
         categoryId: suggestion.categoryId,
         kind: suggestion.kind
       });
+      if (commitNow) commitAutomatic(batch, row, suggestion);
     }
     refreshBatchStatus(batchId);
+  }
+
+  /**
+   * "Sempre automatico": grava a linha no livro com o que a regra sugere, sem
+   * descricao nem observacao (a descricao e de cada lancamento, nao do
+   * destinatario). Se a gravacao falhar, a linha fica `new` — pronta — e o erro
+   * aparece em "Importar prontos", em vez de derrubar o upload inteiro.
+   */
+  function commitAutomatic(
+    batch: BatchRecord,
+    row: RowRecord,
+    suggestion: ReturnType<typeof suggestionFor>
+  ) {
+    try {
+      db.transaction(() => {
+        const entryId = createFromRow(batch, row, {
+          kind: suggestion.kind,
+          categoryId: suggestion.categoryId,
+          placeName: suggestion.placeName,
+          description: suggestion.description,
+          personId: suggestion.personId
+        });
+        markCommitted(row.id, entryId);
+      });
+    } catch (error) {
+      if (!(error instanceof LedgerError)) throw error;
+    }
   }
 
   function refreshBatchStatus(batchId: number) {
@@ -524,7 +561,9 @@ export function createLedgerImportService(db: AppDatabase) {
             : null,
         payee,
         suggestion: suggestionFor(row.parsed, payee, rule, account?.personId ?? null, isCard),
-        rule: rule ? { id: rule.id, mode: rule.mode, ignore: rule.ignore } : null,
+        rule: rule
+          ? { id: rule.id, mode: rule.mode, ignore: rule.ignore, autoCommit: rule.autoCommit }
+          : null,
         duplicate: exact ?? candidates[0] ?? null,
         alternatives: exact ? [] : candidates.slice(1),
         entryId: row.entryId,
@@ -856,7 +895,7 @@ export function createLedgerImportService(db: AppDatabase) {
   function remember(
     payee: PayeeIdentity,
     amountCents: number,
-    choice: "none" | "auto" | "ask" | "ignore",
+    choice: PayeeRemember,
     values: {
       placeId: number | null;
       categoryId: number | null;
@@ -870,20 +909,29 @@ export function createLedgerImportService(db: AppDatabase) {
       return;
     }
     const mode: RuleMode = choice === "ask" ? "ask" : "auto";
+    // So "sempre automatico" grava direto; "categoria automatica" e as demais nao.
+    const autoCommit = choice === "always" ? 1 : 0;
     let ruleId: number;
     if (existing) {
       ruleId = existing.id;
-      sql.prepare(`UPDATE rules SET mode = ?, active = 1 WHERE id = ?`).run(mode, ruleId);
+      sql
+        .prepare(`UPDATE rules SET mode = ?, auto_commit = ?, active = 1 WHERE id = ?`)
+        .run(mode, autoCommit, ruleId);
       sql.prepare(`DELETE FROM rule_actions WHERE rule_id = ?`).run(ruleId);
     } else {
       const direction = directionOf(amountCents);
       ruleId = Number(
         sql
           .prepare(
-            `INSERT INTO rules (name, stage, priority, active, mode, stop_processing, created_at)
-             VALUES (?, 'default', 100, 1, ?, 1, ?)`
+            `INSERT INTO rules (name, stage, priority, active, mode, auto_commit, stop_processing, created_at)
+             VALUES (?, 'default', 100, 1, ?, ?, 1, ?)`
           )
-          .run(`${payee.display} (${direction === "out" ? "saida" : "entrada"})`, mode, nowIso())
+          .run(
+            `${payee.display} (${direction === "out" ? "saida" : "entrada"})`,
+            mode,
+            autoCommit,
+            nowIso()
+          )
           .lastInsertRowid
       );
       const insertCondition = sql.prepare(
