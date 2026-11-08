@@ -373,8 +373,17 @@ export function createLedgerImportService(db: AppDatabase) {
       const place = rule.placeId != null ? ledger.places.get(rule.placeId) : undefined;
       return {
         kind,
+    // O nome do outro lado vira o local quando nada o decidiu. Na fatura do
+    // cartao o texto e sempre o estabelecimento; no extrato, um texto sem
+    // contraparte e canal ("Debito em conta") e nao vira local.
+    const hasName = isCard || !payee.key.startsWith("raw:");
+    const payeePlace = hasName ? ledger.places.getByName(payee.display) : undefined;
+    const payeePlaceName = payeePlace?.name ?? (hasName ? payee.display : null);
+
         categoryId: categoryFits(rule.categoryId),
-        placeName: place?.name ?? null,
+      // Regra com local manda; regra sem local (o usuario nao escolheu um)
+      // cai no nome do destinatario, como se nao houvesse regra.
+        placeName: place?.name ?? payeePlaceName,
         // A descricao e daquele lancamento, nunca do destinatario: o Pix para a
         // mesma pessoa e almoco hoje e aluguel amanha. Regra antiga que gravou
         // `set_description` e ignorada aqui de proposito.
@@ -383,16 +392,11 @@ export function createLedgerImportService(db: AppDatabase) {
       };
     }
 
-    // Sem regra: o nome do outro lado vira o local, e um local que ja existe
-    // traz a categoria padrao dele.
-    // Na fatura do cartao o texto e sempre o estabelecimento; no extrato, um
-    // texto sem contraparte e canal ("Debito em conta") e nao vira local.
-    const hasName = isCard || !payee.key.startsWith("raw:");
-    const place = hasName ? ledger.places.getByName(payee.display) : undefined;
+    // Sem regra, um local que ja existe traz a categoria padrao dele.
     return {
       kind,
-      categoryId: categoryFits(place?.defaultCategoryId ?? null),
-      placeName: place?.name ?? (hasName ? payee.display : null),
+      categoryId: categoryFits(payeePlace?.defaultCategoryId ?? null),
+      placeName: payeePlaceName,
       description: null,
       personId: accountPersonId
     };

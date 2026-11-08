@@ -121,6 +121,49 @@ describe("importacao do extrato Nubank", () => {
     expect(second.suggestion.categoryId).toBe(farmacia);
   });
 
+  it("regra sem local sugere o nome do destinatario; regra com local mantem o dela", () => {
+    const view = upload();
+    const first = rowOf(view, "FARMACIA CENTRAL");
+    const after = imports.confirm(view.batch.id, first.id, {
+      action: "create",
+      kind: "expense",
+      categoryId: farmacia,
+      remember: "ask"
+    });
+    const second = after.rows.find((row) => row.payee.display === "Farmacia Central" && row.id !== first.id)!;
+    expect(second.rule).toMatchObject({ mode: "ask" });
+    expect(second.suggestion.placeName).toBe("Farmacia Central");
+    expect(second.suggestion.categoryId).toBe(farmacia);
+
+    const withPlace = imports.confirm(view.batch.id, second.id, {
+      action: "create",
+      kind: "expense",
+      categoryId: farmacia,
+      placeName: "Drogaria do Bairro",
+      remember: "ask"
+    });
+    expect(withPlace.rows.find((row) => row.id === second.id)!.suggestion.placeName).toBe(
+      "Drogaria do Bairro"
+    );
+  });
+
+  it("regra automatica sem local grava com o nome do destinatario como local", () => {
+    const view = upload();
+    const first = rowOf(view, "FARMACIA CENTRAL");
+    const after = imports.confirm(view.batch.id, first.id, {
+      action: "create",
+      kind: "expense",
+      categoryId: farmacia,
+      remember: "auto"
+    });
+    const second = after.rows.find((row) => row.payee.display === "Farmacia Central" && row.id !== first.id)!;
+    expect(second.status).toBe("new");
+
+    const committed = imports.commitReady(view.batch.id).rows.find((row) => row.id === second.id)!;
+    const entry = db.ledger.entries.get(committed.entryId!)!;
+    expect(db.ledger.places.get(entry.placeId!)!.name).toBe("Farmacia Central");
+  });
+
   it("a regra vale na importacao seguinte e o mesmo arquivo nao duplica", () => {
     const view = upload();
     const first = rowOf(view, "FARMACIA CENTRAL");
