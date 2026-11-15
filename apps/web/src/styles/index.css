@@ -6572,20 +6572,60 @@ select option {
   cursor: not-allowed;
 }
 
-/* --- Planilha do ano (Painel) -------------------------------------------- */
+/* --- Visão do ano (Painel) --------------------------------------------- */
 
-.fin-sheet-filters {
+.fin-year-toolbar {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
   align-items: center;
-  margin-bottom: 14px;
+  margin-bottom: 12px;
 }
-.fin-sheet-filter {
-  flex: 1 1 220px;
+.fin-year-filter {
+  flex: 1 1 170px;
   min-width: 0;
 }
+.fin-year-figures {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0;
+  margin: 0 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  overflow: hidden;
+}
+.fin-year-figures > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 9px 14px;
+  border-left: 1px solid var(--border);
+  margin-left: -1px;
+}
+.fin-year-figures dt {
+  font-size: 0.7rem;
+  color: var(--text-faint);
+}
+.fin-year-figures dd {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.fin-year-figures small {
+  font-size: 0.7rem;
+  color: var(--text-faint);
+}
+
+/* A planilha rola por dentro nos dois eixos: cabeçalho, rodapé e a coluna das
+   categorias ficam presos, como numa planilha com painéis congelados. */
 .fin-sheet {
+  max-height: min(76vh, 960px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--border);
+  border-radius: 12px;
   transition: opacity var(--transition);
 }
 .fin-sheet.is-loading {
@@ -6593,67 +6633,341 @@ select option {
 }
 .fin-sheet .data-table th,
 .fin-sheet .data-table td {
-  padding: 7px 10px;
+  padding: 5px 8px;
+  font-size: 12px;
+  line-height: 1.35;
 }
 .fin-sheet .data-table td {
-  font-size: 12.5px;
+  border-bottom-color: color-mix(in srgb, var(--border) 60%, transparent);
 }
-/* A coluna da categoria fica parada enquanto os meses rolam de lado. */
+.fin-sheet thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--surface-2);
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+.fin-sheet tfoot th {
+  position: sticky;
+  z-index: 2;
+  background: var(--surface-2);
+  font-size: 12px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text);
+  border-bottom: 0;
+  border-top: 1px solid var(--border);
+}
+.fin-sheet tfoot tr:last-child th {
+  bottom: 0;
+  border-top: 2px solid var(--border);
+  font-weight: 700;
+}
+/* Com três linhas no rodapé, só o resultado fica preso; as outras rolam. */
+.fin-sheet tfoot tr:not(:last-child) th {
+  position: static;
+}
+.fin-sheet tfoot th.fin-negative,
+.fin-sheet td.fin-negative {
+  color: var(--negative);
+}
+.fin-sheet tfoot th.fin-positive,
+.fin-sheet td.fin-positive {
+  color: var(--positive);
+}
+.fin-sheet tfoot th.fin-muted,
+.fin-sheet td.fin-muted {
+  color: var(--text-faint);
+}
+
 .fin-sheet .fin-sheet-label {
   position: sticky;
   left: 0;
   z-index: 1;
   background: var(--surface);
-  min-width: 170px;
+  min-width: 168px;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   box-shadow: inset -1px 0 0 var(--border);
 }
-.fin-sheet .fin-sheet-subtotal .fin-sheet-label,
+.fin-sheet thead .fin-sheet-label,
 .fin-sheet tfoot .fin-sheet-label {
+  z-index: 3;
+  background: var(--surface-2);
+}
+.fin-sheet tbody tr:hover td {
   background: var(--surface-2);
 }
 .fin-sheet tbody tr:hover .fin-sheet-label {
-  background: var(--surface-2);
+  background: var(--surface-3);
 }
+
+/* Mês corrente marcado; os que ainda vêm, apagados (o que há neles é parcela
+   ou conta já lançada, não o que aconteceu). */
+.fin-sheet .is-current {
+  background: color-mix(in srgb, var(--accent-soft) 55%, transparent);
+}
+.fin-sheet thead th.is-current {
+  color: var(--accent-text);
+  background: color-mix(in srgb, var(--accent-soft) 70%, var(--surface-2));
+}
+.fin-sheet .is-future {
+  opacity: 0.45;
+}
+.fin-sheet .fin-sheet-total {
+  font-weight: 600;
+  box-shadow: inset 1px 0 0 var(--border);
+}
+.fin-sheet .fin-sheet-average {
+  color: var(--text-muted);
+}
+
 .fin-sheet .fin-sheet-group td {
-  padding-top: 14px;
+  padding-top: 10px;
   font-size: 10px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   font-weight: 700;
   color: var(--text-faint);
+  border-bottom: 0;
+}
+.fin-sheet tbody tr.fin-sheet-group:hover td {
   background: transparent;
+}
+.fin-sheet tbody tr.fin-sheet-group:hover .fin-sheet-label {
+  background: var(--surface);
 }
 .fin-sheet .fin-sheet-subtotal td {
   font-weight: 600;
   background: var(--surface-2);
 }
-.fin-sheet .fin-sheet-total {
-  font-weight: 600;
-}
-.fin-sheet tfoot th {
-  font-size: 12.5px;
-  letter-spacing: 0;
-  text-transform: none;
-  color: var(--text);
-  border-top: 2px solid var(--border);
-  border-bottom: 0;
+.fin-sheet .fin-sheet-subtotal .fin-sheet-label {
   background: var(--surface-2);
 }
-.fin-sheet tfoot th.fin-negative {
-  color: var(--negative);
+.fin-sheet .is-nested .fin-sheet-label {
+  padding-left: 26px;
 }
-.fin-sheet tfoot th.fin-positive {
-  color: var(--positive);
+
+/* Cabeçalho de cada bloco (conta, débito, crédito): o resultado dele no mês. */
+.fin-sheet .fin-sheet-block-head td {
+  background: color-mix(in srgb, var(--surface-3) 70%, var(--surface));
+  border-top: 1px solid var(--border);
+  font-weight: 600;
 }
-.fin-sheet tfoot th.fin-muted {
+.fin-sheet .fin-sheet-block-head .fin-sheet-label {
+  background: color-mix(in srgb, var(--surface-3) 70%, var(--surface));
+}
+.fin-sheet-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.fin-sheet-toggle svg {
+  flex: none;
   color: var(--text-muted);
 }
-.fin-sheet td.fin-negative {
-  color: var(--negative);
+.fin-sheet-toggle-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
-.fin-sheet td.fin-positive {
-  color: var(--positive);
+.fin-sheet-toggle-text strong {
+  font-size: 12.5px;
 }
-.fin-sheet td.fin-muted {
+.fin-sheet-toggle-text small {
+  font-size: 10.5px;
+  font-weight: 400;
   color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --- Painel denso ---------------------------------------------------------- */
+
+.fin-dash {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: opacity var(--transition);
+}
+.fin-dash.is-loading {
+  opacity: 0.6;
+}
+.fin-dash > .panel,
+.fin-dash > .fin-strip,
+.fin-dash .fin-dash-grid > .panel {
+  margin-bottom: 0;
+}
+.fin-dash .panel {
+  padding: 14px 16px;
+}
+.fin-dash .panel-head {
+  margin-bottom: 10px;
+}
+
+/* Seis números numa faixa: três de posição (hoje) e três do período. */
+.fin-kpis {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  overflow: hidden;
+}
+.fin-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 12px 16px;
+  border: 0;
+  border-left: 1px solid var(--border);
+  margin-left: -1px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+}
+/* Separa os números de hoje (saldo, caixinhas, fatura) dos do período. */
+.fin-kpi:nth-child(4) {
+  border-left-width: 2px;
+}
+.fin-kpi.is-link {
+  cursor: pointer;
+  transition: background var(--transition);
+}
+.fin-kpi.is-link:hover {
+  background: var(--surface-2);
+}
+.fin-kpi.is-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.fin-kpi-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+.fin-kpi-value {
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fin-kpi-hint {
+  font-size: 0.7rem;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fin-kpi-hint .delta {
+  font-size: 0.72rem;
+}
+
+.fin-dash .fin-strip {
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  margin-bottom: 0;
+}
+
+/* Alvo e saldos empilhados de um lado, a rosca do outro; a visão do ano
+   vem logo abaixo. */
+.fin-dash-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: stretch;
+}
+.fin-dash-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.fin-dash-stack > .panel {
+  margin-bottom: 0;
+}
+.fin-dash-stack > .panel:last-child {
+  flex: 1;
+}
+.fin-dash-accounts {
+  max-height: 240px;
+}
+
+/* O seletor de período mora no cabeçalho. */
+.section-actions .fin-period-picker {
+  gap: 8px;
+}
+.section-actions .fin-period-row {
+  flex-wrap: nowrap;
+}
+
+@media (max-width: 1240px) {
+  .fin-kpis {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .fin-kpi:nth-child(n + 4) {
+    border-top: 1px solid var(--border);
+  }
+  .fin-kpi:nth-child(4) {
+    border-left-width: 1px;
+  }
+}
+@media (max-width: 760px) {
+  .fin-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .fin-kpi:nth-child(n + 3) {
+    border-top: 1px solid var(--border);
+  }
+  .fin-dash-grid {
+    grid-template-columns: 1fr;
+  }
+  .section-actions {
+    flex-wrap: wrap;
+  }
+  .section-actions .fin-period-row {
+    flex-wrap: wrap;
+  }
+}
+.fin-year-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+/* Em telas estreitas a planilha aperta antes de rolar de lado. */
+@media (max-width: 1280px) {
+  .fin-sheet .data-table th,
+  .fin-sheet .data-table td {
+    padding: 4px 6px;
+    font-size: 11.5px;
+  }
+  .fin-sheet .fin-sheet-label {
+    min-width: 128px;
+    max-width: 180px;
+  }
+}
+/* Cabeçalho do Painel com o seletor de período: quando não cabe numa linha,
+   os controles descem inteiros em vez de espremer o título. */
+.section-heading:has(.fin-period-picker) {
+  flex-wrap: wrap;
+  align-items: center;
+  row-gap: 10px;
+}
+.section-heading:has(.fin-period-picker) p,
+.section-heading:has(.fin-period-picker) .btn {
+  white-space: nowrap;
 }

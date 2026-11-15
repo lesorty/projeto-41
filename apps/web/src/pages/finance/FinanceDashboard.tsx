@@ -4,10 +4,12 @@ import {
   CreditCard,
   PiggyBank,
   Receipt,
+  Scale,
   Settings2,
-  Wallet
+  Wallet,
+  type LucideIcon
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { CategoryReport, GoalProgress, LedgerSummary, TargetReport } from "@projeto41/contracts";
 import { Donut } from "../../components/charts.js";
 import { AccountStrip } from "../../components/finance/AccountStrip.js";
@@ -24,12 +26,12 @@ import { YearCategorySheet } from "../../components/finance/YearCategorySheet.js
 import {
   AnimatedNumber,
   Button,
+  Card,
   Delta,
   Empty,
   Panel,
   SectionHeading,
-  Skeleton,
-  Stat
+  Skeleton
 } from "../../components/ui.js";
 import { api } from "../../lib/api.js";
 import { moneyFromCents } from "../../lib/format.js";
@@ -124,186 +126,166 @@ export function FinanceDashboardPage({ onNavigate }: { onNavigate: FinanceNaviga
   // O anterior é o mês de antes (ou o ano, ou um recorte do mesmo tamanho).
   const versus =
     period.mode === "month" ? "vs. mês anterior" : period.mode === "year" ? "vs. ano anterior" : "vs. período anterior";
+  // Na faixa do topo cabe pouco: o "contra o quê" completo vai na dica.
+  const versusShort = period.mode === "month" ? "vs. mês ant." : period.mode === "year" ? "vs. ano ant." : "vs. ant.";
 
   const hasMovement =
     (summary?.month.incomeCents ?? 0) !== 0 || (summary?.month.expenseCents ?? 0) !== 0;
 
   return (
     <>
+      {/* Período e alvo no próprio cabeçalho: um painel só para o seletor
+          empurrava tudo para baixo. */}
       <SectionHeading title="Painel" subtitle={`Finanças de ${periodLabel(period)}`}>
+        <PeriodPicker value={period} onChange={setPeriod} />
         <Button variant="ghost" icon={Settings2} onClick={() => setConfiguring(true)} disabled={!targets}>
           Configurar alvo
         </Button>
       </SectionHeading>
 
-      <Panel bodyClass="fin-filter-body">
-        <PeriodPicker value={period} onChange={setPeriod} />
-      </Panel>
+      {loading && !summary && <Skeleton rows={6} />}
 
-      {loading && <Skeleton rows={6} />}
-
-      {!loading && summary && (
-        <>
-          <div className="fin-summary">
-            {/* Saldo e fatura lado a lado, nunca somados: um é dinheiro que
-                existe, o outro é dívida que vai sair dele. O sistema não
-                projeta entradas e saídas futuras. */}
-            <Panel title="Saldo" subtitle="Hoje, nas contas do patrimônio">
-              <strong className={summary.consolidated.currentCents < 0 ? "fin-negative" : ""}>
+      {summary && (
+        <div className={`fin-dash ${loading ? "is-loading" : ""}`}>
+          {/* Seis números numa faixa só. Saldo e fatura lado a lado, nunca
+              somados: um é dinheiro que existe, o outro é dívida que vai sair
+              dele. O sistema não projeta entradas e saídas futuras. */}
+          <Card className="fin-kpis">
+            <KpiCell
+              icon={Wallet}
+              label="Saldo"
+              hint="Hoje, nas contas do patrimônio"
+              value={
                 <AnimatedNumber
                   value={summary.consolidated.currentCents / 100}
                   format={(value) => moneyFromCents(value * 100)}
                 />
-              </strong>
-            </Panel>
-            {/* Total guardado em todas as caixinhas, hoje. Elas são contas do
-                patrimônio, então já estão somadas no saldo ao lado. */}
-            <Panel
-              title={
-                <span className="fin-inline">
-                  <PiggyBank size={15} aria-hidden />
-                  Caixinhas
-                </span>
               }
-              subtitle="Total guardado, já somado ao saldo"
-            >
-              <strong>
-                <AnimatedNumber
-                  value={goalsTotal / 100}
-                  format={(value) => moneyFromCents(value * 100)}
-                />
-              </strong>
-            </Panel>
-            <Panel
-              title={
-                <span className="fin-inline">
-                  <CreditCard size={15} aria-hidden />
-                  Fatura
-                </span>
+              tone={summary.consolidated.currentCents < 0 ? "fin-negative" : ""}
+            />
+            {/* Elas são contas do patrimônio, então já estão somadas no saldo. */}
+            <KpiCell
+              icon={PiggyBank}
+              label="Caixinhas"
+              hint="Guardado, já somado ao saldo"
+              value={
+                <AnimatedNumber value={goalsTotal / 100} format={(value) => moneyFromCents(value * 100)} />
               }
-              subtitle="Faturas correntes dos cartões"
-            >
-              <strong className={summary.consolidated.cardStatementCents > 0 ? "fin-negative" : ""}>
+            />
+            <KpiCell
+              icon={CreditCard}
+              label="Fatura"
+              hint="Faturas correntes dos cartões"
+              value={
                 <AnimatedNumber
                   value={summary.consolidated.cardStatementCents / 100}
                   format={(value) => moneyFromCents(value * 100)}
                 />
-              </strong>
-            </Panel>
-          </div>
+              }
+              tone={summary.consolidated.cardStatementCents > 0 ? "fin-negative" : ""}
+            />
+            <KpiCell
+              icon={ArrowUpCircle}
+              label="Entradas"
+              onClick={() => open("income")}
+              ariaLabel="Ver as entradas do período"
+              value={moneyFromCents(summary.month.incomeCents)}
+              tone="fin-positive"
+              hint={
+                <Delta
+                  value={ratio(summary.month.incomeCents, summary.previousMonth.incomeCents)}
+                  suffix={versusShort}
+                  title={`Antes: ${moneyFromCents(summary.previousMonth.incomeCents)} (${versus})`}
+                />
+              }
+            />
+            {/* Saída vem negativa do livro: a comparação é sobre o quanto saiu,
+                então gastar mais sobe a seta e fica vermelho. */}
+            <KpiCell
+              icon={ArrowDownCircle}
+              label="Saídas"
+              onClick={() => open("expenses")}
+              ariaLabel="Ver os gastos do período"
+              value={moneyFromCents(Math.abs(summary.month.expenseCents))}
+              tone="fin-negative"
+              hint={
+                <Delta
+                  value={ratio(
+                    Math.abs(summary.month.expenseCents),
+                    Math.abs(summary.previousMonth.expenseCents)
+                  )}
+                  goodWhen="down"
+                  suffix={versusShort}
+                  title={`Antes: ${moneyFromCents(Math.abs(summary.previousMonth.expenseCents))} (${versus})`}
+                />
+              }
+            />
+            <KpiCell
+              icon={Scale}
+              label="Líquido"
+              onClick={() => open("transactions")}
+              ariaLabel="Ver todas as transações do período"
+              value={moneyFromCents(summary.month.netCents)}
+              tone={summary.month.netCents < 0 ? "fin-negative" : ""}
+              hint={
+                <Delta
+                  value={ratio(summary.month.netCents, summary.previousMonth.netCents)}
+                  suffix={versusShort}
+                  title={`Antes: ${moneyFromCents(summary.previousMonth.netCents)} (${versus})`}
+                />
+              }
+            />
+          </Card>
 
           <AccountStrip accounts={summary.accounts} />
 
-          <div className="fin-summary">
-            <button
-              type="button"
-              className="fin-card-link"
-              onClick={() => open("income")}
-              aria-label="Ver as entradas do período"
-            >
-              <Stat
-                icon={ArrowUpCircle}
-                label="Entradas"
-                value={moneyFromCents(summary.month.incomeCents)}
-                detail={
-                  <Delta
-                    value={ratio(summary.month.incomeCents, summary.previousMonth.incomeCents)}
-                    suffix={versus}
-                    title={`Antes: ${moneyFromCents(summary.previousMonth.incomeCents)}`}
-                  />
-                }
-              />
-            </button>
-            <button
-              type="button"
-              className="fin-card-link"
-              onClick={() => open("expenses")}
-              aria-label="Ver os gastos do período"
-            >
-              {/* Saída vem negativa do livro: a comparação é sobre o quanto saiu,
-                  então gastar mais sobe a seta e fica vermelho. */}
-              <Stat
-                icon={ArrowDownCircle}
-                label="Saídas"
-                value={moneyFromCents(Math.abs(summary.month.expenseCents))}
-                detail={
-                  <Delta
-                    value={ratio(
-                      Math.abs(summary.month.expenseCents),
-                      Math.abs(summary.previousMonth.expenseCents)
-                    )}
-                    goodWhen="down"
-                    suffix={versus}
-                    title={`Antes: ${moneyFromCents(Math.abs(summary.previousMonth.expenseCents))}`}
-                  />
-                }
-              />
-            </button>
-            <button
-              type="button"
-              className="fin-card-link"
-              onClick={() => open("transactions")}
-              aria-label="Ver todas as transações do período"
-            >
-              <Stat
-                icon={PiggyBank}
-                label="Líquido"
-                value={moneyFromCents(summary.month.netCents)}
-                detail={
-                  <Delta
-                    value={ratio(summary.month.netCents, summary.previousMonth.netCents)}
-                    suffix={versus}
-                    title={`Antes: ${moneyFromCents(summary.previousMonth.netCents)}`}
-                  />
-                }
-              />
-            </button>
-          </div>
-
-          {targets ? (
-            <Panel
-              title="Alvo × realizado"
-              subtitle="Clique numa barra para ver os gastos da pessoa contra os objetivos"
-            >
-              <TargetBars report={targets} onSelect={(bar) => open("expenses", bar.personId)} />
-            </Panel>
-          ) : (
-            <Panel title="Alvo × realizado">
-              <p className="fin-muted">O alvo é mensal: escolha um mês para comparar.</p>
-            </Panel>
-          )}
-
-          <div className="fin-columns">
-            <Panel title="Saldo por conta" subtitle="Agrupado por pessoa">
-              {summary.accounts.length === 0 && (
-                <Empty icon={Wallet} text="Nenhuma conta cadastrada." />
+          {/* Alvo e saldos empilhados ao lado da rosca: lado a lado em três
+              colunas, o alvo (uma barra só) sobrava vazio na altura da rosca. */}
+          <div className="fin-dash-grid">
+            <div className="fin-dash-stack">
+              {targets ? (
+                <Panel title="Alvo × realizado" subtitle="Clique numa barra para ver os gastos da pessoa">
+                  <TargetBars report={targets} onSelect={(bar) => open("expenses", bar.personId)} />
+                </Panel>
+              ) : (
+                <Panel title="Alvo × realizado">
+                  <p className="fin-muted">O alvo é mensal: escolha um mês para comparar.</p>
+                </Panel>
               )}
-              {byPerson.map(([name, accounts]) => (
-                <div key={name} className="fin-account-group">
-                  <h4>{name}</h4>
-                  <ul className="fin-list">
-                    {accounts.map((account) => (
-                      <li key={account.id}>
-                        <span className="fin-inline">
-                          <ColorDot color={account.color} />
-                          {account.name}
-                        </span>
-                        <strong className={account.currentBalanceCents < 0 ? "fin-negative" : ""}>
-                          {moneyFromCents(account.currentBalanceCents)}
-                        </strong>
-                      </li>
-                    ))}
-                  </ul>
+
+              <Panel title="Saldo por conta" subtitle="Agrupado por pessoa">
+                {summary.accounts.length === 0 && (
+                  <Empty icon={Wallet} text="Nenhuma conta cadastrada." />
+                )}
+                <div className="fin-scroll fin-dash-accounts">
+                  {byPerson.map(([name, accounts]) => (
+                    <div key={name} className="fin-account-group">
+                      <h4>{name}</h4>
+                      <ul className="fin-list">
+                        {accounts.map((account) => (
+                          <li key={account.id}>
+                            <span className="fin-inline">
+                              <ColorDot color={account.color} />
+                              {account.name}
+                            </span>
+                            <strong className={account.currentBalanceCents < 0 ? "fin-negative" : ""}>
+                              {moneyFromCents(account.currentBalanceCents)}
+                            </strong>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </Panel>
+              </Panel>
+            </div>
 
             <Panel
               title="Gasto por categoria"
               subtitle={periodLabel(period)}
               action={
                 <Button variant="ghost" onClick={() => open("reports")}>
-                  Ver relatórios
+                  Relatórios
                 </Button>
               }
             >
@@ -315,19 +297,19 @@ export function FinanceDashboardPage({ onNavigate }: { onNavigate: FinanceNaviga
                   legend
                   showValue
                   formatValue={moneyFromCents}
-                  height={200}
+                  height={230}
                   center={{ label: "Total", value: moneyFromCents(report?.totalCents ?? 0) }}
                 />
               )}
             </Panel>
           </div>
 
-          <YearCategorySheet initialYear={Number(period.from.slice(0, 4))} />
-
           {!hasMovement && summary.accounts.length > 0 && (
             <Empty icon={Receipt} text="Nenhum lançamento neste período." />
           )}
-        </>
+
+          <YearCategorySheet initialYear={Number(period.from.slice(0, 4))} />
+        </div>
       )}
 
       {configuring && targets && (
@@ -341,6 +323,46 @@ export function FinanceDashboardPage({ onNavigate }: { onNavigate: FinanceNaviga
         />
       )}
     </>
+  );
+}
+
+/**
+ * Um número da faixa do topo. Com `onClick` vira botão e leva à tela que
+ * detalha aquele número, no mesmo recorte.
+ */
+function KpiCell({
+  icon: Icon,
+  label,
+  value,
+  hint,
+  tone = "",
+  onClick,
+  ariaLabel
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: ReactNode;
+  hint?: ReactNode;
+  tone?: string;
+  onClick?: () => void;
+  ariaLabel?: string;
+}) {
+  const body = (
+    <>
+      <span className="fin-kpi-label">
+        <Icon size={14} aria-hidden />
+        {label}
+      </span>
+      <strong className={`fin-kpi-value ${tone}`}>{value}</strong>
+      {hint && <small className="fin-kpi-hint">{hint}</small>}
+    </>
+  );
+  return onClick ? (
+    <button type="button" className="fin-kpi is-link" onClick={onClick} aria-label={ariaLabel}>
+      {body}
+    </button>
+  ) : (
+    <div className="fin-kpi">{body}</div>
   );
 }
 

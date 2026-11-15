@@ -375,14 +375,33 @@ describe("PATCH /api/ledger/entries/:id/target", () => {
 });
 
 describe("GET /api/ledger/reports/categories/year", () => {
-  it("monta categorias x meses com subtotais, resultado e filtro por conta", async () => {
-    const salario = db.ledger.categories
+  type Section = {
+    rows: { categoryId: number | null; months: number[]; totalCents: number; averageCents: number | null }[];
+  };
+  const row = (section: Section, id: number | null) =>
+    section.rows.find((r) => r.categoryId === id);
+
+  let salario: number;
+  let card: number;
+
+  beforeEach(() => {
+    salario = db.ledger.categories
       .list()
       .find((c) => c.name === "Salário" && c.kind === "income")!.id;
+    card = db.ledger.accounts.create({
+      name: "Cartão",
+      kind: "credit_card",
+      color: "#333333",
+      personId: steylor,
+      closingDay: 3,
+      dueDay: 10,
+      paymentAccountId: checking
+    });
     seedExpense(50000, mercado, { date: "2026-01-05" });
     seedExpense(20000, mercado, { date: "2026-03-05" });
     seedExpense(10000, null, { date: "2026-03-06" });
     seedExpense(7000, lazer, { date: "2026-03-07", accountId: savings });
+    seedExpense(4000, lazer, { date: "2026-03-08", accountId: card });
     seedExpense(99999, mercado, { date: "2025-12-31" });
     db.ledger.entries.create({
       accountId: checking,
@@ -391,39 +410,75 @@ describe("GET /api/ledger/reports/categories/year", () => {
       kind: "income",
       categoryId: salario
     });
+  });
 
+  it("monta categorias x meses com subtotais, resultado e filtro por conta", async () => {
     const all = await app
       .inject("/api/ledger/reports/categories/year?year=2026")
       .then((r) => r.json());
-    const row = (section: { rows: { categoryId: number | null }[] }, id: number | null) =>
-      section.rows.find((r) => r.categoryId === id) as
-        | { months: number[]; totalCents: number }
-        | undefined;
 
-    expect(row(all.expense, mercado)!.months[0]).toBe(-50000);
-    expect(row(all.expense, mercado)!.months[2]).toBe(-20000);
-    expect(row(all.expense, mercado)!.totalCents).toBe(-70000);
-    expect(all.expense.rows.at(-1).categoryId).toBeNull();
-    expect(all.expense.totalCents).toBe(-87000);
-    expect(all.income.totalCents).toBe(500000);
-    expect(all.net.months[2]).toBe(500000 - 37000);
-    expect(all.net.totalCents).toBe(500000 - 87000);
+    expect(all.groupBy).toBe("none");
+    expect(all.groups).toEqual([]);
+    expect(row(all.total.expense, mercado)!.months[0]).toBe(-50000);
+    expect(row(all.total.expense, mercado)!.months[2]).toBe(-20000);
+    expect(row(all.total.expense, mercado)!.totalCents).toBe(-70000);
+    expect(all.total.expense.rows.at(-1).categoryId).toBeNull();
+    expect(all.total.expense.totalCents).toBe(-91000);
+    expect(all.total.income.totalCents).toBe(500000);
+    expect(all.total.net.months[2]).toBe(500000 - 41000);
+    expect(all.total.net.totalCents).toBe(500000 - 91000);
 
     const onlyChecking = await app
       .inject(`/api/ledger/reports/categories/year?year=2026&accountId=${checking}`)
       .then((r) => r.json());
-    expect(row(onlyChecking.expense, lazer)).toBeUndefined();
-    expect(onlyChecking.expense.totalCents).toBe(-80000);
+    expect(row(onlyChecking.total.expense, lazer)).toBeUndefined();
+    expect(onlyChecking.total.expense.totalCents).toBe(-80000);
 
     // Categoria escolhida sem movimento aparece zerada; "none" e Sem categoria.
     const picked = await app
       .inject(`/api/ledger/reports/categories/year?year=2026&categoryId=${lazer},none`)
       .then((r) => r.json());
-    expect(picked.expense.rows.map((r: { categoryId: number | null }) => r.categoryId)).toEqual([
-      lazer,
-      null
-    ]);
-    expect(picked.income.rows).toHaveLength(0);
-    expect(picked.expense.totalCents).toBe(-17000);
+    expect(
+      picked.total.expense.rows.map((r: { categoryId: number | null }) => r.categoryId)
+    ).toEqual([lazer, null]);
+    expect(picked.total.income.rows).toHaveLength(0);
+    expect(picked.total.expense.totalCents).toBe(-21000);
+  });
+
+  it("separa em blocos por conta e por debito/credito", async () => {
+    const byAccount = await app
+      .inject("/api/ledger/reports/categories/year?year=2026&groupBy=account")
+      .then((r) => r.json());
+    const keys = byAccount.groups.map((g: { key: string }) => g.key);
+    expect(keys).toEqual(
+      expect.arrayContaining([`account:${checking}`, `account:${savings}`, `account:${card}`])
+    );
+    expect(keys).toHaveLength(3);
+    const ofCard = byAccount.groups.find((g: { key: string }) => g.key === `account:${card}`);
+    expect(ofCard.matrix.expense.totalCents).toBe(-4000);
+    // O total continua sendo a soma de tudo.
+    expect(byAccount.total.net.totalCents).toBe(500000 - 91000);
+
+    const byMethod = await app
+      .inject("/api/ledger/reports/categories/year?year=2026&groupBy=method")
+      .then((r) => r.json());
+    expect(byMethod.groups.map((g: { key: string }) => g.key)).toEqual(["debit", "credit"]);
+    expect(byMethod.groups[0].matrix.expense.totalCents).toBe(-87000);
+    expect(byMethod.groups[1].matrix.expense.totalCents).toBe(-4000);
+    expect(row(byMethod.groups[1].matrix.expense, lazer)!.months[2]).toBe(-4000);
+  });
+
+  it("tira a media so dos meses ja vividos", async () => {
+    const past = await app
+      .inject("/api/ledger/reports/categories/year?year=2025")
+      .then((r) => r.json());
+    expect(past.monthsElapsed).toBe(12);
+    expect(row(past.total.expense, mercado)!.averageCents).toBe(Math.round(-99999 / 12));
+
+    const future = await app
+      .inject("/api/ledger/reports/categories/year?year=2199")
+      .then((r) => r.json());
+    expect(future.monthsElapsed).toBe(0);
+    expect(future.total.net.averageCents).toBeNull();
   });
 });

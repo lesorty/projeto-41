@@ -347,19 +347,46 @@ export type YearMatrixRow = {
   /** Doze posicoes, janeiro a dezembro, com o sinal do livro. */
   months: number[];
   totalCents: number;
+  /** Media dos meses ja vividos; `null` num ano que ainda nao comecou. */
+  averageCents: number | null;
+};
+
+export type YearMatrixSection = {
+  rows: YearMatrixRow[];
+  months: number[];
+  totalCents: number;
+  averageCents: number | null;
 };
 
 export type YearMatrix = {
-  income: { rows: YearMatrixRow[]; months: number[]; totalCents: number };
-  expense: { rows: YearMatrixRow[]; months: number[]; totalCents: number };
+  income: YearMatrixSection;
+  expense: YearMatrixSection;
   /** Entradas mais saidas, mes a mes: o resultado de cada coluna. */
-  net: { months: number[]; totalCents: number };
+  net: { months: number[]; totalCents: number; averageCents: number | null };
 };
+
+/**
+ * Quantos meses do ano ja comecaram em `today`: 12 num ano passado, 0 num
+ * futuro. E o divisor da media "ate agora" — dividir por 12 em novembro
+ * achataria a media com dezembro, que ainda nao aconteceu.
+ */
+export function monthsElapsedInYear(year: number, today: string): number {
+  const { year: currentYear, month } = parseIsoDate(today);
+  if (year < currentYear) return 12;
+  if (year > currentYear) return 0;
+  return month;
+}
 
 const sumMonths = (rows: { months: number[] }[]) =>
   Array.from({ length: 12 }, (_, index) =>
     rows.reduce((total, row) => total + (row.months[index] ?? 0), 0)
   );
+
+/** So os meses vividos entram: parcela futura ja lancada nao infla a media. */
+const averageOf = (months: number[], elapsed: number) =>
+  elapsed <= 0
+    ? null
+    : Math.round(months.slice(0, elapsed).reduce((total, value) => total + value, 0) / elapsed);
 
 /**
  * Planilha anual: categorias nas linhas, meses nas colunas, totais nas bordas.
@@ -374,8 +401,11 @@ export function yearMatrix(
   options: {
     include?: Omit<YearCategoryCell, "month" | "totalCents">[];
     order?: (number | null)[];
+    /** Meses ja vividos, de `monthsElapsedInYear`. Sem ele, os doze. */
+    monthsElapsed?: number;
   } = {}
 ): YearMatrix {
+  const elapsed = options.monthsElapsed ?? 12;
   const byKey = new Map<string, YearMatrixRow>();
   const keyOf = (kind: string, categoryId: number | null) => `${kind}:${categoryId ?? "none"}`;
   const rowFor = (cell: Omit<YearCategoryCell, "month" | "totalCents">) => {
@@ -388,7 +418,8 @@ export function yearMatrix(
         name: cell.name,
         color: cell.color,
         months: Array.from({ length: 12 }, () => 0),
-        totalCents: 0
+        totalCents: 0,
+        averageCents: null
       };
       byKey.set(key, row);
     }
@@ -402,6 +433,7 @@ export function yearMatrix(
     row.months[cell.month - 1] = (row.months[cell.month - 1] ?? 0) + cell.totalCents;
     row.totalCents += cell.totalCents;
   }
+  for (const row of byKey.values()) row.averageCents = averageOf(row.months, elapsed);
 
   const position = new Map((options.order ?? []).map((id, index) => [id, index]));
   const sorted = [...byKey.values()].sort((a, b) => {
@@ -412,10 +444,15 @@ export function yearMatrix(
     return pa - pb || a.name.localeCompare(b.name, "pt-BR");
   });
 
-  const section = (kind: "income" | "expense") => {
+  const section = (kind: "income" | "expense"): YearMatrixSection => {
     const rows = sorted.filter((row) => row.kind === kind);
     const months = sumMonths(rows);
-    return { rows, months, totalCents: months.reduce((a, b) => a + b, 0) };
+    return {
+      rows,
+      months,
+      totalCents: months.reduce((a, b) => a + b, 0),
+      averageCents: averageOf(months, elapsed)
+    };
   };
   const income = section("income");
   const expense = section("expense");
@@ -423,6 +460,10 @@ export function yearMatrix(
   return {
     income,
     expense,
-    net: { months: netMonths, totalCents: income.totalCents + expense.totalCents }
+    net: {
+      months: netMonths,
+      totalCents: income.totalCents + expense.totalCents,
+      averageCents: averageOf(netMonths, elapsed)
+    }
   };
 }

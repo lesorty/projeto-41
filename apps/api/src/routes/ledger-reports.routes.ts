@@ -22,6 +22,7 @@ import {
   previousRangeToDate,
   startOfMonth,
   statementCycleFor,
+  monthsElapsedInYear,
   topSlices,
   yearMatrix,
   type Range
@@ -259,7 +260,8 @@ export const registerLedgerReportsRoutes: RoutePlugin = (app, { db }) => {
     });
   });
 
-  // Planilha anual: categorias x meses, com subtotais e o resultado de cada mes.
+  // Planilha anual: categorias x meses, com subtotais e o resultado de cada mes,
+  // inteira e, se pedido, em blocos por conta ou por debito/credito.
   app.get("/api/ledger/reports/categories/year", async (request) => {
     const query = yearCategoryQuerySchema.parse(request.query);
     const categories = db.ledger.categories.list({ includeArchived: true });
@@ -269,7 +271,9 @@ export const registerLedgerReportsRoutes: RoutePlugin = (app, { db }) => {
       accountIds: query.accountId,
       categoryIds: query.categoryId
     });
-    const matrix = yearMatrix(cells, {
+    const monthsElapsed = monthsElapsedInYear(query.year, today());
+    const order = categories.map((category) => category.id);
+    const total = yearMatrix(cells, {
       include: categories
         .filter((category) => chosen.has(category.id))
         .map((category) => ({
@@ -278,9 +282,63 @@ export const registerLedgerReportsRoutes: RoutePlugin = (app, { db }) => {
           name: category.name,
           color: category.color
         })),
-      order: categories.map((category) => category.id)
+      order,
+      monthsElapsed
     });
-    const report: YearCategoryReport = { year: query.year, ...matrix };
+
+    const groups: YearCategoryReport["groups"] = [];
+    if (query.groupBy === "account") {
+      const ids = new Set(cells.map((cell) => cell.accountId));
+      for (const account of db.ledger.accounts.list({ asOf: today() })) {
+        if (!ids.has(account.id)) continue;
+        groups.push({
+          key: `account:${account.id}`,
+          label: account.name,
+          detail: account.personName ?? null,
+          color: account.color,
+          matrix: yearMatrix(
+            cells.filter((cell) => cell.accountId === account.id),
+            { order, monthsElapsed }
+          )
+        });
+      }
+    } else if (query.groupBy === "method") {
+      // Debito e o que sai direto da conta (Pix, debito, boleto); credito e a
+      // compra no cartao. O pagamento da fatura e transferencia e nao entra.
+      const methods = [
+        {
+          key: "debit",
+          label: "Débito",
+          detail: "Contas: Pix, débito, boleto",
+          test: (kind: string) => kind !== "credit_card"
+        },
+        {
+          key: "credit",
+          label: "Crédito",
+          detail: "Cartões de crédito",
+          test: (kind: string) => kind === "credit_card"
+        }
+      ];
+      for (const method of methods) {
+        const part = cells.filter((cell) => method.test(cell.accountKind));
+        if (part.length === 0) continue;
+        groups.push({
+          key: method.key,
+          label: method.label,
+          detail: method.detail,
+          color: null,
+          matrix: yearMatrix(part, { order, monthsElapsed })
+        });
+      }
+    }
+
+    const report: YearCategoryReport = {
+      year: query.year,
+      monthsElapsed,
+      groupBy: query.groupBy,
+      total,
+      groups
+    };
     return report;
   });
 

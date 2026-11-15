@@ -223,10 +223,17 @@ const amountFmt = new Intl.NumberFormat("pt-BR", {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2
 });
+const wholeAmountFmt = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 });
 
-/** Valor sem "R$", como numa célula de planilha: as colunas cabem lado a lado. */
-export function amountFromCents(cents: number) {
-  return masked ? MASK : amountFmt.format((cents || 0) / 100);
+/**
+ * Valor sem "R$", como numa célula de planilha: as colunas cabem lado a lado.
+ * Com `whole`, em reais inteiros — é o que deixa os doze meses na tela.
+ */
+export function amountFromCents(cents: number, options: { whole?: boolean } = {}) {
+  if (masked) return MASK;
+  const value = (cents || 0) / 100;
+  // `Math.round` antes: o Intl arredonda -0,4 para "-0".
+  return options.whole ? wholeAmountFmt.format(Math.round(value) || 0) : amountFmt.format(value);
 }
 
 /** Mostra o sinal explícito: usado na coluna de valor do livro. */

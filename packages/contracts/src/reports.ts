@@ -95,8 +95,12 @@ const idListSchema = z
  * Planilha anual do Painel. `categoryId=none` escolhe "Sem categoria"; sem
  * conta ou sem categoria, vale tudo.
  */
+/** Sem agrupamento, por conta, ou por debito (conta) e credito (cartao). */
+export const yearGroupBySchema = z.enum(["none", "account", "method"]);
+
 export const yearCategoryQuerySchema = z.object({
   year: yearSchema,
+  groupBy: yearGroupBySchema.default("none"),
   accountId: idListSchema
     .transform((parts) => parts.map(Number).filter((id) => Number.isInteger(id) && id > 0))
     .optional(),
@@ -202,13 +206,41 @@ export type YearCategoryRow = {
   /** Janeiro a dezembro, com o sinal do livro: entrada positiva, saida negativa. */
   months: number[];
   totalCents: number;
+  /** Media dos meses ja vividos do ano; `null` num ano que ainda nao comecou. */
+  averageCents: number | null;
 };
+
+export type YearCategorySection = {
+  rows: YearCategoryRow[];
+  months: number[];
+  totalCents: number;
+  averageCents: number | null;
+};
+
+export type YearCategoryMatrix = {
+  income: YearCategorySection;
+  expense: YearCategorySection;
+  net: { months: number[]; totalCents: number; averageCents: number | null };
+};
+
+export type YearCategoryGroupBy = z.infer<typeof yearGroupBySchema>;
 
 export type YearCategoryReport = {
   year: number;
-  income: { rows: YearCategoryRow[]; months: number[]; totalCents: number };
-  expense: { rows: YearCategoryRow[]; months: number[]; totalCents: number };
-  net: { months: number[]; totalCents: number };
+  /** Meses ja comecados: 12 num ano passado, 0 num futuro. */
+  monthsElapsed: number;
+  groupBy: YearCategoryGroupBy;
+  /** Tudo junto, sempre: e o rodape da planilha. */
+  total: YearCategoryMatrix;
+  /** Um bloco por conta ou por debito/credito; vazio sem agrupamento. */
+  groups: {
+    key: string;
+    label: string;
+    /** Pessoa da conta, ou o que entra no bloco de debito/credito. */
+    detail: string | null;
+    color: string | null;
+    matrix: YearCategoryMatrix;
+  }[];
 };
 
 export type LedgerSummary = {

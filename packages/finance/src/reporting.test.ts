@@ -3,11 +3,13 @@ import {
   categoryTotals,
   comparePeriods,
   distributeShares,
+  monthsElapsedInYear,
   partialPeriod,
   previousRange,
   previousRangeToDate,
   topSlices,
   wholeMonthsIn,
+  yearMatrix,
   type CategoryRow,
   type CategoryTotal
 } from "./reporting.js";
@@ -283,5 +285,42 @@ describe("comparePeriods", () => {
     const result = comparePeriods(current, previous);
     // Cafe dobrou (+100%) mas moveu R$ 12; Mercado subiu 20% e moveu R$ 180.
     expect(result[0]?.name).toBe("Mercado");
+  });
+});
+
+describe("yearMatrix", () => {
+  const cell = (month: number, totalCents: number, categoryId: number | null = 1) => ({
+    categoryId,
+    kind: (totalCents >= 0 ? "income" : "expense") as "income" | "expense",
+    name: categoryId == null ? "Sem categoria" : `Categoria ${categoryId}`,
+    color: null,
+    month,
+    totalCents
+  });
+
+  it("soma meses e calcula a media so dos meses vividos", () => {
+    // Parcela de dezembro ja lancada nao entra na media de novembro.
+    const matrix = yearMatrix([cell(1, -1000), cell(11, -2000), cell(12, -9000)], {
+      monthsElapsed: 11
+    });
+    const row = matrix.expense.rows[0]!;
+    expect(row.totalCents).toBe(-12000);
+    expect(row.averageCents).toBe(Math.round(-3000 / 11));
+    expect(matrix.net.months[11]).toBe(-9000);
+  });
+
+  it("poe Sem categoria por ultimo e respeita a ordem pedida", () => {
+    const matrix = yearMatrix([cell(1, -1, null), cell(1, -1, 3), cell(1, -1, 2)], {
+      order: [3, 2]
+    });
+    expect(matrix.expense.rows.map((row) => row.categoryId)).toEqual([3, 2, null]);
+  });
+});
+
+describe("monthsElapsedInYear", () => {
+  it("conta 12 no passado, o mes corrente no ano atual e 0 no futuro", () => {
+    expect(monthsElapsedInYear(2025, "2026-11-08")).toBe(12);
+    expect(monthsElapsedInYear(2026, "2026-11-08")).toBe(11);
+    expect(monthsElapsedInYear(2027, "2026-11-08")).toBe(0);
   });
 });

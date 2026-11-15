@@ -62,6 +62,8 @@ export function createReportsRepository(db: Db) {
      * So entrada e saida: transferencia e ajuste ficam de fora (D21), senao o
      * pagamento de fatura contaria o gasto do cartao duas vezes. O tipo vem do
      * lancamento, nao da categoria, porque "Sem categoria" existe nos dois.
+     * Vem separado por conta, com o tipo dela, para a planilha agrupar por
+     * conta ou por debito (conta) e credito (cartao).
      */
     yearByCategoryMonth: (options: {
       year: number;
@@ -92,21 +94,26 @@ export function createReportsRepository(db: Db) {
              e.kind AS kind,
              COALESCE(c.name, 'Sem categoria') AS name,
              c.color,
+             e.account_id AS accountId,
+             a.kind AS accountKind,
              CAST(strftime('%m', e.date) AS INTEGER) AS month,
              SUM(e.amount_cents) AS totalCents
            FROM entries e
+           JOIN accounts a ON a.id = e.account_id
            LEFT JOIN categories c ON c.id = e.category_id
            WHERE e.kind IN ('income', 'expense')
              AND e.date >= @from AND e.date <= @to
              ${accountFilter}
              ${categoryFilter}
-           GROUP BY e.category_id, e.kind, month`
+           GROUP BY e.category_id, e.kind, e.account_id, month`
         )
         .all({ from: `${options.year}-01-01`, to: `${options.year}-12-31` }) as {
         categoryId: number | null;
         kind: "income" | "expense";
         name: string;
         color: string | null;
+        accountId: number;
+        accountKind: string;
         month: number;
         totalCents: number;
       }[];
