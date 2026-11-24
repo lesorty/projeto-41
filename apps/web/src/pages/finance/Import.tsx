@@ -1,4 +1,4 @@
-import { CreditCard, FileUp, Landmark, ListChecks, RotateCcw, Upload, X } from "lucide-react";
+import { CheckCheck, CreditCard, FileUp, Landmark, ListChecks, RotateCcw, Upload, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   ImportBatchSummary,
@@ -51,8 +51,9 @@ function reviewOrder(a: ImportRowView, b: ImportRowView): number {
   );
 }
 
+// O que ficou de fora numa importação finalizada não volta para a fila.
 const needsReview = (rows: ImportRowView[]) =>
-  rows.filter((row) => row.status === "needs_review").sort(reviewOrder);
+  rows.filter((row) => row.status === "needs_review" && !row.leftOut).sort(reviewOrder);
 
 const KIND_CHOICES: { value: StatementKind; title: string; text: string; icon: typeof Landmark }[] = [
   {
@@ -266,21 +267,36 @@ export function ImportPage() {
     }
   }
 
-  async function discard() {
+  /**
+   * Fecha a importação como está: o que já foi importado fica no livro e o
+   * que ainda estava pendente fica de fora.
+   */
+  async function finalize() {
     if (!view) return;
     const pending = view.counts.review + view.counts.ready;
+    const imported = view.counts.committed;
     const ok = await confirm({
-      title: "Encerrar lote",
-      message: `${pending} lançamento(s) ainda não gravado(s) serão deixados de fora. O que já foi importado continua no livro.`,
-      confirmLabel: "Encerrar",
-      tone: "danger"
+      title: "Finalizar importação",
+      message:
+        `${imported} lançamento(s) importado(s) ficam no livro. ` +
+        `${pending} que ainda não foram importados ficam de fora e não entram por este extrato. ` +
+        "Se um próximo extrato trouxer algum deles, ele volta para a revisão.",
+      confirmLabel: "Finalizar"
     });
     if (!ok) return;
+    setBusy(true);
     try {
-      setView(await importApi.discard(view.batch.id));
+      const next = await importApi.finalize(view.batch.id);
+      setView(next);
+      setOpenRowId(null);
+      toast.notify(
+        `Importação finalizada: ${next.counts.committed} importado(s), ${next.counts.leftOut} deixado(s) de fora`
+      );
       void loadBatches();
     } catch (cause) {
-      toast.notify(cause instanceof Error ? cause.message : "Falha ao encerrar", "error");
+      toast.notify(cause instanceof Error ? cause.message : "Falha ao finalizar", "error");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -288,6 +304,8 @@ export function ImportPage() {
     id == null ? null : (reference.categories.find((category) => category.id === id)?.name ?? null);
 
   if (reference.loading) return <Loading />;
+  /** Lote que ainda aceita decisão: nem descartado, nem finalizado. */
+  const batchOpen = view != null && view.batch.status !== "discarded" && view.batch.finalizedAt == null;
 
   return (
     <>
@@ -377,16 +395,18 @@ export function ImportPage() {
           }
         >
           <div className="fin-import-summary">
-            <Tag tone="warning">{view.counts.review} a revisar</Tag>
+            {batchOpen && <Tag tone="warning">{view.counts.review} a revisar</Tag>}
             {lookalikes.length > 0 && <Tag tone="info">{lookalikes.length} parecem já estar no livro</Tag>}
-            <Tag tone="info">{view.counts.ready} prontos</Tag>
+            {batchOpen && <Tag tone="info">{view.counts.ready} prontos</Tag>}
             <Tag tone="positive">{view.counts.committed} importados</Tag>
             <Tag tone="neutral">{view.counts.duplicate} já importados</Tag>
             <Tag tone="neutral">{view.counts.ignored} pulados</Tag>
+            {view.counts.leftOut > 0 && <Tag tone="neutral">{view.counts.leftOut} deixados de fora</Tag>}
+            {view.batch.finalizedAt != null && <Tag tone="positive">Importação finalizada</Tag>}
             {view.batch.status === "discarded" && <Tag tone="negative">Lote encerrado</Tag>}
           </div>
           {view.batch.pdf && <PdfReconciliationBanner info={view.batch.pdf} rowCount={view.rows.length} />}
-          {view.batch.status !== "discarded" && (
+          {batchOpen && (
             <div className="fin-import-toolbar">
               <Button
                 icon={ListChecks}
@@ -406,9 +426,10 @@ export function ImportPage() {
                   Importar prontos ({view.counts.ready})
                 </Button>
               )}
+              {/* Fecha como está: importado fica, pendente fica de fora. */}
               {view.counts.review + view.counts.ready > 0 && (
-                <Button variant="ghost" onClick={() => void discard()}>
-                  Encerrar lote
+                <Button variant="soft" icon={CheckCheck} disabled={busy} onClick={() => void finalize()}>
+                  Finalizar importação
                 </Button>
               )}
             </div>
@@ -428,12 +449,13 @@ export function ImportPage() {
               </thead>
               <tbody>
                 {view.rows.map((row) => {
-                  const status = row.skippedBefore
-                    ? { label: "Já pulado antes", tone: "neutral" }
-                    : STATUS[row.status];
-                  const editable = row.status === "needs_review" || row.status === "new";
-                  const reopenable =
-                    view.batch.status !== "discarded" && (row.status === "ignored" || row.status === "duplicate");
+                  const status = row.leftOut
+                    ? { label: "Deixado de fora", tone: "neutral" }
+                    : row.skippedBefore
+                      ? { label: "Já pulado antes", tone: "neutral" }
+                      : STATUS[row.status];
+                  const editable = batchOpen && (row.status === "needs_review" || row.status === "new");
+                  const reopenable = batchOpen && (row.status === "ignored" || row.status === "duplicate");
                   return (
                     <tr key={row.id}>
                       <td>{ledgerDate(row.date)}</td>
@@ -471,7 +493,7 @@ export function ImportPage() {
                         )}
                       </td>
                       <td className="fin-import-row-action">
-                        {editable && view.batch.status !== "discarded" && (
+                        {editable && (
                           <Button variant="ghost" onClick={() => setOpenRowId(row.id)}>
                             {row.status === "new" ? "Editar" : "Revisar"}
                           </Button>
@@ -517,11 +539,19 @@ export function ImportPage() {
                       {batch.committedCount} de {batch.rowCount}
                     </td>
                     <td className="num right">
-                      {batch.status === "discarded" ? <Tag tone="neutral">encerrado</Tag> : batch.pendingCount}
+                      {batch.status === "discarded" ? (
+                        <Tag tone="neutral">encerrado</Tag>
+                      ) : batch.finalizedAt != null ? (
+                        <Tag tone="positive">
+                          finalizado{batch.leftOutCount > 0 ? ` · ${batch.leftOutCount} de fora` : ""}
+                        </Tag>
+                      ) : (
+                        batch.pendingCount
+                      )}
                     </td>
                     <td className="fin-import-row-action">
                       <Button variant="ghost" onClick={() => void openBatch(batch.id)}>
-                        {batch.pendingCount > 0 && batch.status !== "discarded" ? "Continuar" : "Abrir"}
+                        {batch.pendingCount > 0 && batch.status !== "discarded" && batch.finalizedAt == null ? "Continuar" : "Abrir"}
                       </Button>
                     </td>
                   </tr>

@@ -58,6 +58,11 @@ export const importApi = {
       { method: "POST" }
     ),
 
+  finalize: (batchId: number) =>
+    api<ImportBatchView & { balances: BalancesResult }>(`/ledger/imports/${batchId}/finalize`, {
+      method: "POST"
+    }),
+
   discard: (batchId: number) =>
     api<ImportBatchView>(`/ledger/imports/${batchId}/discard`, { method: "POST" })
 };

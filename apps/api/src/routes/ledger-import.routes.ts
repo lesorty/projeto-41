@@ -106,6 +106,11 @@ export const registerLedgerImportRoutes: RoutePlugin = (app, { db }) => {
     return { ...view, balances: balances() };
   });
 
+  app.post("/api/ledger/imports/:id/finalize", async (request) => {
+    const view = imports.finalize(idParam.parse(request.params).id);
+    return { ...view, balances: balances() };
+  });
+
   app.post("/api/ledger/imports/:id/discard", async (request) =>
     imports.discard(idParam.parse(request.params).id)
   );

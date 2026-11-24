@@ -441,6 +441,53 @@ describe("importacao do extrato Nubank", () => {
   });
 });
 
+describe("finalizar importacao", () => {
+  it("fecha o lote como esta: o importado fica e o pendente fica de fora", () => {
+    const view = upload();
+    imports.confirm(view.batch.id, view.rows[0]!.id, { action: "create", kind: "expense" });
+    imports.confirm(view.batch.id, view.rows[2]!.id, { action: "skip" });
+
+    const done = imports.finalize(view.batch.id);
+    expect(done.batch.status).toBe("committed");
+    expect(done.batch.finalizedAt).not.toBeNull();
+    expect(done.counts).toMatchObject({ committed: 1, ignored: 1, review: 0, ready: 0, leftOut: 56 });
+    expect(done.rows[0]).toMatchObject({ status: "committed", leftOut: false });
+    expect(done.rows[1]).toMatchObject({ leftOut: true });
+    expect(db.ledger.entries.list({}).rows).toHaveLength(1);
+
+    const summary = imports.list().find((batch) => batch.id === view.batch.id)!;
+    expect(summary).toMatchObject({ pendingCount: 0, leftOutCount: 56, committedCount: 1 });
+  });
+
+  it("depois de finalizar nada mais e gravado nem reaberto pelo lote", () => {
+    const view = upload();
+    imports.confirm(view.batch.id, view.rows[2]!.id, { action: "skip" });
+    imports.finalize(view.batch.id);
+    expect(() =>
+      imports.confirm(view.batch.id, view.rows[1]!.id, { action: "create", kind: "expense" })
+    ).toThrow(/finalizada/);
+    expect(() => imports.reopen(view.batch.id, view.rows[2]!.id)).toThrow(/finalizada/);
+    expect(() => imports.commitReady(view.batch.id)).toThrow(/finalizada/);
+    // Finalizar de novo nao muda nada.
+    expect(imports.finalize(view.batch.id).counts.leftOut).toBe(57);
+  });
+
+  it("o que ficou de fora volta para a revisao num proximo envio", () => {
+    const first = upload();
+    imports.confirm(first.batch.id, first.rows[0]!.id, { action: "create", kind: "expense" });
+    imports.finalize(first.batch.id);
+    const again = upload();
+    expect(again.rows[0]).toMatchObject({ status: "duplicate" });
+    expect(again.counts.review).toBe(57);
+  });
+
+  it("lote descartado nao finaliza", () => {
+    const view = upload();
+    imports.discard(view.batch.id);
+    expect(() => imports.finalize(view.batch.id)).toThrow(/descartado/);
+  });
+});
+
 describe("o que ja passou pelo sistema e reconhecido sozinho", () => {
   it("guarda a linha do arquivo inteira, com o nome de cada coluna", () => {
     const view = upload();

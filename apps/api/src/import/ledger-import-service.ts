@@ -99,6 +99,7 @@ type BatchRecord = {
   adapterId: string | null;
   layoutVersion: string | null;
   reconciliationJson: string | null;
+  finalizedAt: string | null;
 };
 
 const PENDING: ImportRowStatus[] = ["new", "needs_review"];
@@ -134,7 +135,7 @@ export function createLedgerImportService(db: AppDatabase) {
                 b.period_start AS periodStart, b.period_end AS periodEnd,
                 b.closing_balance_cents AS closingBalanceCents, a.name AS accountName,
                 b.adapter_id AS adapterId, b.layout_version AS layoutVersion,
-                b.reconciliation_json AS reconciliationJson
+                b.reconciliation_json AS reconciliationJson, b.finalized_at AS finalizedAt
          FROM import_batches b JOIN accounts a ON a.id = b.account_id
          WHERE b.id = ?`
       )
@@ -572,6 +573,12 @@ export function createLedgerImportService(db: AppDatabase) {
     }
   }
 
+  /** Lote descartado ou finalizado nao grava, nao reabre linha, nao muda mais. */
+  function assertOpen(batch: BatchRecord) {
+    if (batch.status === "discarded") throw new LedgerError("Lote descartado", 409);
+    if (batch.finalizedAt != null) throw new LedgerError("Importacao finalizada", 409);
+  }
+
   function refreshBatchStatus(batchId: number) {
     const counts = sql
       .prepare(
@@ -580,9 +587,14 @@ export function createLedgerImportService(db: AppDatabase) {
          FROM import_rows WHERE batch_id = ?`
       )
       .get(batchId) as { pending: number | null; committed: number | null };
-    const current = batchRecord(batchId).status;
+    const current = batchRecord(batchId);
+    // Finalizado fecha como esta: o que ficou pendente nao reabre o lote.
     const status =
-      current === "discarded" ? "discarded" : (counts.pending ?? 0) > 0 ? "review" : "committed";
+      current.status === "discarded"
+        ? "discarded"
+        : current.finalizedAt != null || (counts.pending ?? 0) === 0
+          ? "committed"
+          : "review";
     sql
       .prepare(`UPDATE import_batches SET status = ?, committed_count = ? WHERE id = ?`)
       .run(status, counts.committed ?? 0, batchId);
@@ -629,6 +641,7 @@ export function createLedgerImportService(db: AppDatabase) {
         id: row.id,
         lineNo: row.lineNo,
         status: row.status,
+        leftOut: batch.finalizedAt != null && PENDING.includes(row.status),
         date: row.parsed.date,
         // Calculada na leitura, e nao gravada: vale tambem para lote antigo.
         time: row.parsed.time ?? timeFromNubankId(row.externalId, row.parsed.date),
@@ -672,6 +685,7 @@ export function createLedgerImportService(db: AppDatabase) {
 
     const count = (...statuses: ImportRowStatus[]) =>
       rows.filter((row) => statuses.includes(row.status)).length;
+    const finalized = batch.finalizedAt != null;
     const { accountName, adapterId, layoutVersion, reconciliationJson, ...rest } = batch;
     const pdf: PdfBatchInfo | null =
       adapterId && layoutVersion && reconciliationJson
@@ -681,12 +695,14 @@ export function createLedgerImportService(db: AppDatabase) {
       batch: { ...rest, accountName, statementKind: isCard ? "card" : "bank", pdf },
       previousImportAt,
       rows,
+      // Num lote finalizado nada esta a revisar nem pronto: ficou de fora.
       counts: {
-        review: count("needs_review"),
-        ready: count("new"),
+        review: finalized ? 0 : count("needs_review"),
+        ready: finalized ? 0 : count("new"),
         duplicate: count("duplicate"),
         ignored: count("ignored"),
-        committed: count("committed")
+        committed: count("committed"),
+        leftOut: finalized ? count("needs_review", "new") : 0
       }
     };
   }
@@ -1242,9 +1258,12 @@ export function createLedgerImportService(db: AppDatabase) {
                     b.row_count AS rowCount, b.committed_count AS committedCount,
                     b.period_start AS periodStart, b.period_end AS periodEnd,
                     b.closing_balance_cents AS closingBalanceCents, a.name AS accountName,
-                    (SELECT COUNT(*) FROM import_rows r
-                      WHERE r.batch_id = b.id AND r.status IN ('new','needs_review')) AS pendingCount
+                    b.finalized_at AS finalizedAt,
+                    CASE WHEN b.finalized_at IS NULL THEN COALESCE(open.n, 0) ELSE 0 END AS pendingCount,
+                    CASE WHEN b.finalized_at IS NULL THEN 0 ELSE COALESCE(open.n, 0) END AS leftOutCount
              FROM import_batches b JOIN accounts a ON a.id = b.account_id
+             LEFT JOIN (SELECT batch_id, SUM(status IN ('new','needs_review')) AS n
+                   FROM import_rows GROUP BY batch_id) open ON open.batch_id = b.id
              ORDER BY b.id DESC LIMIT 30`
         )
         .all() as ImportBatchSummary[];
@@ -1256,7 +1275,7 @@ export function createLedgerImportService(db: AppDatabase) {
     confirm(batchId: number, rowId: number, body: ImportRowConfirm): ImportBatchView {
       const input = importRowConfirmSchema.parse(body);
       const batch = batchRecord(batchId);
-      if (batch.status === "discarded") throw new LedgerError("Lote descartado", 409);
+      assertOpen(batch);
       const row = rowRecord(batchId, rowId);
       if (row.status === "committed") throw new LedgerError("Linha ja importada", 409);
 
@@ -1346,7 +1365,7 @@ export function createLedgerImportService(db: AppDatabase) {
     /** Grava de uma vez as linhas que as regras automaticas deixaram prontas. */
     commitReady(batchId: number): ImportBatchView {
       const batch = batchRecord(batchId);
-      if (batch.status === "discarded") throw new LedgerError("Lote descartado", 409);
+      assertOpen(batch);
       // Nao existe caminho que grave linha de PDF sem confirmacao, linha a linha.
       if (batch.source === "pdf") {
         throw new LedgerError("Lote de PDF: cada lancamento e confirmado na revisao", 409);
@@ -1371,11 +1390,32 @@ export function createLedgerImportService(db: AppDatabase) {
 
     /** Devolve uma linha pulada ou duplicada para a fila do popup. */
     reopen(batchId: number, rowId: number): ImportBatchView {
+      assertOpen(batchRecord(batchId));
       const row = rowRecord(batchId, rowId);
       if (row.status !== "ignored" && row.status !== "duplicate") {
         throw new LedgerError("So linha pulada ou duplicada volta para a revisao", 409);
       }
       sql.prepare(`UPDATE import_rows SET status = 'needs_review' WHERE id = ?`).run(row.id);
+      refreshBatchStatus(batchId);
+      return viewOf(batchId);
+    },
+
+    /**
+     * Finaliza a importacao do jeito que esta: o que ja foi importado continua
+     * no livro (ja foi gravado ao confirmar cada linha) e o que ainda estava
+     * pendente fica de fora, sem entrar no livro. O lote fecha: nada mais e
+     * gravado por ele.
+     *
+     * As pendentes nao viram "ignored", pelo mesmo motivo de `discard`: so o
+     * que o usuario pulou e pulado sozinho na proxima importacao.
+     */
+    finalize(batchId: number): ImportBatchView {
+      const batch = batchRecord(batchId);
+      if (batch.status === "discarded") throw new LedgerError("Lote descartado", 409);
+      if (batch.finalizedAt != null) return viewOf(batchId);
+      sql
+        .prepare(`UPDATE import_batches SET finalized_at = ? WHERE id = ?`)
+        .run(new Date().toISOString(), batchId);
       refreshBatchStatus(batchId);
       return viewOf(batchId);
     },

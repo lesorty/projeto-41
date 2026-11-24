@@ -171,7 +171,12 @@ export const importBatchSchema = z.object({
   committedCount: z.number().int(),
   periodStart: isoDateSchema.nullable(),
   periodEnd: isoDateSchema.nullable(),
-  closingBalanceCents: z.number().int().nullable()
+  closingBalanceCents: z.number().int().nullable(),
+  /**
+   * Quando o usuario finalizou a importacao: o lote fecha como esta, o que foi
+   * importado fica e o que estava pendente fica de fora.
+   */
+  finalizedAt: z.string().nullable()
 });
 
 /** Destinatario que nenhuma regra conhece: o passo interativo pergunta uma vez. */
@@ -385,6 +390,8 @@ export type ImportRowView = {
   id: number;
   lineNo: number;
   status: ImportRowStatus;
+  /** Pendente num lote finalizado: nao entrou no livro e nao entra mais por este lote. */
+  leftOut: boolean;
   date: string;
   /** `HH:MM` quando o arquivo traz (OFX); o CSV do Nubank nao tem hora. */
   time: string | null;
@@ -479,10 +486,14 @@ export type ImportBatchView = {
     duplicate: number;
     ignored: number;
     committed: number;
+    /** Pendentes que ficaram de fora ao finalizar; 0 em lote aberto. */
+    leftOut: number;
   };
 };
 
 export type ImportBatchSummary = ImportBatch & {
   accountName: string;
+  /** 0 num lote finalizado: o que faltava ficou de fora, nao esta pendente. */
   pendingCount: number;
+  leftOutCount: number;
 };
